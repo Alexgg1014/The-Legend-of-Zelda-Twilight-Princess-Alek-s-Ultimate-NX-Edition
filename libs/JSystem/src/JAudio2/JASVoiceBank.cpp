@@ -1,0 +1,28 @@
+#include "JSystem/JSystem.h" // IWYU pragma: keep
+
+#include "JSystem/JAudio2/JASVoiceBank.h"
+#include "JSystem/JAudio2/JASBasicInst.h"
+
+DUSK_GAME_DATA const JASOscillator::Data JASVoiceBank::sOscData = {
+    0, 1.0f, NULL, NULL, 1.0f, 0.0f,
+};
+
+DUSK_GAME_DATA JASOscillator::Data* JASVoiceBank::sOscTable;
+
+bool JASVoiceBank::getInstParam(int param_0, int param_1, int param_2,
+                                    JASInstParam* param_3) const {
+    if (param_0 < 0) {
+        return false;
+    }
+    sOscTable = (JASOscillator::Data*)&sOscData;
+    param_3->mWaveId = param_0;
+    param_3->mOscillatorCount = 1;
+    param_3->mOscillators = &sOscTable;
+    return true;
+}
+
+JASVoiceBank::~JASVoiceBank() {}
+
+u32 JASVoiceBank::getType() const {
+    return 'VOIC';
+}

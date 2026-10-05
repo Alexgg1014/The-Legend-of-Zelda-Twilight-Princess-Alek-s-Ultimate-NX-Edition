@@ -1,0 +1,29 @@
+From: aleks2 (H37-c2)
+Subject: [PATCH 4/4] source path size from the prefix __FILE__ really has
+
+SOURCE_PATH_SIZE, the length __FILENAME__ skips at the start of __FILE__, was the length of
+the real source directory. Built with -ffile-prefix-map (build-h37-test-mods.sh maps every path
+for reproducible binaries) __FILE__ starts with the mapped prefix instead: the offset then
+changed the binary with the build directory, and pointed past the end of __FILE__ whenever the
+real path was longer than the mapped file name. RANDOMIZER_SOURCE_PATH_PREFIX names the prefix;
+it defaults to the source directory, so an unmapped build is unchanged.
+---
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3b20894..29a7649 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -171,7 +171,13 @@ add_mod(randomizer
+ 
+ target_link_libraries(randomizer PRIVATE yaml-cpp::yaml-cpp base64pp randomizer_embeds)
+ 
+-string(LENGTH "${CMAKE_CURRENT_SOURCE_DIR}/" RANDOMIZER_SOURCE_PATH_SIZE)
++# __FILENAME__ (generator/utility/log.hpp) is __FILE__ past this many characters. A build that
++# maps the source path away (-ffile-prefix-map, for reproducible binaries) changes what __FILE__
++# starts with: give the mapped prefix here, or the offset is the real path's length -- a different
++# binary per build directory, and past the end of the string when the real path is the longer.
++set(RANDOMIZER_SOURCE_PATH_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}" CACHE STRING
++        "What __FILE__ starts with for the Randomizer's sources (the source directory, or its -ffile-prefix-map target)")
++string(LENGTH "${RANDOMIZER_SOURCE_PATH_PREFIX}/" RANDOMIZER_SOURCE_PATH_SIZE)
+ target_compile_definitions(randomizer PRIVATE
+         FULL_RANDOMIZER_VERSION="${FULL_RANDOMIZER_VERSION}"
+         RANDO_DATA_PATH="generator/data/"

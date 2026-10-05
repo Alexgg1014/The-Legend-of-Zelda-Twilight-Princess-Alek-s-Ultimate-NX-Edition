@@ -1,0 +1,607 @@
+/**
+ * @file d_a_obj_life_container.cpp
+ * 
+*/
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_obj_life_container.h"
+#include "d/d_a_itembase_static.h"
+#include "d/d_com_inf_game.h"
+#include "d/actor/d_a_player.h"
+#include "d/d_item_data.h"
+#include "SSystem/SComponent/c_math.h"
+#include <cstring>
+
+const static dCcD_SrcCyl l_cyl_src = {
+    {
+        {0x0, {{0x0, 0x0, 0x0}, {0xffffffff, 0x11}, 0x59}}, // mObj
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x0}, // mGObjAt
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x4}, // mGObjTg
+        {0x0}, // mGObjCo
+    }, // mObjInf
+    {
+        {
+            {0.0f, 0.0f, 0.0f}, // mCenter
+            20.0f, // mRadius
+            40.0f // mHeight
+        } // mCyl
+    }
+};
+
+static f32 Reflect(cXyz* i_vec, cBgS_PolyInfo const& i_wallpoly, f32 i_scale) {
+    cM3dGPla plane;
+
+    if (dComIfG_Bgsp().GetTriPla(i_wallpoly, &plane)) {
+        cXyz reflect_vec;
+        f32 mag = i_vec->absXZ();
+
+        C_VECReflect(i_vec, &plane.mNormal, &reflect_vec);
+        *i_vec = (reflect_vec * mag) * i_scale;
+        return i_vec->absXZ();
+    }
+
+    return 0.0f;
+}
+
+static void lifeGetTgCallBack(fopAc_ac_c* i_tgActor, dCcD_GObjInf* i_tgObjInf,
+                              fopAc_ac_c* i_atActor, dCcD_GObjInf* i_atObjInf) {
+    if (i_tgActor != NULL &&
+        (i_atObjInf->ChkAtType(AT_TYPE_40) || i_atObjInf->ChkAtType(AT_TYPE_BOOMERANG)) &&
+        !dComIfGp_event_runCheck() && !((daObjLife_c*)i_tgActor)->chkStatus(daObjLife_c::STATUS_BOOMERANG_CARRY_e))
+    {
+        ((daObjLife_c*)i_tgActor)->actionInitBoomerangCarry();
+    }
+}
+
+static void lifeGetCoCallBack(fopAc_ac_c* i_coActorA, dCcD_GObjInf* i_coObjInfA,
+                              fopAc_ac_c* i_coActorB, dCcD_GObjInf* i_coObjInfB) {
+    if (i_coActorA != NULL && i_coActorB != NULL && i_coActorB == (fopAc_ac_c*)dComIfGp_getLinkPlayer()) {
+        if (!daPy_getPlayerActorClass()->checkCanoeRide()) {
+            ((daObjLife_c*)i_coActorA)->initActionOrderGetDemo();
+        }
+    }
+}
+
+void daObjLife_c::initBaseMtx() {
+    setBaseMtx();
+}
+
+void daObjLife_c::setBaseMtx() {
+    mpModel->setBaseScale(scale);
+    
+    mDoMtx_stack_c::transS(current.pos);
+    mDoMtx_stack_c::ZXYrotM(shape_angle);
+    mpModel->setBaseTRMtx(mDoMtx_stack_c::get());
+}
+
+int daObjLife_c::Create() {
+    scale.x = scale.y = scale.z = 0.0f;
+    initBaseMtx();
+    fopAcM_SetMtx(this, mpModel->getBaseTRMtx());
+
+    mAcchCir.SetWall(30.0f, 30.0f);
+    mAcch.Set(fopAcM_GetPosition_p(this), fopAcM_GetOldPosition_p(this), this, 1, &mAcchCir, fopAcM_GetSpeed_p(this), NULL, NULL);
+    
+    mCcStts.Init(0, 0xFF, this);
+    mCcCyl.Set(l_cyl_src);
+    mCcCyl.SetStts(&mCcStts);
+    mCcCyl.SetCoHitCallback(lifeGetCoCallBack);
+    mCcCyl.SetTgHitCallback(lifeGetTgCallBack);
+    mCcCyl.SetR(DUSK_IF_ELSE(getCollisionR(), dItem_data::getR(m_itemNo)));
+    mCcCyl.SetH(DUSK_IF_ELSE(getCollisionH(), dItem_data::getH(m_itemNo)));
+
+    fopAcM_SetCullSize(this, fopAc_CULLSPHERE_0_e);
+    fopAcM_SetGravity(this, -3.2f);
+
+    actionWaitInit();
+    field_0x94c = 0.7f;
+    mRotateSpeed = 7000;
+
+#if TARGET_PC
+    // Restore speeds that were skipped if created from a boss with create instead of fastCreate
+    auto bossItemSpeeds = dusk::mods::get_boss_item_actor_speeds();
+    if (bossItemSpeeds.f != 0.f || bossItemSpeeds.y != 0.f) {
+        mOverrideHover = false;
+        speedF = bossItemSpeeds.f;
+        speed.y = bossItemSpeeds.y;
+        dusk::mods::set_boss_item_actor_speeds(0.f, 0.f);
+    }
+
+    if (mOverrideHover) {
+        fopAcM_SetGravity(this, 0.0f);
+        mRotateSpeed = 550;
+    }
+#endif
+    setEffect();
+    mSound.init(&current.pos, 1);
+    return 1;
+}
+
+void daObjLife_c::setEffect() {
+    cXyz size(1.5f, 1.5f, 1.5f);
+
+    if (mEffect0.getEmitter() == NULL) {
+        dComIfGp_particle_set(0x8DE, &current.pos, NULL, &size, 0xFF, &mEffect0, -1, NULL, NULL, NULL);
+    }
+
+    if (mEffect1.getEmitter() == NULL) {
+        dComIfGp_particle_set(0x8DF, &current.pos, NULL, &size, 0xFF, &mEffect1, -1, NULL, NULL, NULL);
+    }
+
+    if (mEffect2.getEmitter() == NULL) {
+        dComIfGp_particle_set(0x8E0, &current.pos, NULL, &size, 0xFF, &mEffect2, -1, NULL, NULL, NULL);
+    }
+}
+
+void daObjLife_c::endEffect00() {
+    mEffect0.remove();
+    mEffect1.remove();
+}
+
+void daObjLife_c::endEffect02() {
+    mEffect2.remove();
+}
+
+int daObjLife_c::__CreateHeap() {
+    return 1;
+}
+
+int daObjLife_c::create() {
+    fopAcM_ct(this, daObjLife_c);
+
+    if (!mIsPrmsInit) {
+        field_0x938 = home.angle.x;
+        field_0x93a = home.angle.z;
+        home.angle.x = home.angle.z = 0;
+        current.angle.x = current.angle.z = 0;
+        shape_angle.x = shape_angle.z = 0;
+#if TARGET_PC
+        const u32 params = fopAcM_GetParam(this);
+        const u8 parameterItemNo = params & 0xFF;
+        if (mItemGiveOriginalNo == dItemNo_NONE_e) {
+            mOriginalItemNo = parameterItemNo;
+            mItemGiveTag = dusk::mods::item_give_tag_freestanding(getSaveBitNo());
+            const auto [item, displayItem, was_resolved] =
+                dusk::mods::item_check_resolve(mItemGiveTag, mOriginalItemNo, this);
+            setDisplayItemNo(displayItem);
+            mItemOverridden = was_resolved;
+            if (mItemOverridden) {
+                fopAcM_SetParam(this, (params & 0xFFFFFF00) | item);
+            }
+        } else if (mGoldenWolfItem) {
+            mOriginalItemNo = mItemGiveOriginalNo;
+            mItemGiveTag = dusk::mods::item_give_tag_golden_wolf(static_cast<u16>(field_0x938));
+            const auto [item, displayItem, was_resolved] =
+                dusk::mods::item_check_resolve(mItemGiveTag, mOriginalItemNo, this);
+            setDisplayItemNo(displayItem);
+            mItemOverridden = was_resolved;
+            if (item != parameterItemNo) {
+                fopAcM_SetParam(this, (params & 0xFFFFFF00) | item);
+            }
+        } else {
+            mOriginalItemNo = mItemGiveOriginalNo;
+            setDisplayItemNo(
+                dusk::mods::item_check_resolve(mItemGiveTag, parameterItemNo, this)
+                    .display_item);
+            mItemOverridden = parameterItemNo != mOriginalItemNo;
+        }
+        mOverrideHover =
+            mItemOverridden &&
+            (mOriginalItemNo == dItemNo_UTAWA_HEART_e ||
+                (mOriginalItemNo >= dItemNo_M_BEETLE_e && mOriginalItemNo <= dItemNo_F_MAYFLY_e));
+#endif
+        mIsPrmsInit = true;
+    }
+
+    m_itemNo = getItemNo();
+    if (m_itemNo != dItemNo_KAKERA_HEART_e && m_itemNo != dItemNo_UTAWA_HEART_e) {
+        // "Heart Container: Item No is incorrect!<%d>\n"
+        OS_REPORT_ERROR("ハートの器：アイテム番号が不正です！<%d>\n", m_itemNo);
+    }
+
+    if (fopAcM_isItem(this, getSaveBitNo())) {
+        return cPhs_ERROR_e;
+    }
+
+    if (m_itemNo == dItemNo_UTAWA_HEART_e && dComIfGs_isStageLife() IF_DUSK(&&!mItemOverridden)) {
+        return cPhs_ERROR_e;
+    }
+
+#if TARGET_PC
+    // Resolved items may have no field model; display their get-demo model instead.
+    const u8 displayItemNo = getDisplayItemNo();
+    const bool useGetModel = dItem_data::getFieldArc(displayItemNo) == NULL;
+    int phase_state = dComIfG_resLoad(&mPhase, dItem_fieldModelArc(displayItemNo));
+    if (phase_state == cPhs_COMPLEATE_e) {
+        if (!fopAcM_entrySolidHeap(
+                this, useGetModel ? CheckItemCreateHeap : CheckFieldItemCreateHeap, 0x4000))
+        {
+            return cPhs_ERROR_e;
+        }
+#else
+    int phase_state = dComIfG_resLoad(&mPhase, dItem_data::getFieldArc(m_itemNo));
+    if (phase_state == cPhs_COMPLEATE_e) {
+        if (!fopAcM_entrySolidHeap(this, CheckFieldItemCreateHeap, 0x4000)) {
+            return cPhs_ERROR_e;
+        }
+#endif
+
+        if (!Create()) {
+            return cPhs_ERROR_e;
+        }
+
+        OS_REPORT("LIFE CONTAINER:<0x%x>\n", fopAcM_GetParam(this));
+    }
+
+    return phase_state;
+}
+
+void daObjLife_c::bg_check() {
+    f32 bounce_speed_scale = 0.7f;
+
+    if (mAcch.ChkWallHit()) {
+        if (speedF > 5.0f) {
+            Reflect(&speed, mAcchCir, 1.0f);
+        }
+
+        current.angle.y = cM_atan2s(speed.x, speed.z);
+    }
+
+    if (mAcch.ChkGroundLanding()) {
+        cXyz reflect_vec(speed);
+        if (speedF > 5.0f) {
+            Reflect(&reflect_vec, mAcchCir, bounce_speed_scale);
+        }
+
+        speed.y = -mPrevSpeed.y * bounce_speed_scale;
+        if (speed.y < 3.0f) {
+            speedF = 0.0f;
+        }
+
+        mGndLandCount++;
+        fopAcM_seStart(this, Z2SE_OBJ_KEY_BOUND, fabsf(mPrevSpeed.y) * 2.0f);
+    }
+
+    if (mGndLandCount >= 2 || (!mAcch.ChkGroundLanding() && mAcch.ChkGroundHit())) {
+        endEffect02();
+    }
+}
+
+int daObjLife_c::actionWaitInit() {
+    mCcCyl.OnTgSPrmBit(1);
+    mCcCyl.OnCoSPrmBit(1);
+
+    show();
+    attention_info.position = current.pos;
+    setStatus(STATUS_WAIT_e);
+
+    if (strcmp(dComIfGp_getStartStageName(), "D_MN11A") == 0) {
+        fopAcM_SetGravity(this, 0.0f);
+        mLv5Counter = 0;
+        speed.y = 4.0f;
+    }
+
+    return 1;
+}
+
+int daObjLife_c::actionWait() {
+    if (strcmp(dComIfGp_getStartStageName(), "D_MN11A") == 0) {
+        if (mLv5Counter < 20000) {
+            mLv5Counter++;
+        }
+
+        if (mLv5Counter == 1) {
+            speed.y = 5.0f;
+            speedF = 3.0f;
+        } else if (mLv5Counter >= 50 && mLv5Counter < 2000) {
+            cLib_addCalc(&speed.y, -3.2f, 0.05f, 0.5f, 0.1f);
+        }
+
+        fopAcM_posMoveF(this, mCcStts.GetCCMoveP());
+        mAcch.CrrPos(dComIfG_Bgsp());
+
+        if (mAcch.ChkGroundLanding() || mAcch.ChkGroundHit()) {
+            fopAcM_SetSpeed(this, 0.0f, -1.0f, 0.0f);
+            fopAcM_SetSpeedF(this, 0.0f);
+        } else if (speed.y < 0.0f) {
+            f32 var_f31 = 3.5f;
+            s16 var_r28 = mCounter * 1100;
+            fopAcM_SetSpeedF(this, cM_ssin(var_r28) * var_f31);
+        }
+
+        RotateYBase();
+    } else {
+        if (!fopAcM_checkHookCarryNow(this)) {
+            fopAcM_posMoveF(this, mCcStts.GetCCMoveP());
+        }
+
+        mAcch.CrrPos(dComIfG_Bgsp());
+        bg_check();
+
+        if (mAcch.ChkGroundHit()) {
+            speedF *= 0.9f;
+            if (speedF < 1.0f) {
+                speedF = 0.0f;
+            }
+        }
+
+        if (mGndLandCount != 0) {
+            s16 target_speed = 0xFFFF / getData().mRotateYSpeed;
+            cLib_addCalcAngleS2(&mRotateSpeed, target_speed, 5, 2000);
+        }
+
+        shape_angle.y += mRotateSpeed;
+    }
+
+    if (!daPy_getPlayerActorClass()->checkCanoeRide() && mCcCyl.ChkCoHit()) {
+        daPy_py_c* player = daPy_getPlayerActorClass();
+        fopAc_ac_c* hit_actor = mCcCyl.GetCoHitAc();
+        if (player == hit_actor) {
+            initActionOrderGetDemo();
+        }
+    }
+
+    attention_info.position = current.pos;
+    return 1;
+}
+
+int daObjLife_c::initActionOrderGetDemo() {
+    mCcCyl.OffTgSPrmBit(1);
+    mCcCyl.OffCoSPrmBit(1);
+    mCcCyl.ClrTgHit();
+    mCcCyl.ClrCoHit();
+
+    endEffect00();
+    endEffect02();
+    
+    hide();
+
+    fopAcM_orderItemEvent(this, 0, 0);
+    eventInfo.onCondition(dEvtCnd_CANGETITEM_e);
+
+#if TARGET_PC
+    const u8 displayItemNo = m_itemNo;
+    const auto itemCheck = dusk::mods::item_check_commit(mItemGiveTag, mOriginalItemNo, this);
+    m_itemNo = itemCheck.itemNo;
+    mItemGiveTag = itemCheck.tag;
+    mItemOverridden = m_itemNo != mOriginalItemNo;
+#endif
+    mItemId = fopAcM_createItemForTrBoxDemo(
+        &current.pos, m_itemNo, -1, fopAcM_GetRoomNo(this), NULL, NULL IF_DUSK_ARG(mItemGiveTag));
+    JUT_ASSERT(699, mItemId != fpcM_ERROR_PROCESS_ID_e);
+#if TARGET_PC
+    m_itemNo = displayItemNo;
+#endif
+
+    setStatus(STATUS_ORDER_GET_DEMO_e);
+    return 1;
+}
+
+int daObjLife_c::actionOrderGetDemo() {
+    if (eventInfo.checkCommandItem()) {
+        setStatus(STATUS_GET_DEMO_e);
+        
+        if (mItemId != fpcM_ERROR_PROCESS_ID_e) {
+            dComIfGp_event_setItemPartnerId(mItemId);
+        }
+    } else {
+        fopAcM_orderItemEvent(this, 0, 0);
+        eventInfo.onCondition(dEvtCnd_CANGETITEM_e);
+    }
+
+    return 1;
+}
+
+int daObjLife_c::actionGetDemo() {
+    if (dComIfGp_evmng_endCheck("DEFAULT_GETITEM")) {
+        dComIfGp_event_reset();
+        fopAcM_delete(this);
+
+        u8 savebit = getSaveBitNo();
+        if (savebit != 0xFF) {
+            fopAcM_onItem(this, savebit);
+        }
+
+        if (m_itemNo == dItemNo_KAKERA_HEART_e) {
+            if (strcmp(dComIfGp_getStartStageName(), "F_SP121") == 0) {
+                if (fopAcM_GetRoomNo(this) == 0) {
+                    if (savebit == 128) {
+                        dComIfGs_setEventReg(0xECFF, dComIfGs_getEventReg(0xECFF) | 0x10);
+                    }
+                } else if (fopAcM_GetRoomNo(this) == 3 && savebit == 130) {
+                    dComIfGs_setEventReg(0xECFF, dComIfGs_getEventReg(0xECFF) | 0x4);
+                }
+            } else if (strcmp(dComIfGp_getStartStageName(), "F_SP109") == 0) {
+                if (fopAcM_GetRoomNo(this) == 0 && savebit == 140) {
+                    dComIfGs_setEventReg(0xECFF, dComIfGs_getEventReg(0xECFF) | 0x2);
+                }
+            }
+        }
+    }
+
+    return 1;
+}
+
+int daObjLife_c::actionSwOnWait() {
+    if (fopAcM_isSwitch(this, getSwNo()) && cLib_calcTimer<u8>(&field_0x935) == 0) {
+        actionWaitInit();
+    }
+
+    return 1;
+}
+
+int daObjLife_c::actionInitBoomerangCarry() {
+    mCcCyl.OnTgSPrmBit(1);
+    mCcCyl.OnCoSPrmBit(1);
+
+    f32 height = DUSK_IF_ELSE(getCollisionH(), dItem_data::getH(m_itemNo)) * 4.0f;
+    f32 radius = DUSK_IF_ELSE(getCollisionR(), dItem_data::getR(m_itemNo)) * 4.0f;
+    mCcCyl.SetR(radius);
+    mCcCyl.SetH(height);
+
+    mCcCyl.OnCoSPrmBit(1);
+
+    setStatus(STATUS_BOOMERANG_CARRY_e);
+    return 1;
+}
+
+int daObjLife_c::actionBoomerangCarry() {
+    fopAc_ac_c* boomerang = fopAcM_SearchByName(fpcNm_BOOMERANG_e);
+    if (boomerang != NULL) {
+        current.pos = boomerang->current.pos;
+    } else {
+        actionWaitInit();
+    }
+
+    // "Heart Container / Piece: Pulling towards\n"
+    OS_REPORT("ハートの器・欠片：引き寄せ中\n");
+    return 1;
+}
+
+int daObjLife_c::actionInitWait2() {
+    setStatus(STATUS_WAIT_2_e);
+    return 1;
+}
+
+int daObjLife_c::actionWait2() {
+    attention_info.position = current.pos;
+    return 1;
+}
+
+void daObjLife_c::calcScale() {
+    cLib_chaseF(&field_0x954, 1.0f, 0.2f);
+    if (field_0x954 == 1.0f) {
+        cLib_chaseF(&field_0x94c, 0.0f, 0.05f);
+        field_0x950 = field_0x94c * cM_ssin(field_0x95e * 3000);
+
+        if (field_0x95e < 1000) {
+            field_0x95e++;
+        }
+    } else {
+        field_0x950 = 0.0f;
+    }
+
+    scale.setall(field_0x950 + field_0x954);
+}
+
+int daObjLife_c::execute() {
+    static int (daObjLife_c::*l_demoFunc[])() = {
+        &daObjLife_c::actionWait,
+        &daObjLife_c::actionOrderGetDemo,
+        &daObjLife_c::actionGetDemo,
+        &daObjLife_c::actionSwOnWait,
+        &daObjLife_c::actionBoomerangCarry,
+        &daObjLife_c::actionWait2,
+    };
+
+    mPrevSpeed = speed;
+    mCounter++;
+
+    (this->*l_demoFunc[mStatus])();
+
+    eyePos = current.pos;
+    eyePos.y += 30.0f;
+    attention_info.position = current.pos;
+
+    calcScale();
+    setBaseMtx();
+
+    animPlay(1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+
+    if (mCcCyl.ChkTgHit()) {
+        cCcD_Obj* hitobj = mCcCyl.GetTgHitObj();
+        if (hitobj != NULL && hitobj->ChkAtType(AT_TYPE_HOOKSHOT)) {
+            mSound.startCollisionSE(Z2SE_HIT_HOOKSHOT_STICK, 0, NULL);
+        }
+    }
+
+    if (fopAcM_checkHookCarryNow(this)) {
+        cXyz offset(current.pos);
+        if (mpModel != NULL) {
+            offset.y += mpModel->getModelData()->getJointNodePointer(0)->getMax()->y * 0.5f;
+        }
+
+        mDoMtx_stack_c::transS(current.pos);
+        mDoMtx_stack_c::ZXYrotM(shape_angle);
+        mDoMtx_stack_c::inverse();
+        mDoMtx_stack_c::multVec(&offset, &offset);
+        daPy_getPlayerActorClass()->setHookshotCarryOffset(fopAcM_GetID(this), &offset);
+    } else if (mIsHookCarry && fopAcM_searchPlayerDistance(this) < 300.0f) {
+        initActionOrderGetDemo();
+    }
+
+    mCcCyl.SetC(current.pos);
+    dComIfG_Ccsp()->Set(&mCcCyl);
+
+    mSound.framework(0, dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
+    mIsHookCarry = fopAcM_checkHookCarryNow(this) != 0;
+    return 1;
+}
+
+int daObjLife_c::draw() {
+    if (!chkDraw()) {
+        return 1;
+    }
+
+    DrawBase();
+    return 1;
+}
+
+void daObjLife_c::setListStart() {
+    dComIfGd_setListDark();
+}
+
+int daObjLife_c::_delete() {
+    mSound.deleteObject();
+    endEffect00();
+    endEffect02();
+
+#if TARGET_PC
+    DeleteBase(dItem_fieldModelArc(getDisplayItemNo()));
+#else
+    DeleteBase(dItem_data::getFieldArc(m_itemNo));
+#endif
+    return 1;
+}
+
+static int daObjLife_Draw(daObjLife_c* i_this) {
+    return i_this->draw();
+}
+
+static int daObjLife_Execute(daObjLife_c* i_this) {
+    return i_this->execute();
+}
+
+static int daObjLife_Delete(daObjLife_c* i_this) {
+    return i_this->_delete();
+}
+
+static int daObjLife_Create(fopAc_ac_c* i_this) {
+    return ((daObjLife_c*)i_this)->create();
+}
+
+static DUSK_CONST actor_method_class l_daObjLife_Method = {
+    (process_method_func)daObjLife_Create,
+    (process_method_func)daObjLife_Delete,
+    (process_method_func)daObjLife_Execute,
+    (process_method_func)NULL,
+    (process_method_func)daObjLife_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_Obj_LifeContainer = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_Obj_LifeContainer_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daObjLife_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_Obj_LifeContainer_e,
+    /* Actor SubMtd */ &l_daObjLife_Method,
+    /* Status       */ fopAcStts_UNK_0x80000_e | fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e | fopAcStts_CULL_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

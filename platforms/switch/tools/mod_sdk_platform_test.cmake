@@ -1,0 +1,32 @@
+# H37-c6: cmake/ModSDK.cmake's explicit package platform, in script mode.
+#   cmake -DCASE=<name> [-DSDK=ModSDK.cmake] [-DTOOLCHAIN=SwitchArm64Mod.toolchain.cmake] -P mod_sdk_platform_test.cmake
+# Prints "platform=<p> name=<n>" on success; a case that must be refused ends in FATAL_ERROR (the driver checks).
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+if (CASE STREQUAL "toolchain")
+    include("${TOOLCHAIN}")
+endif ()
+include("${SDK}")
+if (CASE STREQUAL "inferred-linux")
+    # nothing named: the old inference
+elseif (CASE STREQUAL "explicit-without-toolchain")
+    set(DUSK_MOD_LIB_PLATFORM "switch-arm64")
+elseif (CASE STREQUAL "toolchain")
+    # DUSK_MOD_LIB_PLATFORM and DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN come from the toolchain file
+elseif (CASE STREQUAL "explicit-wrong-arch")
+    set(DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN ON)
+    set(DUSK_MOD_LIB_PLATFORM "switch-arm64")
+    set(CMAKE_SYSTEM_PROCESSOR x86_64)
+elseif (CASE STREQUAL "explicit-unknown")
+    set(DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN ON)
+    set(DUSK_MOD_LIB_PLATFORM "switch-arm32")
+elseif (CASE STREQUAL "toolchain-without-platform")
+    set(DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN ON)
+    set(DUSK_MOD_LIB_PLATFORM "")
+elseif (CASE STREQUAL "nintendo-switch-system")
+    set(CMAKE_SYSTEM_NAME NintendoSwitch)
+else ()
+    message(FATAL_ERROR "unknown case ${CASE}")
+endif ()
+_mod_lib_info(_platform _name)
+message("platform=${_platform} name=${_name}")

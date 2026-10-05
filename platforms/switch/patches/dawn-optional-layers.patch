@@ -1,0 +1,28 @@
+--- a/src/dawn/native/vulkan/VulkanFunctions.cpp
++++ b/src/dawn/native/vulkan/VulkanFunctions.cpp
+@@ -110,7 +110,11 @@
+ 
+     GET_GLOBAL_PROC(CreateInstance);
+     GET_GLOBAL_PROC(EnumerateInstanceExtensionProperties);
+-    GET_GLOBAL_PROC(EnumerateInstanceLayerProperties);
++    // Layer enumeration is the loader's job. A driver linked straight into the
++    // program, as on Horizon, may not export it, so it may be null here the way
++    // EnumerateInstanceVersion may be below.
++    EnumerateInstanceLayerProperties = AsVkFn<PFN_vkEnumerateInstanceLayerProperties>(
++        GetInstanceProcAddr(nullptr, "vkEnumerateInstanceLayerProperties"));
+ 
+     // Is not available in Vulkan 1.0, so allow nullptr
+     EnumerateInstanceVersion = AsVkFn<PFN_vkEnumerateInstanceVersion>(
+--- a/src/dawn/native/vulkan/VulkanInfo.cpp
++++ b/src/dawn/native/vulkan/VulkanInfo.cpp
+@@ -93,8 +93,8 @@
+                     "Vulkan API version (%s) was not at least %s.",
+                     FormatAPIVersion(info.apiVersion), FormatAPIVersion(kRequiredVulkanVersion));
+ 
+-    // Gather the info about the instance layers
+-    {
++    // Gather the info about the instance layers, if the driver can list them.
++    if (vkFunctions.EnumerateInstanceLayerProperties != nullptr) {
+         uint32_t count = 0;
+         VkResult result =
+             VkResult::WrapUnsafe(vkFunctions.EnumerateInstanceLayerProperties(&count, nullptr));

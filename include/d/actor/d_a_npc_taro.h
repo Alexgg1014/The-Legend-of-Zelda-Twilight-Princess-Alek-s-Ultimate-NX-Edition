@@ -1,0 +1,186 @@
+#ifndef D_A_NPC_TARO_H
+#define D_A_NPC_TARO_H
+
+#include "SSystem/SComponent/c_counter.h"
+#include "d/actor/d_a_npc.h"
+
+struct daNpc_Taro_HIOParam {
+    /* 0x00 */ daNpcT_HIOParam common;
+    /* 0x8C */ s16 mChoccaiTimer;
+    /* 0x8E */ s16 field_0x8e;
+};
+
+class daNpc_Taro_Param_c {
+public:
+    virtual ~daNpc_Taro_Param_c() {}
+
+    static DUSK_GAME_DATA daNpc_Taro_HIOParam const m;
+};
+
+#if DEBUG
+class daNpc_Taro_HIO_c : public mDoHIO_entry_c {
+public:
+    daNpc_Taro_HIO_c();
+
+    void listenPropertyEvent(const JORPropertyEvent*);
+
+    void genMessage(JORMContext*);
+
+    daNpc_Taro_HIOParam m;
+};
+#define NPC_TARO_HIO_CLASS daNpc_Taro_HIO_c
+#else
+#define NPC_TARO_HIO_CLASS daNpc_Taro_Param_c
+#endif
+
+/**
+ * @ingroup actors-npcs
+ * @class daNpc_Taro_c
+ * @brief Talo
+ *
+ * @details
+ *
+ */
+class daNpc_Taro_c : public daNpcT_c {
+public:
+    typedef int (daNpc_Taro_c::*cutFunc)(int);
+    typedef int (daNpc_Taro_c::*actionFunc)(void*);
+
+    enum TaroType {
+        TYPE_0,
+        TYPE_1,
+        TYPE_2,
+        TYPE_3,
+        TYPE_4,
+        TYPE_5,
+        TYPE_6,
+        TYPE_7,
+        TYPE_8,
+        TYPE_9,
+        TYPE_10,
+        TYPE_11,
+        TYPE_12,
+        TYPE_13,
+        TYPE_14,
+        TYPE_15,
+        TYPE_16,
+    };
+
+    ~daNpc_Taro_c();
+    int create();
+    int CreateHeap();
+    int Delete();
+    int Execute();
+    int Draw();
+    static int createHeapCallBack(fopAc_ac_c*);
+    static int ctrlJointCallBack(J3DJoint*, int);
+    static void* srchArrow(void*, void*);
+    static void* srchNpc(void*, void*);
+    fopAc_ac_c* getArrowP();
+    u8 getType();
+    BOOL isDelete();
+    void reset();
+    void afterJntAnm(int);
+    void setParam();
+    BOOL checkChangeEvt();
+    BOOL evtEndProc();
+    void setAfterTalkMotion();
+    void srchActors();
+    BOOL evtTalk();
+    BOOL evtCutProc();
+    void action();
+    void beforeMove();
+    void setAttnPos();
+    void setCollision();
+    int drawDbgInfo();
+    void drawOtherMdl();
+    daNpcT_faceMotionAnmData_c getFaceMotionAnm(daNpcT_faceMotionAnmData_c);
+    BOOL selectAction();
+    BOOL chkAction(int (daNpc_Taro_c::*)(void*));
+    BOOL setAction(int (daNpc_Taro_c::*)(void*));
+    void setSwingVoice();
+    int cutConversationAboutPachinko(int);
+    int cutConversationAboutWoodSwd(int);
+    int cutSwdTutorial(int);
+    int cutHail(int);
+    int cutFindMonkey(int);
+    int cutHelpMe(int);
+    int cutAppearanceMoi(int);
+    int cutGiveMeWoodSwd(int);
+    int cutGetWoodSwd(int);
+    int cutConversationWithMaro(int);
+    int cutCacaricoConversation(int);
+    int cutArrowTutorial(int);
+    int cutCaution(int);
+    int cutTagPush1(int);
+    int cutNotGonnaLet(int);
+    int cutTagPush4(int);
+    int wait(void*);
+    int swdTutorial(void*);
+    int talk_withMaro(void*);
+    int practice(void*);
+    int nurse(void*);
+    int talk(void*);
+    daNpc_Taro_c(daNpcT_faceMotionAnmData_c const* i_faceMotionAnmData,
+                 daNpcT_motionAnmData_c const* i_motionAnmData,
+                 daNpcT_MotionSeqMngr_c::sequenceStepData_c const* i_faceMotionSequenceData,
+                 int i_faceMotionStepNum,
+                 daNpcT_MotionSeqMngr_c::sequenceStepData_c const* i_motionSequenceData,
+                 int i_motionStepNum, daNpcT_evtData_c const* i_evtData, char DUSK_CONST* DUSK_CONST* i_arcNames)
+        : daNpcT_c(i_faceMotionAnmData, i_motionAnmData, i_faceMotionSequenceData,
+                   i_faceMotionStepNum, i_motionSequenceData, i_motionStepNum, i_evtData,
+                   i_arcNames) {
+        OS_REPORT("|%06d:%x|daNpc_Taro_c -> コンストラクト\n", g_Counter.mCounter0, this);
+    }
+    u16 getEyeballMaterialNo() { return 2; }
+    s32 getHeadJointNo() { return 4; }
+    s32 getNeckJointNo() { return 3; }
+    s32 getBackboneJointNo() { return 1; }
+    BOOL checkChangeJoint(int jntNo) { return jntNo == 4; }
+    BOOL checkRemoveJoint(int jntNo) { return jntNo == 7; }
+    s32 getFootLJointNo() { return 19; }
+    s32 getFootRJointNo() { return 22; }
+
+    u32 getFlowNodeNo() { 
+        u16 nodeNo = home.angle.x;
+        u32 rv;
+        if (nodeNo == 0xffff) {
+            rv = -1;
+        } else {
+            rv = nodeNo;
+        }
+        return rv;
+    }
+
+    u8 getPathID() { return (fopAcM_GetParam(this) & 0xff00) >> 8; }
+    u8 getBitSW() { return (fopAcM_GetParam(this) & 0xff0000) >> 16; }
+    u8 getBitSW2() { return (fopAcM_GetParam(this) & 0xff000000) >> 24; }
+
+    static DUSK_GAME_DATA char DUSK_CONST* DUSK_CONST mCutNameList[17];
+    static DUSK_GAME_DATA cutFunc DUSK_CONST mCutList[17];
+
+    /* 0x0E40 */ NPC_TARO_HIO_CLASS* mpHIO;
+    /* 0x0E44 */ J3DModel* mModels[2];
+    /* 0x0E4C */ dCcD_Cyl mCyl1;
+    /* 0x0F88 */ dCcD_Cyl mCyl2;
+    /* 0x10C4 */ u8 mType;
+    /* 0x10C8 */ daNpcT_ActorMngr_c mActors[23];
+    /* 0x1180 */ actionFunc mAction;
+    /* 0x118C */ actionFunc mAction2;
+    /* 0x1198 */ int mChoccaiTimer;
+    /* 0x119C */ int field_0x119c;
+    /* 0x11A0 */ u8 field_0x11a0;
+    /* 0x11A1 */ u8 field_0x11a1;
+    /* 0x11A2 */ u8 field_0x11a2;
+    /* 0x11A3 */ u8 field_0x11a3;
+    /* 0x11A4 */ u8 field_0x11a4;
+    /* 0x11A5 */ u8 field_0x11a5;
+    /* 0x11A6 */ u8 field_0x11a6;
+    /* 0x11A7 */ u8 field_0x11a7;
+    /* 0x11A8 */ int field_0x11a8;
+};
+
+STATIC_ASSERT(sizeof(daNpc_Taro_c) == 0x11ac);
+
+
+#endif /* D_A_NPC_TARO_H */

@@ -1,0 +1,516 @@
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "JSystem/J2DGraph/J2DScreen.h"
+#include "JSystem/J2DGraph/J2DTextBox.h"
+#include "JSystem/JKernel/JKRExpHeap.h"
+#include "JSystem/JKernel/JKRMemArchive.h"
+#include "d/actor/d_a_title.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_demo.h"
+#include "d/d_menu_collect.h"
+#include "d/d_pane_class_alpha.h"
+#include "d/d_s_logo.h"
+#include "d/d_s_play.h"
+#include "f_op/f_op_msg_mng.h"
+#include "f_op/f_op_overlap_mng.h"
+#include "f_op/f_op_scene_mng.h"
+#include "m_Do/m_Do_Reset.h"
+#include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_graphic.h"
+
+#if TARGET_PC
+#include "dusk/game_clock.h"
+#include "dusk/interp/frame_interpolation.h"
+#include "dusk/interp/user_interface.h"
+#include "dusk/version.hpp"
+#endif
+
+class daTit_HIO_c : public JORReflexible {
+public:
+    daTit_HIO_c();
+
+    virtual ~daTit_HIO_c() {}
+    void genMessage(JORMContext*);
+
+    /* 0x04 */ s8 id;
+    /* 0x08 */ f32 mPSScaleX;
+    /* 0x0C */ f32 mPSScaleY;
+    /* 0x10 */ f32 mPSPosX;
+    /* 0x14 */ f32 mPSPosY;
+    #if DEBUG
+    /* 0x18 */ u8 unk_0x18[0x48 - 0x18];
+    #endif
+    /* 0x18 */ u8 mAppear;
+    /* 0x19 */ u8 mArrow;
+    /* 0x1A */ u8 field_0x1a;
+};
+
+static daTit_HIO_c g_daTitHIO;
+
+static u8 const lit_3772[12] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+#if TARGET_PC
+using namespace dusk::version;
+#define l_arcName regionSelect<const char*>("Title", "TitlePal", "Title")
+#elif VERSION == VERSION_GCN_PAL
+static char const l_arcName[] = "TitlePal";
+#else
+static char const l_arcName[] = "Title";
+#endif
+
+daTit_HIO_c::daTit_HIO_c() {
+    mPSScaleX = 1.0f;
+    mPSScaleY = 1.0f;
+
+    #if TARGET_PC || VERSION == VERSION_GCN_PAL
+    switch (OSGetLanguage()) {
+    case OS_LANGUAGE_ENGLISH:
+    case OS_LANGUAGE_GERMAN:
+    case OS_LANGUAGE_SPANISH:
+    case OS_LANGUAGE_ITALIAN:
+    case OS_LANGUAGE_DUTCH:
+        mPSPosX = 303.0f;
+        break;
+    case OS_LANGUAGE_FRENCH:
+        mPSPosX = FB_WIDTH / 2;
+        break;
+    }
+    #else
+    mPSPosX = 303.0f;
+    #endif
+
+    mPSPosY = 347.0f;
+    mAppear = 15;
+    mArrow = 60;
+    field_0x1a = 15;
+}
+
+#if DEBUG
+void daTit_HIO_c::genMessage(JORMContext* mctx) {
+    mctx->genLabel("\n======= PRESS START ========", 0);
+    mctx->genSlider("Scale Ｘ", &mPSScaleX, 0.1f, 100.0f);
+    mctx->genSlider("Scale Ｙ", &mPSScaleY, 0.1f, 100.0f);
+    mctx->genSlider("Pos Ｘ", &mPSPosX, 0.0f, 1000.0f);
+    mctx->genSlider("Pos Ｙ", &mPSPosY, 0.0f, 1000.0f);
+
+    mctx->genLabel("\n======= ", 0);
+    mctx->genSlider("出現", &mAppear, 0, 255);
+    mctx->genSlider("矢印", &mArrow, 0, 255);
+}
+#endif
+
+int daTitle_c::CreateHeap() {
+    J3DModelData* modelData = (J3DModelData*)dComIfG_getObjectRes(l_arcName, 10);
+    JUT_ASSERT(258, modelData);
+    mpModel = mDoExt_J3DModel__create(modelData, 0x80000, 0x11000285);
+
+    if (mpModel == NULL) {
+        return 0;
+    }
+
+    int res = mBck.init((J3DAnmTransform*)dComIfG_getObjectRes(l_arcName, 7), 1, 0, 2.0f, 0, -1, false);
+    JUT_ASSERT(276, res == 1);
+
+    res = mBpk.init(modelData, (J3DAnmColor*)dComIfG_getObjectRes(l_arcName, 13), 1, 0, 2.0f, 0, -1);
+    JUT_ASSERT(283, res == 1);
+
+    res = mBrk.init(modelData, (J3DAnmTevRegKey*)dComIfG_getObjectRes(l_arcName, 16), 1, 0, 2.0f, 0, -1);
+    JUT_ASSERT(290, res == 1);
+
+    res = mBtk.init(modelData, (J3DAnmTextureSRTKey*)dComIfG_getObjectRes(l_arcName, 19), 1, 0, 2.0f, 0, -1);
+    JUT_ASSERT(297, res == 1);
+
+    return 1;
+}
+
+static procFunc daTitleProc[6] = {
+    &daTitle_c::loadWait_proc, &daTitle_c::logoDispWait, &daTitle_c::logoDispAnm,
+    &daTitle_c::keyWait, &daTitle_c::nextScene_proc, &daTitle_c::fastLogoDisp,
+};
+
+int daTitle_c::create() {
+    fopAcM_ct(this, daTitle_c);
+
+    int phase_state = dComIfG_resLoad(&mPhaseReq, l_arcName);
+    if (phase_state != cPhs_COMPLEATE_e) {
+        return phase_state;
+    }
+
+    if (!fopAcM_entrySolidHeap(this, createHeapCallBack, 0x4000)) {
+        return cPhs_ERROR_e;
+    }
+
+    mpMount = mDoDvdThd_mountArchive_c::create("/res/Layout/Title2D.arc", 0, NULL);
+    mIsDispLogo = 0;
+    field_0x5f9 = 0;
+
+    m2DHeap = JKRCreateExpHeap(0x8000, mDoExt_getGameHeap(), false);
+    JUT_ASSERT(345, m2DHeap != NULL);
+    JKRHEAP_NAME(m2DHeap, "daTitle_c::m2DHeap");
+    loadWait_init();
+
+    g_daTitHIO.id = mDoHIO_CREATE_CHILD("タイトルロゴ", &g_daTitHIO);
+
+    IF_DUSK(draw_interp_frame = true);
+
+    return phase_state;
+}
+
+int daTitle_c::createHeapCallBack(fopAc_ac_c* actor) {
+    daTitle_c* i_this = (daTitle_c*)actor;
+    return i_this->CreateHeap();
+}
+
+int daTitle_c::Execute() {
+#if PLATFORM_WII || PLATFORM_SHIELD
+    mDoGph_gInf_c::resetDimming();
+#endif
+
+    if (fopOvlpM_IsPeek()) {
+        return 1;
+    }
+
+    IF_NOT_DUSK(dMenu_Collect3D_c::setViewPortOffsetY(0.0f));
+
+    if (mDoRst::isReset()) {
+        return 1;
+    }
+
+    (this->*daTitleProc[mProcID])();
+    IF_NOT_DUSK(KeyWaitAnm());
+
+#if VERSION == VERSION_SHIELD_DEBUG
+    KeyWaitPosMove();
+#endif
+
+    return 1;
+}
+
+void daTitle_c::KeyWaitAnm() {
+#if TARGET_PC
+    if (field_0x5f9 == 0) {
+        return;
+    }
+
+    const f32 duration = g_daTitHIO.mArrow;
+    if (duration <= 0.0f) {
+        field_0x600->alphaAnimeStart(0.0f);
+        field_0x600->setAlpha(255);
+        return;
+    }
+
+    f32 remaining = dusk::game_clock::original_frames();
+    f32 frame = field_0x600->getAlphaTimer();
+    if (field_0x5fa != 0) {
+        const f32 step = std::min(remaining, std::max(0.0f, duration - frame));
+        frame += step;
+        remaining -= step;
+        if (frame < duration) {
+            field_0x600->alphaAnimeStart(frame);
+            field_0x600->setAlpha(255.0f * frame / duration);
+            return;
+        }
+        field_0x5fa = 0;
+        frame = 0.0f;
+        field_0x604 = std::max(1.0f, 2.0f * g_daTitHIO.field_0x1a - 1.0f);
+    }
+
+    const f32 holdStep = std::min(remaining, field_0x604);
+    field_0x604 -= holdStep;
+    remaining -= holdStep;
+    const f32 period = duration + std::max(0.0f, g_daTitHIO.field_0x1a - 1.0f);
+    frame = std::fmod(frame + remaining, period);
+    field_0x600->alphaAnimeStart(frame);
+    const f32 pulse = std::min(frame, duration);
+    const f32 half = std::max(1.0f, std::floor(duration / 2.0f));
+    const f32 rate = std::min(1.0f, std::min(pulse, duration - pulse) / half);
+    field_0x600->setAlpha(255.0f - 127.0f * rate);
+#else
+    if (field_0x5f9 != 0) {
+        if (field_0x604 == 0) {
+            if (field_0x5fa != 0) {
+                field_0x600->alphaAnime(g_daTitHIO.mArrow, 0, 255, 0);
+            } else {
+                field_0x600->alphaAnimeLoop(g_daTitHIO.mArrow, 255, 128, 0);
+            }
+
+            if (field_0x600->getAlpha() == 255) {
+                if (field_0x5fa != 0) {
+                    field_0x5fa = 0;
+                }
+                field_0x604 = g_daTitHIO.field_0x1a;
+            }
+        }
+
+        if (field_0x604 != 0) {
+            field_0x604--;
+        }
+    }
+#endif
+}
+
+#if VERSION == VERSION_SHIELD_DEBUG
+void daTitle_c::KeyWaitPosMove() {
+    J2DPane* pane = mTitle.Scr->search(MULTI_CHAR('n_all'));
+    pane->translate(g_daTitHIO.mPSPosX, g_daTitHIO.mPSPosY);
+    pane->scale(g_daTitHIO.mPSScaleX, g_daTitHIO.mPSScaleY);
+}
+#endif
+
+void daTitle_c::loadWait_init() {
+    mProcID = 0;
+}
+
+void daTitle_c::loadWait_proc() {
+    if (mpMount->sync()) {
+        mpHeap = mDoExt_setCurrentHeap(m2DHeap);
+
+        mpFont = mDoExt_getMesgFont();
+
+        mTitle.Scr = JKR_NEW J2DScreen();
+        JUT_ASSERT(529, mTitle.Scr != NULL);
+
+        mTitle.Scr->setPriority("zelda_press_start.blo", 0x100000, mpMount->getArchive());
+
+        J2DTextBox* text[7];
+        text[0] = (J2DTextBox*)mTitle.Scr->search(MULTI_CHAR('t_s_00'));
+        text[1] = (J2DTextBox*)mTitle.Scr->search(MULTI_CHAR('t_s_01'));
+        text[2] = (J2DTextBox*)mTitle.Scr->search(MULTI_CHAR('t_s_02'));
+        text[3] = (J2DTextBox*)mTitle.Scr->search(MULTI_CHAR('t_s_03'));
+        text[4] = (J2DTextBox*)mTitle.Scr->search(MULTI_CHAR('t_s_04'));
+        text[5] = (J2DTextBox*)mTitle.Scr->search(MULTI_CHAR('t_s_05'));
+        text[6] = (J2DTextBox*)mTitle.Scr->search('t_o');
+
+        for (int i = 0; i < 7; i++) {
+            text[i]->setFont(mpFont);
+            text[i]->setString(0x80, "");
+
+            TEXT_SPAN msg = text[i]->getStringPtr();
+            fopMsgM_messageGet(msg, 100);
+        }
+
+        field_0x600 = JKR_NEW CPaneMgrAlpha(mTitle.Scr, MULTI_CHAR('n_all'), 2, NULL);
+        field_0x600->setAlpha(0);
+        J2DPane* pane = mTitle.Scr->search(MULTI_CHAR('n_all'));
+        pane->translate(g_daTitHIO.mPSPosX, g_daTitHIO.mPSPosY);
+        pane->scale(g_daTitHIO.mPSScaleX, g_daTitHIO.mPSScaleY);
+        JKRSetCurrentHeap(mpHeap);
+        logoDispWaitInit();
+    }
+}
+
+void daTitle_c::logoDispWaitInit() {
+    mProcID = 1;
+}
+
+void daTitle_c::logoDispWait() {
+    if (mDoCPd_c::getTrigA(PAD_1) || mDoCPd_c::getTrigStart(PAD_1)) {
+        fastLogoDispInit();
+    } else if (getDemoPrm() == 1) {
+        logoDispAnmInit();
+    }
+}
+
+void daTitle_c::logoDispAnmInit() {
+    mBck.setPlaySpeed(1.0f);
+    mBpk.setPlaySpeed(1.0f);
+    mBrk.setPlaySpeed(1.0f);
+    mBtk.setPlaySpeed(1.0f);
+    mIsDispLogo = 1;
+    mProcID = 2;
+}
+
+void daTitle_c::logoDispAnm() {
+    mBck.play();
+    mBpk.play();
+    mBrk.play();
+    mBtk.play();
+
+    if (mBrk.isStop() && mBtk.isStop() && mBck.isStop() && mBpk.isStop()) {
+        field_0x600->alphaAnimeStart(0);
+        field_0x604 = 0;
+        field_0x5f9 = 1;
+        field_0x5fa = 1;
+        keyWaitInit();
+    }
+}
+
+void daTitle_c::keyWaitInit() {
+    mProcID = 3;
+}
+
+void daTitle_c::keyWait() {
+    if (mDoCPd_c::getTrigA(PAD_1) || mDoCPd_c::getTrigStart(PAD_1)) {
+        mDoAud_seStart(Z2SE_TITLE_ENTER, NULL, 0, 0);
+        nextScene_init();
+    }
+}
+
+void daTitle_c::nextScene_init() {
+    mProcID = 4;
+}
+
+void daTitle_c::nextScene_proc() {
+    scene_class* playScene;
+
+    if (!fopOvlpM_IsPeek() && !mDoRst::isReset()) {
+        playScene = fopScnM_SearchByID(dStage_roomControl_c::getProcID());
+        JUT_ASSERT(706, playScene != NULL);
+
+        #if DEBUG
+        if (!dScnLogo_c::isOpeningCut())
+        #endif
+        {
+            fopScnM_ChangeReq(playScene, fpcNm_NAME_SCENE_e, 0, 5);
+        }
+        #if DEBUG
+        else {
+            fopScnM_ChangeReq(playScene, fpcNm_MENU_SCENE_e, 0, 5);
+            dComIfGs_init();
+            dComIfG_playerStatusD();
+        }
+        #endif
+
+        #if VERSION != VERSION_SHIELD_DEBUG
+        mDoGph_gInf_c::setFadeColor(*(JUtility::TColor*)&g_blackColor);
+        #endif
+    }
+}
+
+void daTitle_c::fastLogoDispInit() {
+    mBck.setFrame(mBck.getEndFrame() - 1.0f);
+    mBpk.setFrame(mBpk.getEndFrame() - 1.0f);
+    mBrk.setFrame(mBrk.getEndFrame() - 1.0f);
+    mBtk.setFrame(mBtk.getEndFrame() - 1.0f);
+
+    field_0x600->alphaAnimeStart(0);
+    field_0x604 = 0;
+    mWaitTimer = 30;
+    mProcID = 5;
+
+    IF_DUSK(dusk::interp::request_presentation_sync());
+}
+
+void daTitle_c::fastLogoDisp() {
+    if (mWaitTimer != 0) {
+        mWaitTimer--;
+        return;
+    }
+
+    field_0x5f9 = 1;
+    field_0x5fa = 1;
+    mIsDispLogo = 1;
+    keyWaitInit();
+}
+
+int daTitle_c::getDemoPrm() {
+    dDemo_actor_c* demoActor = dDemo_c::getActor(demoActorID);
+    dDemo_prm_c* prm;
+    if (demoActor != NULL && demoActor->checkEnable(1) && (prm = demoActor->getPrm())) {
+        JStudio::stb::TParseData_fixed<49> parser(prm->getData());
+        TValueIterator_raw<u8> iter = parser.begin();
+        return *iter;
+    }
+
+    return -1;
+}
+
+int daTitle_c::Draw() {
+#if TARGET_PC
+    if (field_0x600 != NULL && dusk::game_clock::is_presentation_frame()) {
+        if (!fopOvlpM_IsPeek() && !mDoRst::isReset()) {
+            KeyWaitAnm();
+        }
+        field_0x600->presentAlphaAnime();
+    }
+#endif
+
+    J3DModelData* modelData = mpModel->getModelData();
+    cMtx_trans(mpModel->getBaseTRMtx(), IREG_F(7), IREG_F(8), IREG_F(9) + -430.0f);
+    mpModel->getBaseScale()->x = -1.0f;
+
+    mBck.entry(modelData);
+    mBpk.entry(modelData);
+    mBrk.entry(modelData);
+    mBtk.entry(modelData);
+
+    IF_DUSK(dMenu_Collect3D_c::setViewPortOffsetY(0.0f));
+    dComIfGd_setListItem3D();
+    mDoExt_modelUpdateDL(mpModel);
+    dComIfGd_setList();
+
+    if (mIsDispLogo) {
+        dComIfGd_set2DOpaTop(&mTitle);
+    }
+
+    return 1;
+}
+
+int daTitle_c::Delete() {
+    mDoHIO_DELETE_CHILD(g_daTitHIO.id);
+
+    dComIfG_resDelete(&mPhaseReq, l_arcName);
+    JKR_DELETE(mTitle.Scr);
+    JKR_DELETE(field_0x600);
+
+    mpMount->getArchive()->removeResourceAll();
+    JKRUnmountArchive(mpMount->getArchive());
+    mpMount->destroy();
+
+    if (m2DHeap != NULL) {
+        m2DHeap->destroy();
+    }
+
+    return 1;
+}
+
+static int daTitle_Draw(daTitle_c* i_this) {
+    return i_this->Draw();
+}
+
+static int daTitle_Execute(daTitle_c* i_this) {
+    return i_this->Execute();
+}
+
+static int daTitle_Delete(daTitle_c* i_this) {
+    fpc_ProcID id = fopAcM_GetID(i_this);
+    return i_this->Delete();
+}
+
+static int daTitle_Create(fopAc_ac_c* i_this) {
+    daTitle_c* a_this = (daTitle_c*)i_this;
+    fpc_ProcID id = fopAcM_GetID(i_this);
+    return a_this->create();
+}
+
+void dDlst_daTitle_c::draw() {
+    J2DGrafContext* ctx = dComIfGp_getCurrentGrafPort();
+    Scr->draw(0.0f, 0.0f, ctx);
+}
+
+static DUSK_CONST actor_method_class l_daTitle_Method = {
+    (process_method_func)daTitle_Create,
+    (process_method_func)daTitle_Delete,
+    (process_method_func)daTitle_Execute,
+    (process_method_func)NULL,
+    (process_method_func)daTitle_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TITLE = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TITLE_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTitle_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TITLE_e,
+    /* Actor SubMtd */ &l_daTitle_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

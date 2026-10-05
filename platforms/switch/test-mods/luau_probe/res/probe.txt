@@ -1,0 +1,2 @@
+H36 Luau probe resource, read from the package
+If the first line above appears in the log, res/ came from the .dusk on the SD card.

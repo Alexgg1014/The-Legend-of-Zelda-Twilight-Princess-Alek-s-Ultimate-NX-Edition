@@ -1,0 +1,392 @@
+From: aleks2 (H37-c5)
+Subject: [PATCH 5/5] stop safely when the host gives no data directory
+
+GetRandomizerPath() built a std::filesystem::path from the null pointer HostService::data_dir
+leaves behind when it fails, after calling HostService::fail -- which returns. H37-c4 on Switch
+("Failed to get data directory (1)") then crashed in the next instruction, before the loader's
+Disable at the next safe point. The five path functions now return std::optional: nullopt when
+the host refuses (or reports OK with a null or empty path), fail() is called once, and every
+caller stops what it was doing (config in memory only, no seed/preset listing, no generation, no
+file written) instead of writing to the current directory. Randomizer::GenerateTrackerWorld() (generator/randomizer.cpp) stops too: it
+built the anti-spoiler log path from the seeds path and would not compile against the optional. data_dir.hpp holds the lookup so a host
+test can run it against a stub host.
+---
+diff --git a/src/data_dir.hpp b/src/data_dir.hpp
+new file mode 100644
+index 0000000..d87732c
+--- /dev/null
++++ b/src/data_dir.hpp
+@@ -0,0 +1,28 @@
++#pragma once
++
++// aleks2 (H37-c5): the mod's persistent directory as the host reports it, with nothing assumed.
++// HostService::data_dir can fail (H37-c4 on Switch: "Failed to get data directory (1)") and
++// HostService::fail returns to its caller -- it marks the mod failed, the loader disables it at the next
++// safe point, and the code that asked keeps running until it returns. So a failed lookup must end in
++// "no path", never in a path built from the null pointer data_dir leaves in *out.
++
++#include <filesystem>
++#include <optional>
++
++#include <mods/svc/host.h>
++
++namespace randomizer::paths {
++
++// nullopt when the host refuses, or reports MOD_OK with no or an empty path.
++inline std::optional<std::filesystem::path> ResolveDataDir(const HostService* host, ModContext* ctx) {
++    if (host == nullptr || host->data_dir == nullptr) {
++        return std::nullopt;
++    }
++    const char* dataDir = nullptr;
++    if (host->data_dir(ctx, &dataDir) != MOD_OK || dataDir == nullptr || dataDir[0] == '\0') {
++        return std::nullopt;
++    }
++    return std::filesystem::path(reinterpret_cast<const char8_t*>(dataDir));
++}
++
++}  // namespace randomizer::paths
+diff --git a/src/paths.cpp b/src/paths.cpp
+index 71ed83a..7340fc7 100644
+--- a/src/paths.cpp
++++ b/src/paths.cpp
+@@ -1,32 +1,57 @@
+ #include "paths.hpp"
+ 
++#include "data_dir.hpp"
+ #include "session.hpp"
+ 
++#include <mutex>
++
+ namespace randomizer::paths {
+ 
+-std::filesystem::path GetRandomizerPath() {
+-    const char* dataDir = nullptr;
+-    if (session::svc_mng.host->data_dir(session::svc_mng.mod_ctx, &dataDir) != MOD_OK) {
++std::optional<std::filesystem::path> GetRandomizerPath() {
++    static std::mutex mutex;
++    static std::optional<std::filesystem::path> resolved;
++    static bool failed = false;
++
++    std::lock_guard lock{mutex};
++    if (resolved) {
++        return resolved;
++    }
++    if (failed) {
++        return std::nullopt;
++    }
++    resolved = ResolveDataDir(session::svc_mng.host, session::svc_mng.mod_ctx);
++    if (!resolved) {
++        // fail() returns: it marks the mod failed and the loader disables it at the next safe point.
++        failed = true;
+         session::svc_mng.host->fail(session::svc_mng.mod_ctx, MOD_ERROR, "Failed to get data directory");
+     }
++    return resolved;
++}
+ 
+-    return reinterpret_cast<const char8_t*>(dataDir);
++namespace {
++std::optional<std::filesystem::path> Below(const char* name) {
++    auto base = GetRandomizerPath();
++    if (!base) {
++        return std::nullopt;
++    }
++    return *base / name;
+ }
++}  // namespace
+ 
+-std::filesystem::path GetRandomizerSettingsPath() {
+-    return GetRandomizerPath() / "settings.yaml";
++std::optional<std::filesystem::path> GetRandomizerSettingsPath() {
++    return Below("settings.yaml");
+ }
+ 
+-std::filesystem::path GetRandomizerPreferencesPath() {
+-    return GetRandomizerPath() / "preferences.yaml";
++std::optional<std::filesystem::path> GetRandomizerPreferencesPath() {
++    return Below("preferences.yaml");
+ }
+ 
+-std::filesystem::path GetRandomizerPresetsPath() {
+-    return GetRandomizerPath() / "presets";
++std::optional<std::filesystem::path> GetRandomizerPresetsPath() {
++    return Below("presets");
+ }
+ 
+-std::filesystem::path GetRandomizerSeedsPath() {
+-    return GetRandomizerPath() / "seeds";
++std::optional<std::filesystem::path> GetRandomizerSeedsPath() {
++    return Below("seeds");
+ }
+ 
+ }  // namespace randomizer::paths
+diff --git a/src/paths.hpp b/src/paths.hpp
+index 771e951..cfb9310 100644
+--- a/src/paths.hpp
++++ b/src/paths.hpp
+@@ -1,13 +1,17 @@
+ #pragma once
+ 
+ #include <filesystem>
++#include <optional>
+ 
+ namespace randomizer::paths {
+ 
+-std::filesystem::path GetRandomizerPath();
+-std::filesystem::path GetRandomizerSettingsPath();
+-std::filesystem::path GetRandomizerPreferencesPath();
+-std::filesystem::path GetRandomizerPresetsPath();
+-std::filesystem::path GetRandomizerSeedsPath();
++// nullopt: the host would not give the mod's data directory. The mod has been told to fail (once); the
++// caller must stop what it was doing -- there is no path to fall back to, and an empty one would mean
++// the current directory.
++std::optional<std::filesystem::path> GetRandomizerPath();
++std::optional<std::filesystem::path> GetRandomizerSettingsPath();
++std::optional<std::filesystem::path> GetRandomizerPreferencesPath();
++std::optional<std::filesystem::path> GetRandomizerPresetsPath();
++std::optional<std::filesystem::path> GetRandomizerSeedsPath();
+ 
+ }  // namespace randomizer::paths
+diff --git a/src/randomizer_context.cpp b/src/randomizer_context.cpp
+index 371c3e6..119a13e 100644
+--- a/src/randomizer_context.cpp
++++ b/src/randomizer_context.cpp
+@@ -116,7 +116,11 @@ RandomizerContext::MessageStyleData parse_message_style(const YAML::Node& node)
+ 
+ std::optional<std::string> RandomizerContext::WriteToFile() {
+ 
+-    std::ofstream seedData(this->GetSeedDataPath());
++    const auto seedDataPath = this->GetSeedDataPath();
++    if (!seedDataPath) {
++        return "The data directory is unavailable";
++    }
++    std::ofstream seedData(*seedDataPath);
+     if (!seedData.is_open()) {
+         return "Could not open seed data file";
+     }
+@@ -269,13 +273,18 @@ std::optional<std::string> RandomizerContext::WriteToFile() {
+ std::optional<std::string> RandomizerContext::LoadFromHash(const std::string& hash) {
+     this->mHash = hash;
+ 
+-    if (!std::filesystem::exists(this->GetSeedDataPath())) {
++    const auto seedDataPath = this->GetSeedDataPath();
++    if (!seedDataPath) {
++        mHash.clear();
++        return "The data directory is unavailable";
++    }
++    if (!std::filesystem::exists(*seedDataPath)) {
+         mods::log::error("Failed to load Hash: {}", hash);
+         mHash.clear();
+         return std::nullopt;
+     }
+ 
+-    auto in = LoadYAML(this->GetSeedDataPath());
++    auto in = LoadYAML(*seedDataPath);
+     if (!in["formatVersion"] || in["formatVersion"].as<u32>() != FORMAT_VERSION) {
+         mods::log::error("Seed {} uses an obsolete data format and must be regenerated", hash);
+         mHash.clear();
+@@ -481,8 +490,12 @@ std::optional<std::string> RandomizerContext::LoadFromHash(const std::string& ha
+     return std::nullopt;
+ }
+ 
+-std::filesystem::path RandomizerContext::GetSeedDataPath() const {
+-    return ::randomizer::paths::GetRandomizerSeedsPath() / this->mHash / "seed.dat";
++std::optional<std::filesystem::path> RandomizerContext::GetSeedDataPath() const {
++    const auto seeds = ::randomizer::paths::GetRandomizerSeedsPath();
++    if (!seeds) {
++        return std::nullopt;
++    }
++    return *seeds / this->mHash / "seed.dat";
+ }
+ 
+ int RandomizerContext::SettingToEnum(const std::string& settingName) {
+@@ -1864,7 +1877,12 @@ static void DeleteFailedGenerationFiles(randomizer::Randomizer& rando) {
+ }
+ 
+ bool GenerateAndWriteSeed() {
+-    auto r = randomizer::Randomizer{::randomizer::paths::GetRandomizerPath()};
++    const auto basePath = ::randomizer::paths::GetRandomizerPath();
++    if (!basePath) {
++        randomizer::ui::UpdateGenerationStatusMsg("Failed to generate seed. Reason:\nThe data directory is unavailable");
++        return false;
++    }
++    auto r = randomizer::Randomizer{*basePath};
+ 
+     auto generationResult = r.Generate();
+     if (generationResult.has_value()) {
+diff --git a/src/randomizer_context.hpp b/src/randomizer_context.hpp
+index ffd6903..f0c47e0 100644
+--- a/src/randomizer_context.hpp
++++ b/src/randomizer_context.hpp
+@@ -143,7 +143,7 @@ public:
+ 
+     std::optional<std::string> WriteToFile();
+     std::optional<std::string> LoadFromHash(const std::string& hash);
+-    std::filesystem::path GetSeedDataPath() const;
++    std::optional<std::filesystem::path> GetSeedDataPath() const;
+ 
+     enum Settings {
+         HYRULE_BARRIER_REQUIREMENTS,
+diff --git a/src/ui/config_store.cpp b/src/ui/config_store.cpp
+index 4bcf5b6..c67094a 100644
+--- a/src/ui/config_store.cpp
++++ b/src/ui/config_store.cpp
+@@ -8,14 +8,22 @@
+ namespace randomizer::ui {
+ 
+ seedgen::config::Config& GetRandomizerConfig() {
+-    static seedgen::config::Config s_config{paths::GetRandomizerSettingsPath(),
+-                                            paths::GetRandomizerPreferencesPath()};
++    // Without a data directory the settings live in memory only (and SaveRandomizerConfig writes nothing).
++    static seedgen::config::Config s_config = [] {
++        const auto settings = paths::GetRandomizerSettingsPath();
++        const auto preferences = paths::GetRandomizerPreferencesPath();
++        return settings && preferences ? seedgen::config::Config{*settings, *preferences} : seedgen::config::Config{};
++    }();
+     return s_config;
+ }
+ 
+ void SaveRandomizerConfig() {
+-    GetRandomizerConfig().WriteToFile(paths::GetRandomizerSettingsPath(),
+-                                      paths::GetRandomizerPreferencesPath());
++    const auto settings = paths::GetRandomizerSettingsPath();
++    const auto preferences = paths::GetRandomizerPreferencesPath();
++    if (!settings || !preferences) {
++        return;
++    }
++    GetRandomizerConfig().WriteToFile(*settings, *preferences);
+ }
+ 
+ bool TryCreateRandomSeed() {
+diff --git a/src/ui/rando_config.cpp b/src/ui/rando_config.cpp
+index 0a22619..ca3220a 100644
+--- a/src/ui/rando_config.cpp
++++ b/src/ui/rando_config.cpp
+@@ -96,7 +96,11 @@ UiMenuTabHandle g_menu_tab{};
+ FileSelectGateWindowCtx g_file_select_window_ctx{};
+ 
+ std::vector<std::string> get_compatible_seed_hashes() {
+-    const std::filesystem::path seedDir = paths::GetRandomizerSeedsPath();
++    const auto seedsPath = paths::GetRandomizerSeedsPath();
++    if (!seedsPath) {
++        return {};
++    }
++    const std::filesystem::path seedDir = *seedsPath;
+     std::filesystem::create_directories(seedDir);
+ 
+     static std::map<std::filesystem::path, std::filesystem::file_time_type> verifiedSeeds{};
+@@ -145,7 +149,11 @@ std::vector<std::string> get_compatible_seed_hashes() {
+ 
+ namespace {
+ std::vector<std::string> get_presets() {
+-    const std::filesystem::path presetsDir = paths::GetRandomizerPresetsPath();
++    const auto presetsPath = paths::GetRandomizerPresetsPath();
++    if (!presetsPath) {
++        return {};
++    }
++    const std::filesystem::path presetsDir = *presetsPath;
+     std::filesystem::create_directories(presetsDir);
+ 
+     std::vector<std::string> presets;
+@@ -425,11 +433,15 @@ void onOverwriteDialogNo(ModContext* ctx, UiDialogHandle dialog, void* user_data
+ };
+ 
+ void SaveNewRandomizerPreset(const std::string& presetName, bool overwriteExisting /*= false*/) {
+-    const std::filesystem::path presetsDir = paths::GetRandomizerPresetsPath();
++    const auto presetsPath = paths::GetRandomizerPresetsPath();
++    if (!presetsPath) {
++        return;
++    }
++    const std::filesystem::path presetsDir = *presetsPath;
+     if (!exists(presetsDir))
+         std::filesystem::create_directories(presetsDir);
+ 
+-    auto presetFilepath = paths::GetRandomizerPresetsPath() / (presetName + ".yaml");
++    auto presetFilepath = presetsDir / (presetName + ".yaml");
+ 
+     // If the preset exists, ask the user if they want to overwrite it. If so, call this function
+     // again but force overwrite the existing preset
+@@ -476,9 +488,13 @@ void SaveNewRandomizerPreset(const std::string& presetName, bool overwriteExisti
+ 
+ void ApplyExistingRandomizerPreset(const std::filesystem::path& presetFilePath) {
+     // Don't overwrite the seed with the one from the preset
++    const auto preferencesPath = paths::GetRandomizerPreferencesPath();
++    if (!preferencesPath) {
++        return;
++    }
+     auto seed = GetRandomizerConfig().GetSeed();
+     try {
+-        GetRandomizerConfig().LoadFromFile(presetFilePath, paths::GetRandomizerPreferencesPath(), false, true);
++        GetRandomizerConfig().LoadFromFile(presetFilePath, *preferencesPath, false, true);
+         GetRandomizerConfig().SetSeed(seed);
+     } catch (std::exception& e) {
+         std::string body_rml = fmt::format("Error: {}", e.what());
+@@ -552,7 +568,9 @@ void onPresetDialogLoadCancel(ModContext* ctx, UiDialogHandle dialog, void* user
+ 
+ void onPresetLoad(ModContext* ctx, void* user_data) {
+     auto preset = static_cast<const char*>(user_data);
+-    ApplyExistingRandomizerPreset(paths::GetRandomizerPresetsPath() / preset);
++    if (const auto presetsPath = paths::GetRandomizerPresetsPath()) {
++        ApplyExistingRandomizerPreset(*presetsPath / preset);
++    }
+     session::svc_mng.ui->dialog_close(ctx, g_presetLoadDialog);
+ }
+ 
+@@ -607,7 +625,9 @@ void onSeedDelete(ModContext* ctx, DialogSeed const& user_data) {
+     if (randomizer_GetContext().mHash == user_data.hash) {
+         randomizer_GetContext() = RandomizerContext{};
+     }
+-    std::filesystem::remove_all(paths::GetRandomizerSeedsPath() / user_data.hash);
++    if (const auto seedsPath = paths::GetRandomizerSeedsPath()) {
++        std::filesystem::remove_all(*seedsPath / user_data.hash);
++    }
+     session::svc_mng.ui->dialog_close(ctx, g_seedDialog);
+ }
+ 
+@@ -711,7 +731,12 @@ void buildSeedStringPermalinkPastedDialog(ModContext* ctx, void* user_data) {
+ }
+ 
+ void onSeedExportSpoiler(ModContext* ctx, DialogSeed const& seed) {
+-    auto spoilerPath = paths::GetRandomizerSeedsPath() / seed.hash / (seed.hash + " Spoiler Log.txt");
++    const auto seedsPath = paths::GetRandomizerSeedsPath();
++    if (!seedsPath) {
++        session::svc_mng.ui->dialog_close(ctx, g_seedDialog);
++        return;
++    }
++    auto spoilerPath = *seedsPath / seed.hash / (seed.hash + " Spoiler Log.txt");
+ 
+     mods::file::export_file(spoilerPath.generic_string(), seed.hash + " Spoiler Log.txt", [&](mods::file::PickResult result) {
+         UiToastDesc desc = UI_TOAST_DESC_INIT;
+@@ -732,7 +757,12 @@ void onSeedExportSpoiler(ModContext* ctx, DialogSeed const& seed) {
+ }
+ 
+ void onSeedExportAllData(ModContext* ctx, DialogSeed const& seed) {
+-    auto seedPath = paths::GetRandomizerSeedsPath() / seed.hash;
++    const auto seedsPath = paths::GetRandomizerSeedsPath();
++    if (!seedsPath) {
++        session::svc_mng.ui->dialog_close(ctx, g_seedDialog);
++        return;
++    }
++    auto seedPath = *seedsPath / seed.hash;
+ 
+     mods::file::PickOptions options{};
+     mods::file::pick_folder(options, [=](mods::file::PickResult result) {
+diff --git a/generator/randomizer.cpp b/generator/randomizer.cpp
+index 8141ccf..65bca07 100644
+--- a/generator/randomizer.cpp
++++ b/generator/randomizer.cpp
+@@ -55,8 +55,13 @@ namespace randomizer
+             return;
+         }
+ 
+-        std::filesystem::path seedSettings = ::randomizer::paths::GetRandomizerSeedsPath() /
+-            contextHash / (contextHash + " Anti-Spoiler Log.txt");
++        const auto seedsPath = ::randomizer::paths::GetRandomizerSeedsPath();
++        if (!seedsPath) {
++            return;
++        }
++
++        std::filesystem::path seedSettings =
++            *seedsPath / contextHash / (contextHash + " Anti-Spoiler Log.txt");
+ 
+         this->_config.LoadFromFile(seedSettings, GetPrefPath());
+         this->_config.SetHash(contextHash);

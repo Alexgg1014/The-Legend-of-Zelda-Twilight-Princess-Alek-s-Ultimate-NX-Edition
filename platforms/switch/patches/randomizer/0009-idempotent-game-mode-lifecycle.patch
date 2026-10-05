@@ -1,0 +1,485 @@
+From: aleks2 (H38)
+Subject: [PATCH 9/9] idempotent game-mode lifecycle
+
+onGameModeDeactivated() and mod_shutdown() both ran the whole teardown, removeMenuTab() freed its handle without
+invalidating it (the host logged "unregister_menu_tab: stale handle"), a failure half way through activation left
+the earlier resources acquired, and the preload thread could outlive what it touches.
+
+session_lifecycle.hpp holds the state machine (Inactive / Activating / Active / ShuttingDown) and the resources in
+acquisition order: hooks, save observer, texture replacement, UI, seed state, preload thread. A failed activation
+rolls back what it acquired in reverse; shutdown() releases each resource exactly once however many times it runs,
+preload thread first (cancel flag raised, then joined) so nothing it touches is gone while it runs. Handles are
+invalidated as they are freed (release_handle). The UI's menu tab and styles use the same idiom, and a failed
+ui::initialize releases its own styles.
+---
+diff --git a/src/session.cpp b/src/session.cpp
+index 88cd475..2555adc 100644
+--- a/src/session.cpp
++++ b/src/session.cpp
+@@ -1,4 +1,5 @@
+ #include "session.hpp"
++#include "session_lifecycle.hpp"
+ 
+ #include <mods/svc/log.hpp>
+ 
+@@ -22,9 +23,11 @@
+ 
+ #include <mods/items.h>
+ 
++#include <atomic>
+ #include <cstdlib>
+ #include <cstring>
+ #include <optional>
++#include <memory>
+ #include <string_view>
+ #include <thread>
+ 
+@@ -33,8 +36,6 @@ ServiceManager svc_mng;
+ std::string g_pending_seed_hash{};
+ bool g_seedActivated = false;
+ 
+-SaveObserverHandle s_save_observer{};
+-static randomizer::LargeStackThread s_preloadThread;
+ ItemCheckHandle s_check_resolver{};
+ ItemGiveHandle s_check_observer{};
+ std::vector<StageActorHandle> s_stage_edits{};
+@@ -462,67 +463,45 @@ void onSaveWritten(ModContext*, uint32_t, void*) {
+     saveAncientDocumentNum();
+ }
+ 
+-void preLoadRandomizerData() {
++// aleks2 (H38): `cancel` is raised by shutdown; each step is one uninterruptible load, so it is checked between them.
++void preLoadRandomizerData(const std::atomic<bool>& cancel) {
+     // Load text database now so that we don't hitch when opening up the item wheel the first time
+     getTextDatabase();
++    if (cancel.load()) {
++        return;
++    }
+ 
+     // Verify current seeds now so we don't hitch when getting seeds in the future
+     ui::get_compatible_seed_hashes();
++    if (cancel.load()) {
++        return;
++    }
+ 
+     // Load the excluded locations catalog for the excluded locations menu
+     ui::load_excluded_locations();
+ }
+ 
+-TextureReplacementHandle logoTexHandle{};
++// aleks2 (H38): every resource of the game mode is acquired and released through SessionResources
++// (session_lifecycle.hpp): rollback if activation fails half way, each resource freed once however often shutdown
++// runs, the preload thread cancelled and joined before the UI, the seed and the services go away.
++static std::unique_ptr<SessionResources> s_resources;
+ 
+ ModResult onGameModeActivated(void*, ModError* error) {
+-    ModResult result = hooks::initialize();
+-    if (result != MOD_OK) {
+-        return mods::set_error(error, result, "failed to initialize hooks");
++    if (s_resources == nullptr) {
++        return mods::set_error(error, MOD_ERROR, "randomizer resources are not initialized");
+     }
+-
+-    result = svc_mng.save->observe_saves(
+-        svc_mng.mod_ctx,
+-        nullptr,
+-        nullptr,
+-        onSaveWritten,
+-        nullptr,
+-        &s_save_observer);
+-    if (result != MOD_OK) {
+-        return mods::set_error(error, result, "failed to initialize save observation");
++    if (const auto failed = s_resources->activate()) {
++        return mods::set_error(error, failed->code, SessionResources::failure_message(failed->resource));
+     }
+ 
+-    result = svc_mng.texture->register_file(mod_ctx, "res/tex1_608x100_0c1c70378fb8cb46_6.png", &logoTexHandle);
+-    if (result != MOD_OK) {
+-        return mods::set_error(error, result, "failed to register texture replacement");
+-    }
+-
+-    result = ui::initialize();
+-    if (result != MOD_OK) {
+-        return mods::set_error(error, result, "failed to initialize ui");
+-    }
+-
+-    // Preload certain data to prevent hitching that would happen if loading the data as necessary.
+-    // aleks2 (H37): kept, and joined in shutdown(), instead of detached: a preload still running
+-    // after the mod shut down would write into state that is gone.
+-    if (s_preloadThread.joinable()) {
+-        s_preloadThread.join();
+-    }
+-    s_preloadThread = randomizer::LargeStackThread{preLoadRandomizerData};
+-
+     mods::log::info("randomizer game mode activated");
+     return MOD_OK;
+ }
+ 
+ void shutdown() {
+-    if (s_preloadThread.joinable()) {
+-        s_preloadThread.join();
++    if (s_resources != nullptr) {
++        s_resources->shutdown();
+     }
+-    deactivateSeed();
+-    hooks::uninstall();
+-    ui::shutdown();
+-    svc_mng.save->unobserve_saves(mod_ctx, s_save_observer);
+-    svc_mng.texture->unregister(mod_ctx, logoTexHandle);
+ }
+ 
+ ModResult onGameModeDeactivated(void*, ModError*) {
+@@ -541,6 +520,17 @@ ModResult onGameModeUpdate(void*, ModError*) {
+ ModResult initialize(const ServiceManager& services) {
+     svc_mng = services;
+ 
++    GameCallbacks game;
++    game.hooks_initialize = [] { return hooks::initialize(); };
++    game.hooks_uninstall = [] { hooks::uninstall(); };
++    game.ui_initialize = [] { return ui::initialize(); };
++    game.ui_shutdown = [] { ui::shutdown(); };
++    game.deactivate_seed = [] { deactivateSeed(); };
++    game.preload = preLoadRandomizerData;
++    game.on_save_written = onSaveWritten;
++    game.logo_texture = "res/tex1_608x100_0c1c70378fb8cb46_6.png";
++    s_resources = std::make_unique<SessionResources>(svc_mng, std::move(game));
++
+     auto result = messages::initialize();
+     if (result != MOD_OK) {
+         return result;
+diff --git a/src/session_lifecycle.hpp b/src/session_lifecycle.hpp
+new file mode 100644
+index 0000000..bdc8075
+--- /dev/null
++++ b/src/session_lifecycle.hpp
+@@ -0,0 +1,254 @@
++// aleks2 (H38): the Randomizer's game-mode lifecycle as one idempotent state machine.
++//
++// What went wrong. onGameModeDeactivated() and mod_shutdown() both ran the whole teardown, so a handle freed by the
++// first (the menu tab) was freed again by the second and the host logged "unregister_menu_tab: stale handle"; a
++// failure half way through onGameModeActivated() left whatever was acquired before it behind; and the preload thread
++// was only joined by one of the two paths.
++//
++// What this is. Every resource the game mode acquires has one acquire step and one release step, run in a fixed
++// order. Lifecycle records which were acquired, rolls back in reverse if an acquire fails, and releases each exactly
++// once however many times shutdown() is called. release_handle() is the idiom for the handle-shaped ones: the handle
++// is invalidated (0, which is never a valid handle) before the service is asked to free it, so a second release is a
++// no-op. Nothing here touches the game, so test-randomizer-lifecycle.sh drives it with fake services and counters.
++#pragma once
++
++#include "large_stack_thread.hpp"
++#include "session.hpp"
++
++#include <array>
++#include <atomic>
++#include <cstddef>
++#include <exception>
++#include <functional>
++#include <optional>
++#include <utility>
++
++namespace randomizer::session {
++
++// Frees `handle` through `unregister(handle)` once and leaves it 0. Returns whether it freed anything.
++template <class Handle, class Unregister>
++bool release_handle(Handle& handle, Unregister&& unregister) {
++    if (handle == 0) {
++        return false;
++    }
++    const Handle live = handle;
++    handle = 0;
++    std::forward<Unregister>(unregister)(live);
++    return true;
++}
++
++enum class State { Inactive, Activating, Active, ShuttingDown };
++
++// In acquisition order; released in the reverse order. The preload thread comes last so that it is joined before
++// anything it could touch (the seed state, the UI, the services) is taken down.
++enum class Resource : int { Hooks, SaveObserver, TextureReplacement, Ui, Seed, PreloadThread, Count };
++constexpr std::size_t kResourceCount = static_cast<std::size_t>(Resource::Count);
++
++class Lifecycle {
++public:
++    struct Step {
++        std::function<bool()> acquire;   // true if the resource is now held; a failing acquire cleans up after itself
++        std::function<void()> release;   // called once per successful acquire
++    };
++    using Steps = std::array<Step, kResourceCount>;
++
++    explicit Lifecycle(Steps steps) : m_steps(std::move(steps)) {}
++
++    State state() const { return m_state; }
++    bool held(Resource r) const { return m_held[static_cast<std::size_t>(r)]; }
++
++    // Acquires every resource in order. On the first failure the ones already held are released in reverse and the
++    // failing resource is returned. Already Active: nothing to do. Busy (activating or shutting down): refused.
++    std::optional<Resource> activate() {
++        if (m_state == State::Active) {
++            return std::nullopt;
++        }
++        if (m_state != State::Inactive) {
++            return Resource::Hooks;
++        }
++        m_state = State::Activating;
++        for (std::size_t i = 0; i < kResourceCount; ++i) {
++            bool ok = false;
++            try {
++                ok = m_steps[i].acquire && m_steps[i].acquire();
++            } catch (...) {
++                ok = false;
++            }
++            if (!ok) {
++                release_held();
++                m_state = State::Inactive;
++                return static_cast<Resource>(i);
++            }
++            m_held[i] = true;
++        }
++        m_state = State::Active;
++        return std::nullopt;
++    }
++
++    // Releases what is held, in reverse. Safe to call any number of times, in any state.
++    void shutdown() {
++        if (m_state == State::Inactive || m_state == State::ShuttingDown) {
++            return;
++        }
++        m_state = State::ShuttingDown;
++        release_held();
++        m_state = State::Inactive;
++    }
++
++private:
++    void release_held() {
++        for (std::size_t i = kResourceCount; i-- > 0;) {
++            if (!m_held[i]) {
++                continue;
++            }
++            m_held[i] = false;
++            try {
++                if (m_steps[i].release) {
++                    m_steps[i].release();
++                }
++            } catch (...) {
++                // One failed release must not leave the ones below it held.
++            }
++        }
++    }
++
++    Steps m_steps;
++    std::array<bool, kResourceCount> m_held{};
++    State m_state = State::Inactive;
++};
++
++// The game-side work the lifecycle drives (hooks, UI, seed state, the preload itself), so that the lifecycle's own
++// glue to the services can be tested without the game.
++struct GameCallbacks {
++    std::function<ModResult()> hooks_initialize;
++    std::function<void()> hooks_uninstall;  // also the rollback of a hooks_initialize that failed half way
++    std::function<ModResult()> ui_initialize;
++    std::function<void()> ui_shutdown;
++    std::function<void()> deactivate_seed;
++    // Runs on the preload thread. Must return soon after `cancel` becomes true.
++    std::function<void(const std::atomic<bool>& cancel)> preload;
++    SaveEventFn on_save_written = nullptr;
++    const char* logo_texture = nullptr;
++};
++
++// The Randomizer's resources over the real service tables (fake ones in tests).
++class SessionResources {
++public:
++    SessionResources(const ServiceManager& services, GameCallbacks game)
++        : m_svc(services), m_game(std::move(game)), m_lifecycle(make_steps()) {}
++    SessionResources(const SessionResources&) = delete;
++    SessionResources& operator=(const SessionResources&) = delete;
++    ~SessionResources() { shutdown(); }
++
++    struct Failure {
++        Resource resource;
++        ModResult code;
++    };
++
++    std::optional<Failure> activate() {
++        m_failCode = MOD_ERROR;
++        if (const auto failed = m_lifecycle.activate()) {
++            return Failure{*failed, m_failCode};
++        }
++        return std::nullopt;
++    }
++    void shutdown() { m_lifecycle.shutdown(); }
++    State state() const { return m_lifecycle.state(); }
++    bool held(Resource r) const { return m_lifecycle.held(r); }
++
++    static const char* failure_message(Resource r) {
++        switch (r) {
++        case Resource::Hooks: return "failed to initialize hooks";
++        case Resource::SaveObserver: return "failed to initialize save observation";
++        case Resource::TextureReplacement: return "failed to register texture replacement";
++        case Resource::Ui: return "failed to initialize ui";
++        case Resource::Seed: return "failed to prepare the seed state";
++        case Resource::PreloadThread: return "failed to start the data preload thread";
++        default: return "failed to activate the randomizer";
++        }
++    }
++
++private:
++    Lifecycle::Steps make_steps() {
++        Lifecycle::Steps steps;
++        steps[index(Resource::Hooks)] = {
++            [this] {
++                const ModResult r = m_game.hooks_initialize();
++                if (r != MOD_OK) {
++                    m_failCode = r;
++                    m_game.hooks_uninstall();  // some hooks may be in
++                    return false;
++                }
++                return true;
++            },
++            [this] { m_game.hooks_uninstall(); }};
++        steps[index(Resource::SaveObserver)] = {
++            [this] {
++                const ModResult r = m_svc.save->observe_saves(
++                    m_svc.mod_ctx, nullptr, nullptr, m_game.on_save_written, nullptr, &m_saveObserver);
++                if (r != MOD_OK) {
++                    m_failCode = r;
++                    m_saveObserver = 0;
++                    return false;
++                }
++                return true;
++            },
++            [this] {
++                release_handle(m_saveObserver,
++                    [this](SaveObserverHandle h) { m_svc.save->unobserve_saves(m_svc.mod_ctx, h); });
++            }};
++        steps[index(Resource::TextureReplacement)] = {
++            [this] {
++                const ModResult r =
++                    m_svc.texture->register_file(m_svc.mod_ctx, m_game.logo_texture, &m_logoTexture);
++                if (r != MOD_OK) {
++                    m_failCode = r;
++                    m_logoTexture = 0;
++                    return false;
++                }
++                return true;
++            },
++            [this] {
++                release_handle(m_logoTexture,
++                    [this](TextureReplacementHandle h) { m_svc.texture->unregister(m_svc.mod_ctx, h); });
++            }};
++        steps[index(Resource::Ui)] = {
++            [this] {
++                const ModResult r = m_game.ui_initialize();
++                if (r != MOD_OK) {
++                    m_failCode = r;
++                    return false;
++                }
++                return true;
++            },
++            [this] { m_game.ui_shutdown(); }};
++        steps[index(Resource::Seed)] = {
++            [] { return true; },  // a seed is activated later, by a new or loaded save; this releases it
++            [this] { m_game.deactivate_seed(); }};
++        steps[index(Resource::PreloadThread)] = {
++            [this] {
++                m_cancel.store(false);
++                m_preload = LargeStackThread{[this] { m_game.preload(m_cancel); }};
++                return true;  // a thread that cannot start throws, which Lifecycle counts as a failure
++            },
++            [this] {
++                m_cancel.store(true);
++                if (m_preload.joinable()) {
++                    m_preload.join();
++                }
++            }};
++        return steps;
++    }
++    static constexpr std::size_t index(Resource r) { return static_cast<std::size_t>(r); }
++
++    const ServiceManager& m_svc;
++    GameCallbacks m_game;
++    SaveObserverHandle m_saveObserver = 0;
++    TextureReplacementHandle m_logoTexture = 0;
++    LargeStackThread m_preload;
++    std::atomic<bool> m_cancel{false};
++    ModResult m_failCode = MOD_ERROR;
++    Lifecycle m_lifecycle;  // last: its steps capture `this` and the members above
++};
++
++}  // namespace randomizer::session
+diff --git a/src/ui/rando_config.cpp b/src/ui/rando_config.cpp
+index ca3220a..132f7d4 100644
+--- a/src/ui/rando_config.cpp
++++ b/src/ui/rando_config.cpp
+@@ -5,6 +5,7 @@
+ #include <mods/svc/ui.hpp>
+ 
+ #include "../session.hpp"
++#include "../session_lifecycle.hpp"
+ #include "../paths.hpp"
+ #include "../randomizer_context.hpp"
+ #include "../../generator/utility/string.hpp"
+@@ -1953,8 +1954,14 @@ ModResult buildMenuTab() {
+     return session::svc_mng.ui->register_menu_tab(session::svc_mng.mod_ctx, &desc, &g_menu_tab);
+ }
+ 
++// aleks2 (H38): the handle is invalidated as it is freed, so a second removal (deactivation followed by mod_shutdown)
++// is a no-op and the host does not log "unregister_menu_tab: stale handle".
+ ModResult removeMenuTab() {
+-    return session::svc_mng.ui->unregister_menu_tab(session::svc_mng.mod_ctx, g_menu_tab);
++    ModResult result = MOD_OK;
++    session::release_handle(g_menu_tab, [&result](UiMenuTabHandle h) {
++        result = session::svc_mng.ui->unregister_menu_tab(session::svc_mng.mod_ctx, h);
++    });
++    return result;
+ }
+ 
+ ModResult buildFileSelectGateMenu(dFile_select_c* fileSelect) {
+diff --git a/src/ui/ui.cpp b/src/ui/ui.cpp
+index 2aeb303..1f6af59 100644
+--- a/src/ui/ui.cpp
++++ b/src/ui/ui.cpp
+@@ -3,6 +3,7 @@
+ #include <mods/svc/log.hpp>
+ 
+ #include "../session.hpp"
++#include "../session_lifecycle.hpp"
+ 
+ #include "rando_seed_generation.hpp"
+ #include "rando_config.hpp"
+@@ -15,6 +16,12 @@ UiStyleHandle styleHandle{};
+ // It used to have a thread of its own calling the UI service every 16 ms, and the UI service is
+ // the game's: nothing says it may be called from another thread while the game thread uses it.
+ 
++static void releaseStyles() {
++    session::release_handle(styleHandle, [](UiStyleHandle h) {
++        session::svc_mng.ui->unregister_styles(session::svc_mng.mod_ctx, h);
++    });
++}
++
+ ModResult initialize() {
+     ModResult res;
+ 
+@@ -31,6 +38,8 @@ ModResult initialize() {
+     res = buildMenuTab();
+     if (res != MOD_OK) {
+         mods::log::error("failed to initialize randomizer menu tab!");
++        // aleks2 (H38): a failed initialize holds nothing: the lifecycle never calls shutdown() for it.
++        releaseStyles();
+         return res;
+     }
+ 
+@@ -42,11 +51,12 @@ void update() {
+     UpdateSeedGenerationDialog();
+ }
+ 
++// aleks2 (H38): idempotent. removeMenuTab() and releaseStyles() free a handle once and leave it invalid.
+ ModResult shutdown() {
+     // A seed still generating must finish before the state it writes goes away.
+     JoinSeedGeneration();
+     removeMenuTab();
+-    session::svc_mng.ui->unregister_styles(mod_ctx, styleHandle);
++    releaseStyles();
+     return MOD_OK;
+ }
+ 

@@ -1,0 +1,51 @@
+{
+  // Use Ctrl+Shift+B to run build tasks.
+  // Or "Run Build Task" in the Command Palette.
+  "version": "2.0.0",
+  "inputs": [
+    {
+        "id": "gameVersion",
+        "type": "pickString",
+        "options": [
+            "GZ2E01",    // GCN USA
+            "GZ2P01",    // GCN PAL
+            "GZ2J01",    // GCN JPN
+            "RZDE01_00", // Wii USA Rev 0
+            "RZDE01_02", // Wii USA Rev 2
+            "RZDP01",    // Wii PAL
+            "RZDJ01",    // Wii JPN
+            //"RZDK01",    // Wii KOR
+            //"DZDE01",    // Wii USA Kiosk Demo
+            //"DZDP01",    // Wii PAL Kiosk Demo
+            "Shield",    // Shield
+            //"ShieldP",   // Shield Production
+            "ShieldD",   // Shield Debug
+        ],
+        "default": "GZ2E01",
+        "description": "Game version to build."
+    },
+  ],
+  "tasks": [
+    {
+      "label": "ninja",
+      "type": "shell",
+      "command": "ninja",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "configure",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} configure.py --version ${input:gameVersion}",
+      "problemMatcher": [],
+    },
+    {
+      "label": "ninja changes_all",
+      "type": "shell",
+      "command": "ninja changes_all",
+      "problemMatcher": [],
+    },
+  ]
+}

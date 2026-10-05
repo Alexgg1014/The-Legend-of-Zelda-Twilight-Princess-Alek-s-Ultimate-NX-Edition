@@ -1,0 +1,202 @@
+/**
+ * d_a_tag_shop_item.cpp
+ * Tag - Shop Item
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_tag_shop_item.h"
+#include "f_pc/f_pc_name.h"
+#include <cstring>
+
+int daTag_ShopItem_c::create() {
+    fopAcM_ct(this, daTag_ShopItem_c);
+    initialize();
+    field_0x572 = false;
+
+    if (strcmp("F_SP109", dComIfGp_getStartStageName()) == 0) {
+        // saveBitLabels[64] = Goron Mines completed
+        if (!dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[64])) {
+            return cPhs_ERROR_e;
+        }
+
+        if (dComIfGs_getTime() >= 90.0f && dComIfGs_getTime() < 270.0f) {
+            return cPhs_ERROR_e;
+        }
+    }
+
+    if (getGroupID() == 15) {
+        mCreateTimer = 150;
+
+        // "Event Item\n"
+        OS_REPORT("イベントアイテム\n");
+
+        if (getSwitchBit1() != 0xFF) {
+            if (!dComIfGs_isSaveSwitch(getSwitchBit1())) {
+                dComIfGs_onSaveSwitch(getSwitchBit2());
+                field_0x572 = true;
+                mCreateTimer = 0;
+                // "Before Talk\n"
+                OS_REPORT("会話前\n");
+            } else {
+                // "After Talk\n"
+                OS_REPORT("会話後\n");
+            }
+        }
+    } else {
+        mCreateTimer = 0;
+
+        if (getSwitchBit1() != 0xFF) {
+            if (dComIfGs_isSaveSwitch(getSwitchBit1())) {
+                // "Already Sold\n"
+                OS_REPORT("もう売れたよ\n");
+                mCreateTimer = 150;
+            }
+        }
+
+        if (getSwitchBit2() != 0xFF) {
+            if (!dComIfGs_isSaveSwitch(getSwitchBit2())) {
+                // "Not sold yet\n"
+                OS_REPORT("まだ売れない\n");
+                mCreateTimer = 150;
+            }
+        }
+    }
+
+    return cPhs_COMPLEATE_e;
+}
+
+int daTag_ShopItem_c::Delete() {
+    if (field_0x572 && getGroupID() == 15) {
+        if (dComIfGs_isSaveSwitch(getSwitchBit1())) {
+            dComIfGs_offSaveSwitch(getSwitchBit2());
+        }
+    }
+
+    return 1;
+}
+
+int daTag_ShopItem_c::Execute() {
+    if (mProcessID == fpcM_ERROR_PROCESS_ID_e) {
+        if (mCreateTimer == 0) {
+            mProcessID =
+                fopAcM_create(fpcNm_ShopItem_e, getType() | (getGroupID() << 28),
+                              &current.pos, fopAcM_GetRoomNo(this), &current.angle, NULL, -1);
+
+        } else {
+            mCreateTimer--;
+
+            if (getGroupID() == 15) {
+                if (field_0x572) {
+                    mCreateTimer = 0;
+                }
+            } else {
+                if (getSwitchBit1() != 0xFF && dComIfGs_isSaveSwitch(getSwitchBit1())) {
+                } else if (getSwitchBit2() == 0xFF || dComIfGs_isSaveSwitch(getSwitchBit2())) {
+                    mCreateTimer = 0;
+                }
+            }
+        }
+    } else {
+        daItemBase_c* item_actor_p = (daItemBase_c*)fopAcM_SearchByID(mProcessID);
+
+        if (item_actor_p != NULL) {
+            if (getGroupID() == 15) {
+                if (!field_0x572) {
+                    item_actor_p->hide();
+                } else {
+                    item_actor_p->show();
+                }
+            } else {
+                if (getSwitchBit1() != 0xFF && dComIfGs_isSaveSwitch(getSwitchBit1())) {
+                    item_actor_p->hide();
+                } else if (getSwitchBit2() != 0xFF && !dComIfGs_isSaveSwitch(getSwitchBit2())) {
+                    item_actor_p->hide();
+                } else {
+                    item_actor_p->show();
+                }
+            }
+        }
+    }
+
+    return 1;
+}
+
+int daTag_ShopItem_c::Draw() {
+    return 1;
+}
+
+u8 daTag_ShopItem_c::getType() {
+    u8 result = fopAcM_GetParam(this);
+    return result;
+}
+
+u8 daTag_ShopItem_c::getGroupID() {
+    u8 result = (fopAcM_GetParam(this) & 0xF0000000) >> 28;
+    return result;
+}
+
+u8 daTag_ShopItem_c::getSwitchBit1() {
+    u16 angleZ = home.angle.z;
+    u8 result = angleZ;
+    return result;
+}
+
+u8 daTag_ShopItem_c::getSwitchBit2() {
+    u16 angleZ = home.angle.z;
+    u8 result = (angleZ & 0xFF00) >> 8;
+    return result;
+}
+
+void daTag_ShopItem_c::initialize() {
+    fopAcM_setCullSizeBox(this, -30.0f, -15.0f, -30.0f, 30.0f, 45.0f, 30.0f);
+    attention_info.flags = 0;
+    current.angle.set(0, home.angle.y, 0);
+    shape_angle = current.angle;
+    mProcessID = -1;
+}
+
+static int daTag_ShopItem_Create(void* i_this) {
+    return static_cast<daTag_ShopItem_c*>(i_this)->create();
+}
+
+static int daTag_ShopItem_Delete(void* i_this) {
+    return static_cast<daTag_ShopItem_c*>(i_this)->Delete();
+}
+
+static int daTag_ShopItem_Execute(void* i_this) {
+    return static_cast<daTag_ShopItem_c*>(i_this)->Execute();
+}
+
+static int daTag_ShopItem_Draw(void* i_this) {
+    return static_cast<daTag_ShopItem_c*>(i_this)->Draw();
+}
+
+static int daTag_ShopItem_IsDelete(void* i_this) {
+    return 1;
+}
+
+daTag_ShopItem_c::~daTag_ShopItem_c() {}
+
+static DUSK_CONST actor_method_class daTag_ShopItem_MethodTable = {
+    (process_method_func)daTag_ShopItem_Create,  (process_method_func)daTag_ShopItem_Delete,
+    (process_method_func)daTag_ShopItem_Execute, (process_method_func)daTag_ShopItem_IsDelete,
+    (process_method_func)daTag_ShopItem_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_SHOPITM = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_SHOPITM_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTag_ShopItem_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_SHOPITM_e,
+    /* Actor SubMtd */ &daTag_ShopItem_MethodTable,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_NOPAUSE_e | fopAcStts_UNK_0x4000_e | fopAcStts_CULL_e,
+    /* Group        */ fopAc_UNK_GROUP_5_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

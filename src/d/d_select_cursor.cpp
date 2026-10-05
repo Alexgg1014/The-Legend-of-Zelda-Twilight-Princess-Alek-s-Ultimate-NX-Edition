@@ -1,0 +1,657 @@
+#include "d/dolzel.h" // IWYU pragma: keep
+
+#include "d/d_select_cursor.h"
+#include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "d/d_com_inf_game.h"
+#include "JSystem/J2DGraph/J2DAnimation.h"
+#include "JSystem/J2DGraph/J2DAnmLoader.h"
+#include <cstring>
+
+#if TARGET_PC
+#include "dusk/interp/samples.h"
+#include "dusk/interp/user_interface.h"
+
+#include "m_Do/m_Do_lib.h"
+
+namespace {
+struct CursorSamples {
+    dusk::interp::Samples<cXyz> positions;
+    dusk::interp::Samples<f32> alpha;
+};
+}  // namespace
+#endif
+
+dSelect_cursorHIO_c::dSelect_cursorHIO_c() {
+    field_0x8 = 1.0f;
+    mXAxisExpansion = 1.0f;
+    mYAxisExpansion = 1.0f;
+    mOscillation = 3.0f / 10.0f;
+    field_0x18 = 1.0f;
+    mRatioX = 1.0f;
+    mRatioY = 1.0f;
+    mDebugON = false;
+}
+
+dSelect_cursor_c::dSelect_cursor_c(u8 param_0, f32 param_1, JKRArchive* param_2) {
+    static DUSK_CONST char* blo_name[4] = {
+        "zelda_select_cursor_4parts.blo",
+        "zelda_store_select_icon.blo",
+        "zelda_map_screen_portal_icon.blo",
+        "zelda_map_screen_batsumark.blo",
+    };
+
+    static DUSK_CONST char* bck_name[4] = {
+        "",
+        "zelda_store_select_icon.bck",
+        "",
+        "",
+    };
+
+    static DUSK_CONST char* bpk_name[4] = {
+        "zelda_select_cursor_4parts.bpk",
+        "zelda_store_select_icon.bpk",
+        "zelda_map_screen_portal_icon.bpk",
+        "zelda_map_screen_batsumark.bpk",
+    };
+
+    static DUSK_CONST char* btk_name[4] = {
+        "zelda_select_cursor_4parts.btk",
+        "zelda_store_select_icon.btk",
+        "",
+        "",
+    };
+
+    static DUSK_CONST char* btk2_name[4] = {
+        "",
+        "zelda_store_select_icon_02.btk",
+        "",
+        "",
+    };
+
+    mpCursorHIO = JKR_NEW dSelect_cursorHIO_c();
+    mpCursorHIO->field_0x4 = -1;
+    mNameIdx = 0;
+    field_0xb6 = param_0;
+    field_0xb4 = 0xff;
+    mUpdateFlag = true;
+    mpPane = NULL;
+    for (int i = 0; i < 4; i++) {
+        field_0x94[i] = 0.0f;
+        field_0xa4[i] = 0.0f;
+        field_0x74[i] = 0.0f;
+        field_0x84[i] = 0.0f;
+    }
+    mParam1 = mpCursorHIO->mXAxisExpansion;
+#ifdef TARGET_PC
+    mBaseParam1 = mParam1;
+#endif
+    mParam2 = mpCursorHIO->mYAxisExpansion;
+    mParam3 = mpCursorHIO->mOscillation;
+    mParam4 = mpCursorHIO->mRatioX;
+    mParam5 = mpCursorHIO->mRatioY;
+
+    switch(field_0xb6) {
+        case 1:
+        case 2:
+        case 3:
+        case 4:
+            mNameIdx = 0;
+            break;
+        case 5:
+            mNameIdx = 2;
+            break;
+        case 6:
+            mNameIdx = 3;
+            break;
+    }
+
+    if (param_2 == NULL) {
+        param_2 = dComIfGp_getMain2DArchive();
+    }
+
+    mpScreen = JKR_NEW J2DScreen();
+    mpScreen->setPriority(blo_name[mNameIdx], 0x20000, param_2);
+    dPaneClass_showNullPane(mpScreen);
+
+    for (int i = 0; i < 4; i++) {
+        field_0x1C[i] = NULL;
+    }
+
+    switch(mNameIdx) {
+    case 0: {
+            mpPaneMgr = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('n_all'), 2, NULL);
+            mpPaneMgr->hide();
+            mpPaneMgr->setAlpha(0);
+
+            static u64 const corner_tag[4] = {MULTI_CHAR('l_u_null'), MULTI_CHAR('l_d_null'), MULTI_CHAR('r_u_null'), MULTI_CHAR('r_d_null')};
+            for (int i = 0; i< 4; i++) {
+                field_0x1C[i] = JKR_NEW CPaneMgr(mpScreen, corner_tag[i], 0, NULL);
+                field_0x94[i] = mpScreen->search(corner_tag[i])->getTranslateX();
+                field_0xa4[i] = mpScreen->search(corner_tag[i])->getTranslateY();
+                field_0x74[i] = field_0x94[i];
+                field_0x84[i] = field_0xa4[i];
+            }
+
+            mpPaneMgr->scale(param_1, param_1);
+            field_0x14 = NULL;
+            field_0x18 = NULL;
+    } break;
+        case 1:
+            mpPaneMgr = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('n_all'), 2, NULL);
+            mpPaneMgr->hide();
+            mpPaneMgr->setAlpha(0);
+            mpPaneMgr->scale(param_1, param_1);
+            field_0x14 = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('sel_po00'), 0, NULL);
+            field_0x14->hide();
+            field_0x18 = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('n_all2'), 2, NULL);
+            break;
+        case 2:
+            mpPaneMgr = JKR_NEW CPaneMgr(mpScreen, 'Null', 2, NULL);
+            mpPaneMgr->hide();
+            mpPaneMgr->setAlpha(0);
+            mpPaneMgr->scale(param_1, param_1);
+            field_0x14 = NULL;
+            field_0x18 = NULL;
+            break;
+        case 3:
+            mpPaneMgr = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('batsu'), 2, NULL);
+            mpPaneMgr->hide();
+            mpPaneMgr->setAlpha(0);
+            mpPaneMgr->scale(param_1, param_1);
+            field_0x14 = NULL;
+            field_0x18 = NULL;
+            break;
+    }
+
+    mpSelectIcon = NULL;
+    OSInitFastCast();
+    if (strcmp(bpk_name[mNameIdx], "") != 0) {
+        field_0x30 = (J2DAnmColor*)J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource(bpk_name[mNameIdx], param_2));
+        field_0x30->searchUpdateMaterialID(mpScreen);
+    } else {
+        field_0x30 = NULL;
+    }
+
+    field_0x44 = 0.0f;
+    if (strcmp(btk_name[mNameIdx], "") != 0) {
+        field_0x34[0] = (J2DAnmTextureSRTKey*)J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource(btk_name[mNameIdx], param_2));
+        field_0x34[0]->searchUpdateMaterialID(mpScreen);
+    } else {
+        field_0x34[0] = NULL;
+    }
+
+    field_0x48[0] = 0.0f;
+    if (strcmp(btk2_name[mNameIdx], "") != 0) {
+        field_0x34[1] = (J2DAnmTextureSRTKey*)J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource(btk2_name[mNameIdx], param_2));
+        field_0x34[1]->searchUpdateMaterialID(mpScreen);
+    } else {
+        field_0x34[1] = NULL;
+    }
+
+    field_0x48[1] = 0.0f;
+    if (strcmp(bck_name[mNameIdx], "") != 0) {
+        field_0x2C = (J2DAnmTransformKey*)J2DAnmLoaderDataBase::load(JKRFileLoader::getGlbResource(bck_name[mNameIdx], param_2));
+    } else {
+        field_0x2C = NULL;
+    }
+
+    field_0x40 = 0.0f;
+    switch(mNameIdx) {
+        case 1:
+            field_0x50 = mpScreen->search(MULTI_CHAR('ssel_ico'))->getTranslateX();
+            field_0x54 = mpScreen->search(MULTI_CHAR('ssel_ico'))->getTranslateY();
+            break;
+        case 0:
+        case 2:
+        case 3:
+            field_0x50 = 0.0f;
+            field_0x54 = 0.0f;
+            break;
+    }
+
+    mPositionY = 0.0f;
+    mPositionX = 0.0f;
+}
+
+
+dSelect_cursor_c::~dSelect_cursor_c() {
+    IF_DUSK(dusk::interp::erase_owned_samples(this);)
+    JKR_DELETE(mpScreen);
+    mpScreen = NULL;
+    if (mpPaneMgr) {
+        JKR_DELETE(mpPaneMgr);
+        mpPaneMgr = NULL;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (field_0x1C[i]) {
+            JKR_DELETE(field_0x1C[i]);
+            field_0x1C[i] = NULL;
+        }
+    }
+    if (field_0x14) {
+        JKR_DELETE(field_0x14);
+        field_0x14 = NULL;
+    }
+    if (field_0x18) {
+        JKR_DELETE(field_0x18);
+        field_0x18 = NULL;
+    }
+    if (mpSelectIcon) {
+        JKR_DELETE(mpSelectIcon);
+        mpSelectIcon = NULL;
+    }
+    if (field_0x30) {
+        JKR_DELETE(field_0x30);
+        field_0x30 = NULL;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (field_0x34[i]) {
+            JKR_DELETE(field_0x34[i]);
+            field_0x34[i] = NULL;
+        }
+    }
+    if (field_0x2C) {
+        JKR_DELETE(field_0x2C);
+        field_0x2C = NULL;
+    }
+    if (mpCursorHIO) {
+        JKR_DELETE(mpCursorHIO);
+        mpCursorHIO = NULL;
+    }
+}
+
+void dSelect_cursor_c::draw() {
+#if TARGET_PC
+    const f32 alpha = mpPaneMgr->getAlphaRate();
+    const bool visible = mpPaneMgr->isVisible();
+    const f32 presentedAlpha = dusk::interp::get<CursorSamples>(this).alpha.read(0, alpha);
+    mpPaneMgr->setAlphaRate(presentedAlpha);
+    if (alpha == 0.0f && presentedAlpha > 0.0f) {
+        mpPaneMgr->show();
+    }
+#endif
+    mpPaneMgr->getAlphaRate();
+    update();
+    J2DGrafContext* gphCtx = dComIfGp_getCurrentGrafPort();
+    gphCtx->setup2D();
+    mpScreen->draw(0.0f, 0.0f, gphCtx);
+    if (mpSelectIcon) {
+        mpSelectIcon->drawSelf(); // inline here, but not sure how to properly define it
+    }
+#if TARGET_PC
+    mpPaneMgr->setAlphaRate(alpha);
+    if (!visible) {
+        mpPaneMgr->hide();
+    }
+#endif
+}
+
+void dSelect_cursor_c::update() {
+    f32 fVar1 = 1.0f;
+    if (field_0xb6 == 3) {
+        fVar1 = 0.5f;
+    }
+
+#if TARGET_PC
+    if (mpPane) {
+        Vec pos = mpPaneMgr->getGlobalVtxCenter(mpPane, false, 0);
+        mPositionX = pos.x;
+        mPositionY = pos.y;
+    }
+
+    auto& samples = dusk::interp::get<CursorSamples>(this);
+    cXyz position(mPositionX, mPositionY, 0.0f);
+    if (mpPane == nullptr) {
+        if (mInterpolatePosition) {
+            position = samples.positions.read(0, position);
+        }
+        if (mWorldCursor) {
+            cXyz world = samples.positions.read(1, mWorldPosition);
+            Vec projected;
+            mDoLib_project(&world, &projected);
+            position.x += projected.x;
+            position.y += projected.y;
+        }
+    }
+#endif
+
+    mpPaneMgr->translate(DUSK_IF_ELSE(position.x, mPositionX), DUSK_IF_ELSE(position.y, mPositionY));
+    if (mpCursorHIO->mDebugON) {
+        mParam1 = mpCursorHIO->mXAxisExpansion;
+        mParam2 = mpCursorHIO->mYAxisExpansion;
+        mParam3 = mpCursorHIO->mOscillation;
+        mParam4 = mpCursorHIO->mRatioX;
+        mParam5 = mpCursorHIO->mRatioY;
+    }
+
+    if (mUpdateFlag) {
+        if (field_0x30) {
+            if (chkPlayAnime(0)) {
+#if TARGET_PC
+                dusk::vdt::advance_looping_frame(
+                    field_0x44, mNameIdx == 1 ? mpCursorHIO->field_0x8 * fVar1 : fVar1,
+                    field_0x30->getFrameMax());
+#else
+                if (mNameIdx == 1) {
+                    field_0x44 += mpCursorHIO->field_0x8 * fVar1;
+                } else {
+                    field_0x44 += fVar1;
+                }
+
+                if (field_0x44 >= field_0x30->getFrameMax()) {
+                    field_0x44 -= field_0x30->getFrameMax();
+                }
+#endif
+
+                field_0x30->setFrame(field_0x44);
+                setBpkAnimation(field_0x30);
+            } else {
+                if (field_0x44 != 1.0f) {
+                    field_0x44 = 1.0f;
+                    field_0x30->setFrame(field_0x44);
+                    setBpkAnimation(field_0x30);
+                }
+            }
+        }
+
+        for (int i = 0; i < 2; i++) {
+            if (field_0x34[i]) {
+                if ((i == 0 && chkPlayAnime(2)) || (i == 1 && chkPlayAnime(3))) {
+#if TARGET_PC
+                    dusk::vdt::advance_looping_frame(
+                        field_0x48[i], mNameIdx == 1 ? mpCursorHIO->field_0x8 * fVar1 : fVar1,
+                        field_0x34[i]->getFrameMax());
+#else
+                    if (mNameIdx == 1) {
+                        field_0x48[i] += mpCursorHIO->field_0x8 * fVar1;
+                    } else {
+                        field_0x48[i] += fVar1;
+                    }
+                    if (field_0x48[i] >= field_0x34[i]->getFrameMax()) {
+                        field_0x48[i] -= field_0x34[i]->getFrameMax();
+                    }
+#endif
+
+                    field_0x34[i]->setFrame(field_0x48[i]);
+                }
+                setBtk0Animation(field_0x34[i]);
+            }
+        }
+
+        if (field_0x2C && chkPlayAnime(1)) {
+#if TARGET_PC
+            dusk::vdt::advance_looping_frame(
+                field_0x40, mNameIdx == 1 ? mpCursorHIO->field_0x8 * fVar1 : fVar1,
+                field_0x2C->getFrameMax());
+#else
+            if (mNameIdx == 1) {
+                field_0x40 += mpCursorHIO->field_0x8 * fVar1;
+            } else {
+                field_0x40 += fVar1;
+            }
+            if (field_0x40 >= field_0x2C->getFrameMax()) {
+                field_0x40 -= field_0x2C->getFrameMax();
+            }
+#endif
+
+            field_0x2C->setFrame(field_0x40);
+            setBckAnimation(field_0x2C);
+
+        }
+
+        if (chkPlayAnime(1) && mNameIdx == 0) {
+            setCursorAnimation();
+        }
+
+        mpScreen->animation();
+    }
+
+    if (mpSelectIcon && field_0x14) {
+        Vec res = field_0x14->getGlobalVtxCenter(field_0x14->mPane, false, 0);
+        mpSelectIcon->setPos(field_0x14->getPanePtr(), res.x, res.y);
+        mpSelectIcon->animation();
+        mpSelectIcon->setAlpha(field_0x14->getPanePtr()->getAlpha());
+    }
+
+    for (int i = 0; i < 4; i++) {
+        if (field_0x1C[i]) {
+            field_0x1C[i]->scale(mParam4, mParam5);
+        }
+    }
+}
+
+void dSelect_cursor_c::setPos(f32 i_posX, f32 i_posY, J2DPane* i_pane, bool i_scaleBounds) {
+    mpPane = i_pane;
+    setPos(i_posX,i_posY);
+
+    if (!i_pane) {
+        return;
+    }
+
+    f32 val1 = 1.0f;
+    f32 width = (i_pane->getWidth()) * val1 * 0.5f;
+    f32 height = i_pane->getHeight() * 0.5f;
+
+    if (i_scaleBounds) {
+        width *= i_pane->getScaleX();
+        height *= i_pane->getScaleY();
+    }
+
+    f32 tmp7 = -1.0f;
+
+    for (int i = 0; i < 4; i++) {
+        
+        field_0x94[i] = width;
+        field_0xa4[i] = height;
+
+        if (i < 2) {
+            field_0x94[i] *= tmp7;
+        }
+
+        if (i % 2 == 0) {
+            field_0xa4[i] *= tmp7;
+        }
+    }
+
+}
+
+void dSelect_cursor_c::setParam(f32 i_param1, f32 i_param2, f32 i_param3, f32 i_param4,
+                                    f32 i_param5) {
+    mParam1 = i_param1;
+#ifdef TARGET_PC
+    mBaseParam1 = i_param1;
+#endif
+    mParam2 = i_param2;
+    mParam3 = i_param3;
+    mParam4 = i_param4;
+    mParam5 = i_param5;
+}
+
+void dSelect_cursor_c::setScale(f32 i_scale) {
+    J2DPane* pane = mpPaneMgr->getPanePtr();
+    pane->scale(i_scale,i_scale);
+
+    switch (mNameIdx) {
+    case 1:
+        field_0x50 = mpScreen->search(MULTI_CHAR('ssel_ico'))->getTranslateX();
+        field_0x54 = mpScreen->search(MULTI_CHAR('ssel_ico'))->getTranslateY();
+        break;
+    case 0:
+    case 2:
+    case 3:
+        field_0x50 = 0.0f;
+        field_0x54 = 0.0f;
+        break;
+    }
+}
+
+void dSelect_cursor_c::setAlphaRate(f32 i_alphaRate) {
+    if (i_alphaRate > 0.0f) {
+        if (mpPaneMgr->isVisible() == 0) {
+            mpPaneMgr->show();
+        }
+    } else {
+        i_alphaRate = 0.0f;
+        if (mpPaneMgr->isVisible() == 1) {
+            mpPaneMgr->hide();
+        }
+    }
+
+    mpPaneMgr->setAlphaRate(i_alphaRate);
+    IF_DUSK(dusk::interp::get<CursorSamples>(this).alpha.capture(&i_alphaRate, 1));
+}
+
+int dSelect_cursor_c::addAlpha() {
+    s16 alpha_timer = mpPaneMgr->getAlphaTimer();
+
+    if (mpPaneMgr->isVisible() == 0) {
+        mpPaneMgr->show();
+    }
+
+    if (alpha_timer >= 5) {
+        return 1;
+    } else {
+        alpha_timer++;
+        mpPaneMgr->alphaAnimeStart(alpha_timer);
+        DUSK_IF_ELSE(setAlphaRate, mpPaneMgr->setAlphaRate)(alpha_timer/5.0f);
+    }
+
+    return 0;
+}
+
+int dSelect_cursor_c::decAlpha() {
+    s16 alpha_timer = mpPaneMgr->getAlphaTimer();
+
+    if (alpha_timer <= 0) {
+        if (mpPaneMgr->isVisible() == 1) {
+            mpPaneMgr->hide();
+        }
+        return 1;
+    } else {
+        alpha_timer--;
+        mpPaneMgr->alphaAnimeStart(alpha_timer);
+        DUSK_IF_ELSE(setAlphaRate, mpPaneMgr->setAlphaRate)(alpha_timer/5.0f);
+    }
+
+    return 0;
+}
+
+void dSelect_cursor_c::setBpkAnimation(J2DAnmColor* param_0) {
+    switch (mNameIdx) {
+    case 0: {
+        static u64 const tag_4181[4] = {'l_ld', 'l_lu', 'l_rd', 'l_ru'};
+        for (int i = 0; i < 4; i++) {
+            mpScreen->search(tag_4181[i])->setAnimation(param_0);
+        }
+        break;
+    }
+    case 2:
+        mpScreen->search(MULTI_CHAR('light'))->setAnimation(param_0);
+        mpScreen->search(MULTI_CHAR('back_l'))->setAnimation(param_0);
+        break;
+    case 3:
+        mpScreen->search(MULTI_CHAR('batsu'))->setAnimation(param_0);
+        break;
+    default:
+        mpScreen->search(MULTI_CHAR('light00'))->setAnimation(param_0);
+        break;
+    }
+}
+
+void dSelect_cursor_c::setBtk0Animation(J2DAnmTextureSRTKey* param_0) {
+    switch (mNameIdx) {
+    case 0: {
+        static u64 const tag_4197[8] = {
+            MULTI_CHAR('i_c_ld1'), MULTI_CHAR('i_c_ld2'), MULTI_CHAR('i_c_lu1'), MULTI_CHAR('i_c_lu2'), MULTI_CHAR('i_c_rd1'), MULTI_CHAR('i_c_rd2'), MULTI_CHAR('i_c_ru1'), MULTI_CHAR('i_c_ru2'), 
+        };
+        for (int i = 0; i < 8; i++) {
+            mpScreen->search(tag_4197[i])->setAnimation(param_0);
+        }
+        break;
+    }
+    case 1: {
+        static u64 const tag_4204[2] = {MULTI_CHAR('gold01'), MULTI_CHAR('gold02')};
+        for (int i = 0; i < 2; i++) {
+            mpScreen->search(tag_4204[i])->setAnimation(param_0);
+        }
+        break;
+    }
+    default:
+        mpScreen->search(MULTI_CHAR('gold01'))->setAnimation(param_0);
+        break;
+    }
+}
+
+void dSelect_cursor_c::setCursorAnimation() {
+    f32 fVar1 = 1.0f;
+    if (field_0xb6 == 3) {
+        fVar1 = 0.5f;
+    }
+
+#if TARGET_PC
+    dusk::vdt::advance_looping_frame(field_0x40, fVar1, 20.0f);
+#else
+    field_0x40 += fVar1;
+    if (field_0x40 >= 20.0f) {
+        field_0x40 -= 20.0f;
+    }
+#endif
+    f32 fVar2;
+    f32 param3 = mParam3;
+    fVar2 = field_0x40;
+    if (fVar2 < 10.0f) {
+        fVar2 /= 10.0f;
+    } else {
+        fVar2 = (20.0f - fVar2) / 10.0f;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        field_0x74[i] = mParam1 * (field_0x94[i] * ((1.0f - param3) + fVar2 * param3));
+        field_0x84[i] = mParam2 * (field_0xa4[i] * ((1.0f - param3) + fVar2 * param3));
+    }
+
+    moveCenter(mpScreen->search(MULTI_CHAR('l_u_null')), field_0x74[0], field_0x84[0]);
+    moveCenter(mpScreen->search(MULTI_CHAR('l_d_null')), field_0x74[1], field_0x84[1]);
+    moveCenter(mpScreen->search(MULTI_CHAR('r_u_null')), field_0x74[2], field_0x84[2]);
+    moveCenter(mpScreen->search(MULTI_CHAR('r_d_null')), field_0x74[3], field_0x84[3]);
+}
+
+
+void dSelect_cursor_c::setBckAnimation(J2DAnmTransformKey* param_0) {
+    mpScreen->search(MULTI_CHAR('ssel_ico'))->setAnimation((J2DAnmTransform*)param_0);
+}
+
+void dSelect_cursor_c::moveCenter(J2DPane* i_pane, f32 i_x, f32 i_y) {
+    i_pane->translate(i_x,i_y);
+}
+
+#if TARGET_PC
+void dSelect_cursor_c::setInterp(bool enabled) {
+    if (mInterpolatePosition != enabled) {
+        mInterpolatePosition = enabled;
+        dusk::interp::get<CursorSamples>(this).positions.reset();
+    }
+}
+
+void dSelect_cursor_c::setPos(f32 x, f32 y, const cXyz* world) {
+    auto& positions = dusk::interp::get<CursorSamples>(this).positions;
+    if (mWorldCursor != (world != nullptr)) {
+        positions.reset();
+    }
+    mWorldCursor = world != nullptr;
+    mPositionX = x;
+    mPositionY = y;
+    if (world) {
+        mpPane = nullptr;
+        mWorldPosition = *world;
+    }
+    if (mInterpolatePosition) {
+        const cXyz values[] = {cXyz(x, y, 0.0f), mWorldPosition};
+        positions.capture(values, mWorldCursor ? 2 : 1);
+    }
+}
+
+void dSelect_cursor_c::refreshAspectScale(f32 param_0) {
+    mParam1 = mBaseParam1 * param_0;
+}
+#endif

@@ -1,0 +1,72 @@
+diff --git a/generator/utility/latin1.hpp b/generator/utility/latin1.hpp
+new file mode 100644
+index 0000000..7192b26
+--- /dev/null
++++ b/generator/utility/latin1.hpp
+@@ -0,0 +1,17 @@
++#pragma once
++
++namespace randomizer::utility::latin1 {
++
++// The generator stores western translations as single-byte Latin-1/CP1252 text.
++// Keep capitalization deterministic and independent of the host's installed locales.
++constexpr unsigned char uppercase(unsigned char c) {
++    if (c >= static_cast<unsigned char>('a') && c <= static_cast<unsigned char>('z')) {
++        return static_cast<unsigned char>(c - ('a' - 'A'));
++    }
++    if ((c >= 0xE0 && c <= 0xF6) || (c >= 0xF8 && c <= 0xFE)) {
++        return static_cast<unsigned char>(c - 0x20);
++    }
++    return c;
++}
++
++}  // namespace randomizer::utility::latin1
+diff --git a/generator/utility/text.cpp b/generator/utility/text.cpp
+index 47ab14b..9600b16 100644
+--- a/generator/utility/text.cpp
++++ b/generator/utility/text.cpp
+@@ -1,5 +1,6 @@
+ #include "text.hpp"
+ 
++#include "latin1.hpp"
+ #include "shiftjis_table.hpp"
+ #include "string.hpp"
+ #include "yaml.hpp"
+@@ -75,31 +76,12 @@ const auto kSilverMessageCode = text_color_code(0xBFBFBFFF);
+     }
+ 
+     void Text::Capitalize() {
+-        try {
+-            // Determine the platform-specific locale string
+-#if defined(_WIN32) || defined(_WIN64)
+-            const char* localeName = "English_United States.1252";
+-#else
+-            const char* localeName = "en_US.iso88591";
+-#endif
+-
+-            static const std::locale latin1Locale(localeName);
+-
+-            for (size_t lang = 0; lang < mEntries.size(); ++lang) {
+-                auto& entry = mEntries[lang];
+-                if (!entry.str.empty() && lang != JAPANESE) {
+-                    auto firstCharIndex = findFirstNonMessageCodeIndex(entry.str);
+-                    entry.str[firstCharIndex] = std::toupper(entry.str[firstCharIndex], latin1Locale);
+-                }
+-            }
+-        } catch (const std::runtime_error&) {
+-            // Fallback incase the system completely lacks the requested locale definition
+-            for (size_t lang = 0; lang < mEntries.size(); ++lang) {
+-                auto& entry = mEntries[lang];
+-                if (!entry.str.empty() && lang != JAPANESE) {
+-                    auto firstCharIndex = findFirstNonMessageCodeIndex(entry.str);
+-                    entry.str[firstCharIndex] = static_cast<char>(std::toupper(static_cast<unsigned char>(entry.str[firstCharIndex])));
+-                }
++        for (size_t lang = 0; lang < mEntries.size(); ++lang) {
++            auto& entry = mEntries[lang];
++            if (!entry.str.empty() && lang != JAPANESE) {
++                const auto firstCharIndex = findFirstNonMessageCodeIndex(entry.str);
++                entry.str[firstCharIndex] = static_cast<char>(
++                    utility::latin1::uppercase(static_cast<unsigned char>(entry.str[firstCharIndex])));
+             }
+         }
+     }

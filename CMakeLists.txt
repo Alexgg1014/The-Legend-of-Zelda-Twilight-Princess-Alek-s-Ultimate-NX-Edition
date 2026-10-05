@@ -1,0 +1,924 @@
+cmake_minimum_required(VERSION 3.25)
+
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
+            "Build type options: Debug Release RelWithDebInfo MinSizeRel" FORCE)
+endif ()
+
+include(extern/borealis/cmake/DetectVersion.cmake)
+borealis_detect_version()
+if (DUSK_PLATFORM_SWITCH)
+    # H38-c4: no UNKNOWN-VERSION / 0.0.0.0 on the Switch (cmake/DuskAppVersion.cmake).
+    include(cmake/DuskAppVersion.cmake)
+    dusk_resolve_app_version()
+endif ()
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+project(dusklight LANGUAGES C CXX VERSION ${BOREALIS_APP_VERSION})
+
+if (DUSK_PLATFORM_SWITCH)
+    include(cmake/SwitchOptions.cmake)
+endif ()
+
+if (APPLE)
+    enable_language(OBJC OBJCXX)
+endif ()
+# Adjust CMAKE_SYSTEM_PROCESSOR on Windows to match compiler target
+include(cmake/WindowsTargetProcessor.cmake)
+if (APPLE AND NOT TVOS AND CMAKE_SYSTEM_NAME STREQUAL tvOS)
+    # ios.toolchain.cmake hack for SDL
+    set(TVOS ON)
+    set(IOS OFF)
+endif ()
+
+if(APPLE AND NOT CMAKE_OSX_SYSROOT)
+    # If the Xcode SDK is lagging behind system version, CMake needs this done first
+    execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
+            OUTPUT_VARIABLE CMAKE_OSX_SYSROOT
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+endif()
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+set(CMAKE_COLOR_DIAGNOSTICS ON)
+
+# Folder-based instead of target-based organization
+# in Visual Studio and Xcode generators
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "_cmake")
+
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+if (ENABLE_ASAN)
+    if (CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND
+            CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/fsanitize=address>)
+        add_link_options(/fsanitize=address /INCREMENTAL:NO)
+        set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "ProgramDatabase")
+        foreach (_lang C CXX)
+            foreach (_rtc_flag /RTC1 /RTCc /RTCs /RTCu)
+                string(REPLACE "${_rtc_flag}" "" CMAKE_${_lang}_FLAGS_DEBUG "${CMAKE_${_lang}_FLAGS_DEBUG}")
+            endforeach ()
+        endforeach ()
+    elseif (CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "GNU" AND
+            CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+        add_compile_options(
+                $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-fsanitize=address>
+                $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-fno-omit-frame-pointer>
+        )
+        add_link_options(-fsanitize=address)
+    else ()
+        message(FATAL_ERROR "ENABLE_ASAN requires GNU-like or MSVC-like C/C++ compiler frontends")
+    endif ()
+
+    add_compile_definitions(NDEBUG_SANITIZER) # Avoids absl issue with SwissTable debug code
+    message(STATUS "dusklight: Enabled AddressSanitizer")
+endif ()
+
+if (CMAKE_SYSTEM_NAME STREQUAL Linux)
+  set(DAWN_USE_WAYLAND ON CACHE BOOL "Enable support for Wayland surface" FORCE)
+endif ()
+if (NOT DUSK_PLATFORM_SWITCH)
+  set(AURORA_ENABLE_DVD ON CACHE BOOL "Enable DVD API support" FORCE)
+endif ()
+set(AURORA_ENABLE_CARD ON CACHE BOOL "Enable CARD API support" FORCE)
+set(AURORA_ENABLE_THP ON CACHE BOOL "Enable THP decoder" FORCE)
+if (NOT DUSK_PLATFORM_SWITCH)
+  set(AURORA_ENABLE_RMLUI ON CACHE BOOL "Enable RmlUi UI support" FORCE)
+endif ()
+option(DUSK_ENABLE_PROFILER "Enable the built-in frame profiler (overlay zones)" ON)
+if (DUSK_ENABLE_PROFILER)
+    add_compile_definitions(DUSK_PROFILER_ENABLED=1)
+else ()
+    add_compile_definitions(DUSK_PROFILER_ENABLED=0)
+endif ()
+add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
+target_compile_definitions(aurora_mtx PRIVATE MTX_USE_PS=1)
+
+# aleks2: networking on Switch. The port shipped a stub that answers "no HTTP
+# backend on Switch" to everything, so the online mod browser, mod updates and
+# the guide downloader had nothing to talk to. devkitPro's own libcurl (built
+# against mbedtls) is a portlib, and borealis already has a curl backend, so
+# the stub can go. Sockets still have to be brought up by hand -- libnx does not
+# do it by default -- which src/dusk/switch_net.cpp handles.
+# borealis cannot build the target itself: its http needs borealis::io, which on
+# Switch is one of the replacements defined in platforms/switch -- after this
+# point. So platforms/switch/cmake/CurlHttp.cmake builds it from borealis' own
+# sources instead.
+option(ALEKS2_SWITCH_HTTP "Use devkitPro's libcurl for HTTP on Switch" ON)
+
+# aleks2: keep the symbols a loaded native mod binds against (see
+# platforms/switch/cmake/ModAbiExports.cmake). Costs binary size, not frames.
+option(ALEKS2_MOD_ABI "Keep the ABI surface native mods need on Switch" ON)
+
+add_subdirectory(extern/borealis EXCLUDE_FROM_ALL)
+
+add_subdirectory(libs/freeverb)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(DUSK_GFX_DEBUG_GROUPS_DEFAULT ON)
+else ()
+    set(DUSK_GFX_DEBUG_GROUPS_DEFAULT OFF)
+endif ()
+
+option(DUSK_BUILD_WARNINGS "Enable compiler warnings (off by default)")
+option(DUSK_SELECTED_OPT "If on, selected parts of the project will be compiled with optimizations on Debug, intending to make the game run at 30 FPS. Note for MSVC: you will need to remove '/RTC1' from your debug flags in CMake.")
+option(DUSK_PACKAGE_INSTALL "Install Dusklight with a Linux-native file structure" OFF)
+option(DUSK_GFX_DEBUG_GROUPS "Report debug groups to the native graphics API" ${DUSK_GFX_DEBUG_GROUPS_DEFAULT})
+option(DUSK_ENABLE_CODE_MODS "Enable code mods" ON)
+option(DUSK_ENABLE_OPUS "Enable loading Opus audio files for mods" OFF)
+
+# aleks2: mods to compile into the Switch NRO, by directory name under mods/.
+# Horizon has no dlopen, so code mods cannot be loaded from a bundle; see
+# platforms/switch/cmake/StaticMods.cmake. Deliberately separate from
+# DUSK_ENABLE_CODE_MODS, which also turns on funchook, the symbol manifest and
+# the hook-friendly codegen options -- none of which apply without a dynamic
+# loader, and the codegen ones cost frames on Tegra.
+set(ALEKS2_STATIC_MODS "" CACHE STRING "Mods compiled into the Switch NRO (directory names under mods/)")
+# aleks2 (H37): native mods loaded from the card at run time on Switch, by the ELF loader in
+# src/dusk/mods/loader/elf_loader.cpp (docs/switch-h37-dynamic-loader.md). Its Loader Mode
+# (Off / Dry Run / Execute) is a setting, so one NRO tests any package.
+option(ALEKS2_NATIVE_MOD_LOADER "Load native mods from the card at run time on Switch" OFF)
+# Either way, the Switch build then has code mods: hooks, the mod services, hook-friendly codegen.
+set(ALEKS2_SWITCH_CODE_MODS OFF)
+if (DUSK_PLATFORM_SWITCH AND (ALEKS2_STATIC_MODS OR ALEKS2_NATIVE_MOD_LOADER))
+    set(ALEKS2_SWITCH_CODE_MODS ON)
+endif ()
+
+
+set(DUSK_HAS_FUNCHOOK OFF)
+if (DUSK_ENABLE_CODE_MODS AND (NOT APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
+    set(DUSK_HAS_FUNCHOOK ON)
+endif ()
+# aleks2: hooks on Switch. Deliberately keyed off ALEKS2_STATIC_MODS rather
+# than DUSK_ENABLE_CODE_MODS, which also turns on the dynamic loader and the
+# symbol manifest -- neither of which exists here. The console has to permit
+# three privileged syscalls for this to do anything at run time; it says so in
+# the log at startup, and refuses cleanly when it does not.
+if (ALEKS2_SWITCH_CODE_MODS)
+    set(DUSK_HAS_FUNCHOOK ON)
+    set(FUNCHOOK_CPU arm64 CACHE STRING "" FORCE)
+endif ()
+set(DUSK_HAS_FUNCHOOK ${DUSK_HAS_FUNCHOOK} CACHE INTERNAL "Enable funchook" FORCE)
+
+set(_target_architectures ${CMAKE_OSX_ARCHITECTURES})
+if (NOT _target_architectures)
+    set(_target_architectures ${CMAKE_SYSTEM_PROCESSOR})
+endif ()
+list(LENGTH _target_architectures _target_arch_count)
+set(DUSK_HAS_PREPATCH OFF)
+if (DUSK_ENABLE_CODE_MODS AND APPLE AND _target_arch_count EQUAL 1)
+    list(GET _target_architectures 0 _target_arch)
+    if (_target_arch STREQUAL "arm64")
+        set(DUSK_HAS_PREPATCH ON)
+    endif ()
+endif ()
+set(DUSK_HAS_PREPATCH ${DUSK_HAS_PREPATCH} CACHE INTERNAL "Enable symgen prepatch support" FORCE)
+
+if (DUSK_ENABLE_CODE_MODS AND CMAKE_SYSTEM_NAME MATCHES "^(iOS|tvOS)$")
+    list(LENGTH CMAKE_OSX_ARCHITECTURES _mobile_arch_count)
+    if (NOT _mobile_arch_count EQUAL 1 OR NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        message(FATAL_ERROR
+                "iOS/tvOS code mods require a single arm64 architecture; got "
+                "CMAKE_OSX_ARCHITECTURES='${CMAKE_OSX_ARCHITECTURES}'")
+    endif ()
+endif ()
+
+# Edit & Continue
+if (MSVC)
+    if ("${CMAKE_MSVC_DEBUG_INFORMATION_FORMAT}" STREQUAL "" AND CMAKE_BUILD_TYPE STREQUAL "Debug"
+            AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "EditAndContinue")
+    endif ()
+    if (CMAKE_MSVC_DEBUG_INFORMATION_FORMAT STREQUAL "EditAndContinue")
+        add_link_options("/INCREMENTAL")
+    endif ()
+endif ()
+
+if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+    # -Wno-multichar: Multi-character constants ('ABCD') are implementation-defined but all compilers
+    #   (CW, GCC, Clang, MSVC) encode them identically in big-endian order.
+    #   For >4-char literals (which GCC/Clang truncate to int), use the MULTI_CHAR() macro.
+    # -Wdeprecated-declarations: JSystem uses std::iterator, deprecated in C++17
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-multichar>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-trigraphs>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>
+    )
+elseif (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    add_compile_options(
+            $<$<COMPILE_LANGUAGE:C,CXX>:/bigobj>
+            $<$<COMPILE_LANGUAGE:C,CXX>:/MP>
+            $<$<COMPILE_LANGUAGE:C,CXX>:/FS>
+            /Zc:__cplusplus # Enable updated `__cplusplus` macro
+    )
+
+    if (NOT DUSK_BUILD_WARNINGS)
+        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/W0>)
+    else ()
+        # Disable warnings
+        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/wd4068>) # unknown pragma
+        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/wd4291>) # no matching delete operator, leaks if exception thrown
+        # Only show warnings once
+        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/wo4244>) # narrowing conversion, possible data loss
+    endif ()
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/utf-8>)
+endif ()
+
+if (CMAKE_SYSTEM_NAME STREQUAL Linux)
+    set(CMAKE_INSTALL_RPATH "$ORIGIN")
+    set(CMAKE_BUILD_RPATH "$ORIGIN")
+elseif (APPLE)
+    add_compile_options(-Wno-declaration-after-statement -Wno-non-pod-varargs)
+    set(CMAKE_INSTALL_RPATH "@loader_path")
+    set(CMAKE_BUILD_RPATH "@loader_path")
+endif ()
+
+include(FetchContent)
+
+# Declare all dependencies first so CMake can download them in parallel
+message(STATUS "dusklight: Fetching miniz")
+FetchContent_Declare(miniz
+    URL https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    EXCLUDE_FROM_ALL
+)
+message(STATUS "dusklight: Fetching PicoSHA2")
+FetchContent_Declare(picosha2
+    URL https://github.com/okdshin/PicoSHA2/archive/refs/tags/v1.0.1.tar.gz
+    URL_HASH SHA256=9983136544234e573fe07cc1a22fdf978ad7979043e7be2e9082f6d4991ff8a8
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    EXCLUDE_FROM_ALL
+)
+
+set(_fetch_content_deps miniz picosha2)
+
+if (DUSK_ENABLE_OPUS)
+    message(STATUS "dusklight: Fetching opusfile")
+
+    # Opusfile options
+    SET(OP_DISABLE_HTTP ON CACHE BOOL "" FORCE)
+    SET(OP_DISABLE_DOCS ON CACHE BOOL "" FORCE)
+    SET(OP_DISABLE_EXAMPLES ON CACHE BOOL "" FORCE)
+
+    message(STATUS "dusklight: Fetching opusfile")
+    FetchContent_Declare(
+        opusfile
+        GIT_REPOSITORY https://github.com/xiph/opusfile.git
+        GIT_TAG        6dfd29e7adb87f2e193575fc3fa88cbf1a0b27df
+    )
+
+    list(APPEND _fetch_content_deps opusfile)
+endif ()
+
+if (DUSK_HAS_FUNCHOOK)
+    message(STATUS "dusklight: Fetching funchook")
+    # cmake/PatchFunchook.cmake patches funchook's cmake/capstone.cmake.in to inject a
+    # PATCH_COMMAND into capstone's inner ExternalProject. That PATCH_COMMAND runs
+    # cmake/PatchCapstone.cmake after capstone is cloned, which removes the
+    # cmake_policy(SET CMP0048 OLD) line that CMake >= 3.27 rejects.
+    # This is incredibly scuffed and we should probably think of a better way to do this
+    set(CAPSTONE_FIX_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchCapstone.cmake")
+    FetchContent_Declare(funchook
+        GIT_REPOSITORY https://github.com/kubo/funchook.git
+        GIT_TAG v1.1.3
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS TRUE
+        PATCH_COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=<SOURCE_DIR> -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchFunchook.cmake
+        EXCLUDE_FROM_ALL
+    )
+    set(FUNCHOOK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(FUNCHOOK_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(FUNCHOOK_INSTALL OFF CACHE BOOL "" FORCE)
+    if (APPLE AND CMAKE_OSX_ARCHITECTURES)
+        list(LENGTH CMAKE_OSX_ARCHITECTURES _osx_arch_count)
+        if (_osx_arch_count EQUAL 1)
+            list(GET CMAKE_OSX_ARCHITECTURES 0 _osx_arch)
+            if (_osx_arch MATCHES "^(arm64|aarch64|ARM64)$")
+                set(FUNCHOOK_CPU arm64 CACHE STRING "" FORCE)
+            elseif (_osx_arch MATCHES "^(x86_64|AMD64|amd64|i[3-6]86|x86)$")
+                set(FUNCHOOK_CPU x86 CACHE STRING "" FORCE)
+            endif ()
+        endif ()
+    endif ()
+    list(APPEND _fetch_content_deps funchook)
+endif ()
+FetchContent_MakeAvailable(${_fetch_content_deps})
+
+if (DUSK_HAS_FUNCHOOK AND APPLE)
+    target_sources(funchook-static PRIVATE src/dusk/mods/loader/code_patch_macos.cpp)
+    target_include_directories(funchook-static PRIVATE src/dusk/mods/loader)
+    set_source_files_properties(src/dusk/mods/loader/code_patch_macos.cpp
+            TARGET_DIRECTORY funchook-static PROPERTIES
+            COMPILE_OPTIONS "-O2;-fno-sanitize=all;-fno-stack-protector")
+endif ()
+
+# Use signed char on ARM to match the original game (and x86)
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _arch)
+if(_arch MATCHES "^(arm|aarch64)" AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+    add_compile_options(-fsigned-char)
+endif()
+
+include(files.cmake)
+
+if (DUSK_PLATFORM_SWITCH)
+    set_source_files_properties(${DOLZEL_FILES}
+        PROPERTIES COMPILE_OPTIONS "-Ofast;-fno-finite-math-only;-fno-aggressive-loop-optimizations;-Wno-invalid-pch")
+    set(CMAKE_PCH_WARN_INVALID OFF)
+endif ()
+
+
+# TODO: version handling for res includes
+
+set(DUSK_BUNDLE_NAME Dusklight)
+set(DUSK_BUNDLE_IDENTIFIER dev.twilitrealm.dusk)
+set(DUSK_COMPANY_NAME "Twilit Realm")
+set(DUSK_FILE_DESCRIPTION "Dusklight")
+set(DUSK_PRODUCT_NAME "Dusklight")
+set(DUSK_COPYRIGHT "Copyright (C) Twilit Realm contributors")
+
+source_group("dolzel" FILES ${DOLZEL_FILES} ${Z2AUDIOLIB_FILES} ${REL_FILES})
+source_group("dusklight" FILES ${DUSK_FILES})
+
+include(cmake/GameABIConfig.cmake)
+
+find_package(Threads REQUIRED)
+set(GAME_COMPILE_DEFS DUSK_BUILDING_GAME=1)
+set(GAME_LIBS aurora::core aurora::gx aurora::gd aurora::si aurora::vi aurora::pad aurora::mtx aurora::os aurora::dvd aurora::thp
+    aurora::card borealis::http borealis::cli borealis::crash borealis::data borealis::disc borealis::discord borealis::file_select borealis::io borealis::log borealis::net borealis::presentation borealis::sentry borealis::update borealis::ws freeverb cxxopts::cxxopts absl::flat_hash_map nlohmann_json::nlohmann_json TracyClient fmt::fmt
+    Threads::Threads zstd::libzstd dusklight_game_headers picosha2 PNG::PNG)
+if (DUSK_PLATFORM_SWITCH)
+    # Native libnx replacements ship as same-named targets in platforms/switch.
+    list(REMOVE_ITEM GAME_LIBS borealis::crash borealis::net borealis::presentation borealis::disc)
+    list(APPEND GAME_COMPILE_DEFS DUSK_ASSET_DIR="romfs:/")
+endif ()
+if (DUSK_HAS_FUNCHOOK)
+    list(APPEND GAME_LIBS funchook-static)
+endif ()
+if (DUSK_ENABLE_OPUS)
+    list(APPEND GAME_LIBS OpusFile::opusfile)
+    list(APPEND GAME_COMPILE_DEFS DUSK_OPUS=1)
+endif ()
+
+if (WIN32)
+    list(APPEND GAME_LIBS Ws2_32)
+endif ()
+
+if (DUSK_ENABLE_CODE_MODS OR ALEKS2_STATIC_MODS OR ALEKS2_SWITCH_CODE_MODS)
+    # aleks2: ALEKS2_STATIC_MODS (or the H37 native loader) is enough to make
+    # mods::EnableCodeMods true.
+    list(APPEND GAME_COMPILE_DEFS DUSK_CODE_MODS=1)
+endif ()
+if (ALEKS2_NATIVE_MOD_LOADER AND DUSK_PLATFORM_SWITCH)
+    list(APPEND GAME_COMPILE_DEFS ALEKS2_NATIVE_MOD_LOADER=1)
+endif ()
+list(APPEND GAME_COMPILE_DEFS
+        DUSK_HAS_FUNCHOOK=$<BOOL:${DUSK_HAS_FUNCHOOK}>
+        DUSK_HAS_PREPATCH=$<BOOL:${DUSK_HAS_PREPATCH}>)
+
+if (DUSK_PACKAGE_INSTALL)
+    include(GNUInstallDirs)
+    list(APPEND GAME_COMPILE_DEFS DUSK_ASSET_DIR="${CMAKE_INSTALL_FULL_DATADIR}/dusklight/")
+endif ()
+
+if (DUSK_GFX_DEBUG_GROUPS)
+    list(APPEND GAME_COMPILE_DEFS DUSK_GFX_DEBUG_GROUPS=1)
+    target_compile_definitions(aurora_gx PRIVATE AURORA_GFX_DEBUG_GROUPS)
+endif ()
+
+# game_debug is for game code files that we know work when compiled with DEBUG=1
+# Of course, if building a release build, this distinction is irrelevant
+set(GAME_DEBUG_FILES
+        ${SSYSTEM_FILES}
+        src/dusk/audio/DuskAudioSystem.cpp
+        src/dusk/audio/JASCriticalSection.cpp
+        src/dusk/audio/DuskDsp.cpp
+        src/dusk/audio/Adpcm.cpp
+        src/dusk/audio/DspStub.cpp
+        src/dusk/imgui/ImGuiAudio.cpp
+)
+set_source_files_properties(
+        ${GAME_DEBUG_FILES}
+        PROPERTIES
+        COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:DEBUG=1>"
+)
+
+# game_base is for all other game code files
+set(GAME_BASE_FILES
+        ${DOLZEL_FILES}
+        ${Z2AUDIOLIB_FILES}
+        ${REL_FILES}
+        ${DUSK_FILES}
+        ${DOLPHIN_FILES}
+)
+set_source_files_properties(
+        ${GAME_BASE_FILES}
+        PROPERTIES
+        COMPILE_DEFINITIONS "NDEBUG=1;NDEBUG_DEFINED=1;DEBUG_DEFINED=0"
+)
+
+foreach(jsystem_lib IN LISTS JSYSTEM_LIBRARIES)
+    target_compile_definitions(${jsystem_lib} PRIVATE ${GAME_COMPILE_DEFS} $<$<CONFIG:Debug>:DEBUG=1>)
+    target_link_libraries(${jsystem_lib} PRIVATE ${GAME_LIBS})
+    set_target_properties(${jsystem_lib} PROPERTIES FOLDER "JSystem")
+endforeach()
+
+set(JSYSTEM_LINK_LIBRARIES ${JSYSTEM_LIBRARIES})
+if (DUSK_PLATFORM_SWITCH)
+    # GNU ld resolves static archives in a single left-to-right pass. The split
+    # JSystem libraries reference each other, so wrap them in an explicit group.
+    # (Spelled out instead of $<LINK_GROUP:RESCAN>: the bare-metal toolchain
+    # has no LINK_GROUP feature definition for CMake to expand.)
+    set(JSYSTEM_LINK_LIBRARIES "-Wl,--start-group" ${JSYSTEM_LIBRARIES} "-Wl,--end-group")
+elseif (CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED OR CMAKE_LINK_GROUP_USING_RESCAN_SUPPORTED)
+    # GNU ld resolves static archives in a single left-to-right pass. The split
+    # JSystem libraries reference each other, so they need a RESCAN group there.
+    set(JSYSTEM_LINK_LIBRARIES "$<LINK_GROUP:RESCAN,${JSYSTEM_LIBRARIES}>")
+endif ()
+
+set(_dusklight_all_files src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES})
+set(DUSK_INTERNAL_FILES ${_dusklight_all_files})
+list(FILTER DUSK_INTERNAL_FILES INCLUDE REGEX "^src/dusk/")
+if (DUSK_PLATFORM_SWITCH)
+    # aleks2: NativeModule is dlopen; src/dusk/switch_native_module.cpp provides
+    # it over the built-in mod table instead, which keeps upstream's file
+    # byte-identical rather than carrying a Switch branch inside it.
+    list(REMOVE_ITEM DUSK_INTERNAL_FILES src/dusk/mods/loader/native_module.cpp)
+    list(APPEND DUSK_INTERNAL_FILES src/dusk/switch_native_module.cpp)
+    if (ALEKS2_NATIVE_MOD_LOADER)
+        # aleks2 (H37): the ELF loader and its Horizon backend. The first four are
+        # platform-neutral and host-tested (platforms/switch/tools/test-elf-loader.sh);
+        # elf_image_runtime.c is the table of the image's own hidden libgcc/libm functions.
+        set(_aleks2_loader_files
+                src/dusk/mods/loader/elf_loader.cpp
+                src/dusk/mods/loader/elf_runtime_policy.cpp
+                src/dusk/mods/loader/elf_image_runtime.c
+                src/dusk/mods/loader/image_symbols.cpp
+                src/dusk/mods/loader/mod_services.cpp)
+        list(APPEND DUSK_INTERNAL_FILES ${_aleks2_loader_files}
+                src/dusk/switch_elf_memory.cpp src/dusk/switch_native_loader.cpp)
+        if (NOT ALEKS2_STATIC_MODS)
+            list(APPEND DUSK_INTERNAL_FILES src/dusk/switch_builtin_none.cpp)
+        endif ()
+        # Plain C++, no game headers: the game's forced-include PCH is not wanted there.
+        set_source_files_properties(${_aleks2_loader_files} src/dusk/switch_elf_memory.cpp
+                PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+    endif ()
+endif ()
+set(GAME_FILES ${_dusklight_all_files})
+list(FILTER GAME_FILES EXCLUDE REGEX "^src/dusk/")
+
+add_library(dusk_internal OBJECT ${DUSK_INTERNAL_FILES})
+if (ENABLE_ASAN)
+    target_sources(dusk_internal PRIVATE src/dusk/asan_options.c)
+endif ()
+target_compile_definitions(dusk_internal PRIVATE ${GAME_COMPILE_DEFS})
+target_include_directories(dusk_internal PRIVATE ${miniz_SOURCE_DIR})
+if (DUSK_PLATFORM_SWITCH)
+    target_include_directories(dusk_internal PRIVATE "${CMAKE_SOURCE_DIR}/platforms/switch/include")
+    # aleks2 (companion): libnx touchscreen -> companion, and the legacy line
+    # logger. They live here rather than in dusk_switch_runtime because they
+    # need the aurora/webgpu and borealis headers the game TUs already have.
+    target_sources(dusk_internal PRIVATE src/dusk/switch_touch.cpp src/dusk/switch_jit.cpp src/dusk/switch_log.cpp src/dusk/dynres.cpp src/dusk/session_log.cpp src/dusk/switch_net.cpp src/dusk/switch_mod_libc.cpp src/dusk/switch_mod_libstdcxx.cpp
+            src/dusk/benchmark.cpp src/dusk/benchmark_report.cpp
+            src/dusk/shader_prep.cpp src/dusk/fifo_report.cpp src/dusk/perf_tour.cpp)
+    # aleks2 (H28): the benchmark names the build it ran on.
+    include(platforms/switch/cmake/BuildIdentity.cmake)
+    # Standard-library territory: the game's forced-include PCH collides with it.
+    set_source_files_properties(src/dusk/switch_mod_libstdcxx.cpp PROPERTIES
+            SKIP_PRECOMPILE_HEADERS ON)
+endif ()
+target_link_libraries(dusk_internal PRIVATE aurora::main ${GAME_LIBS} ${JSYSTEM_LIBRARIES})
+target_precompile_headers(dusk_internal PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/dusk_pch.hpp>")
+
+if(ANDROID)
+    add_library(dusklight SHARED ${GAME_FILES} ${miniz_SOURCE_DIR}/miniz.c)
+else ()
+    add_executable(dusklight ${GAME_FILES} ${miniz_SOURCE_DIR}/miniz.c)
+endif ()
+borealis_configure_android_application(dusklight)
+
+target_compile_definitions(dusklight PRIVATE ${GAME_COMPILE_DEFS})
+target_include_directories(dusklight PRIVATE ${miniz_SOURCE_DIR})
+target_link_libraries(dusklight PRIVATE dusk_internal aurora::main ${GAME_LIBS} ${JSYSTEM_LINK_LIBRARIES})
+target_precompile_headers(dusklight PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/dusk_pch.hpp>")
+
+if (DUSK_ENABLE_CODE_MODS)
+    include(cmake/SymbolManifest.cmake)
+    if (WIN32)
+        # Game ABI exports & import library for mod linking
+        include(cmake/WindowsExports.cmake)
+        setup_windows_exports(dusklight)
+    endif ()
+    # Post-link symbol manifest: hookable-surface name->address map keyed to the build.
+    setup_symbol_manifest(dusklight)
+endif ()
+if (DUSK_PLATFORM_SWITCH)
+    # aleks2 (H37): Switch's own post-link manifest, in the RomFS (see the file).
+    include(platforms/switch/cmake/SymbolManifestSwitch.cmake)
+    aleks2_switch_symbol_manifest(dusklight)
+endif ()
+
+# aleks2: the same, for the Switch build, and it is not optional there.
+#
+# Measured on the H22 binary: of daAlink_c's 1476 methods, 884 -- sixty per
+# cent -- had no direct call site at all. The optimiser had inlined them into
+# their callers or split them into `.part.0` clones and pointed the callers at
+# those. A hook on such a function installs perfectly and intercepts nothing,
+# with no error anywhere, because the code being patched is never executed.
+# That is what six test builds of Roll and Sprint were chasing: procMoveInit,
+# which is the whole sprint trigger, had zero callers and its `.part.0` clone
+# had the one.
+#
+# Only the clone-producing passes are turned off here, not inlining itself.
+# That is the cheaper half and it is what fixes the two dead targets in this
+# mod; -fno-inline-* would make all 884 hookable and costs frames on Tegra,
+# which this port cannot spend. If a mod turns up that needs a target which is
+# genuinely inlined rather than cloned, that is the moment to weigh it -- with
+# a measurement, not a guess.
+if (ALEKS2_SWITCH_CODE_MODS AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(DUSK_GAME_ABI_INLINE_OPTIONS
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-partial-inlining>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-ipa-sra>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-ipa-cp>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-ipa-cp-clone>)
+    target_compile_options(dusklight PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
+    foreach(jsystem_lib IN LISTS JSYSTEM_LIBRARIES)
+        target_compile_options(${jsystem_lib} PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
+    endforeach()
+
+    # And no inlining at all in Link's own file.
+    #
+    # Killing the clones was not enough: of procMoveInit's four call sites in
+    # the source, the two in setStartProcInit survived as real calls (Link is
+    # spawned once) and the two that matter -- checkLandAction and
+    # checkNextAction, which is where a roll ends and Link decides what to do
+    # next -- were inlined outright. A hook on procMoveInit therefore caught
+    # only Link being created.
+    #
+    # -fno-inline and not just the four -fno-inline-* switches: with those
+    # four, checkNextAction still had procMoveInit's body folded into it and
+    # no call to hook. -fno-inline is the one that means it -- everything but
+    # always_inline stays out of line.
+    #
+    # Inlining happens in the caller's translation unit, and both callers live
+    # in d_a_alink.cpp alongside the callee, so one file covers it. That
+    # matters: -fno-inline over the whole game is the version that costs
+    # frames on Tegra, and almost every gameplay mod hooks daAlink_c. If one
+    # turns up that needs another file, this list is where it goes -- with a
+    # measurement of what it cost.
+    set(ALEKS2_NO_INLINE_FILES src/d/actor/d_a_alink.cpp)
+    set_source_files_properties(${ALEKS2_NO_INLINE_FILES}
+            TARGET_DIRECTORY dusklight
+            PROPERTIES COMPILE_OPTIONS
+            "-fno-inline;-fno-inline-functions;-fno-inline-small-functions;-fno-inline-functions-called-once;-fno-early-inlining")
+
+    message(STATUS "aleks2: clone-producing optimisations off so hooks land on live code; "
+            "no inlining in ${ALEKS2_NO_INLINE_FILES}")
+endif ()
+
+# Hook reliability: prevent auto-inlining, guarantee patchable function entries,
+# and disable identical-code folding for game functions.
+if (DUSK_ENABLE_CODE_MODS)
+    set(DUSK_GAME_ABI_INLINE_OPTIONS)
+    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            list(APPEND DUSK_GAME_ABI_INLINE_OPTIONS
+                    $<$<COMPILE_LANGUAGE:CXX>:-finline-hint-functions>)
+        elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            list(APPEND DUSK_GAME_ABI_INLINE_OPTIONS
+                    $<$<COMPILE_LANGUAGE:CXX>:-flive-patching=inline-clone>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-inline-functions>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-inline-small-functions>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-inline-functions-called-once>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-early-inlining>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-ipa-cp>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-ipa-cp-clone>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-ipa-sra>
+                    $<$<COMPILE_LANGUAGE:CXX>:-fno-partial-inlining>)
+        endif ()
+    endif ()
+
+    if (DUSK_GAME_ABI_INLINE_OPTIONS)
+        target_compile_options(dusklight PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
+
+        foreach(jsystem_lib IN LISTS JSYSTEM_LIBRARIES)
+            target_compile_options(${jsystem_lib} PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
+        endforeach()
+        foreach(_sdk_lib aurora_card aurora_core aurora_dvd aurora_gd aurora_gx aurora_mtx
+                aurora_os aurora_pad aurora_si aurora_vi)
+            if (TARGET ${_sdk_lib})
+                get_target_property(_sdk_lib_imported ${_sdk_lib} IMPORTED)
+                if (NOT _sdk_lib_imported)
+                    target_compile_options(${_sdk_lib} PRIVATE ${DUSK_GAME_ABI_INLINE_OPTIONS})
+                endif ()
+            endif ()
+        endforeach ()
+    endif ()
+
+    if (MSVC)
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            set(DUSK_PATCHABLE_ENTRY_FLAG $<$<COMPILE_LANGUAGE:C,CXX>:/hotpatch>)
+        endif ()
+        if (CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+            target_link_options(dusklight PRIVATE /FUNCTIONPADMIN:16 /OPT:NOICF)
+        else ()
+            target_link_options(dusklight PRIVATE /FUNCTIONPADMIN /OPT:NOICF)
+        endif ()
+    elseif (CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang|GNU)$")
+        if ((CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64|aarch64)$") OR
+                (NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$"))
+            set(DUSK_PATCHABLE_ENTRY_FLAG $<$<COMPILE_LANGUAGE:C,CXX>:-fpatchable-function-entry=2,1>)
+        else ()
+            set(DUSK_PATCHABLE_ENTRY_FLAG $<$<COMPILE_LANGUAGE:C,CXX>:-fpatchable-function-entry=10,4>)
+        endif ()
+    endif ()
+
+    if (DEFINED DUSK_PATCHABLE_ENTRY_FLAG)
+        target_compile_options(dusklight PRIVATE ${DUSK_PATCHABLE_ENTRY_FLAG})
+        foreach(jsystem_lib IN LISTS JSYSTEM_LIBRARIES)
+            target_compile_options(${jsystem_lib} PRIVATE ${DUSK_PATCHABLE_ENTRY_FLAG})
+        endforeach()
+        foreach(_sdk_lib aurora_card aurora_core aurora_dvd aurora_gd aurora_gx aurora_mtx
+                aurora_os aurora_pad aurora_si aurora_vi)
+            if (TARGET ${_sdk_lib})
+                get_target_property(_sdk_lib_imported ${_sdk_lib} IMPORTED)
+                if (NOT _sdk_lib_imported)
+                    target_compile_options(${_sdk_lib} PRIVATE ${DUSK_PATCHABLE_ENTRY_FLAG})
+                endif ()
+            endif ()
+        endforeach ()
+    endif ()
+endif ()
+
+if (WIN32)
+    target_link_libraries(dusklight PRIVATE Psapi)
+endif ()
+if (APPLE)
+    include(cmake/AppleExports.cmake)
+    setup_apple_exports(dusklight)
+elseif (ANDROID)
+    include(cmake/AndroidExports.cmake)
+    setup_android_exports(dusklight)
+elseif (UNIX)
+    target_link_options(dusklight PRIVATE -rdynamic)
+endif ()
+
+if (TARGET crashpad_handler)
+    add_dependencies(dusklight crashpad_handler)
+    add_custom_command(TARGET dusklight POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:crashpad_handler>"
+            "$<TARGET_FILE_DIR:dusklight>"
+        COMMENT "Copying crashpad handler"
+    )
+endif ()
+
+if (CMAKE_SYSTEM_NAME STREQUAL Linux)
+    target_link_options(dusklight PRIVATE "-Wl,--build-id=sha1")
+    target_link_libraries(dusklight PRIVATE dl)
+endif ()
+
+if (NOT APPLE)
+    add_custom_command(TARGET dusklight POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/res"
+            "$<TARGET_FILE_DIR:dusklight>/res"
+        COMMENT "Copying resources"
+    )
+endif ()
+
+if (WIN32)
+    set(DUSK_WINDOWS_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/platforms/windows)
+    set(DUSK_WINDOWS_ICON_PNG ${CMAKE_CURRENT_SOURCE_DIR}/res/icon.png)
+    set(DUSK_WINDOWS_ICON_ICO ${CMAKE_CURRENT_BINARY_DIR}/dusklight.ico)
+    set(DUSK_WINDOWS_RC ${CMAKE_CURRENT_BINARY_DIR}/dusklight.rc)
+    set(DUSK_WINDOWS_MANIFEST ${CMAKE_CURRENT_BINARY_DIR}/dusklight.manifest)
+
+    add_custom_command(
+            OUTPUT ${DUSK_WINDOWS_ICON_ICO}
+            COMMAND powershell -ExecutionPolicy Bypass -File
+            ${DUSK_WINDOWS_RESOURCE_DIR}/Create-IcoFromPng.ps1
+            -InputPng ${DUSK_WINDOWS_ICON_PNG}
+            -OutputIco ${DUSK_WINDOWS_ICON_ICO}
+            DEPENDS ${DUSK_WINDOWS_ICON_PNG} ${DUSK_WINDOWS_RESOURCE_DIR}/Create-IcoFromPng.ps1
+            VERBATIM
+            COMMENT "Generating Windows icon"
+    )
+
+    configure_file(${DUSK_WINDOWS_RESOURCE_DIR}/dusklight.manifest.in ${DUSK_WINDOWS_MANIFEST} @ONLY)
+    configure_file(${DUSK_WINDOWS_RESOURCE_DIR}/dusklight.rc.in ${DUSK_WINDOWS_RC} @ONLY)
+
+    target_sources(dusklight PRIVATE ${DUSK_WINDOWS_ICON_ICO} ${DUSK_WINDOWS_RC})
+    set_target_properties(dusklight PROPERTIES WIN32_EXECUTABLE TRUE)
+
+    if (MSVC)
+        target_link_options(dusklight PRIVATE /MANIFEST:NO)
+    endif ()
+endif ()
+
+include(cmake/ModSDK.cmake)
+
+if (ALEKS2_STATIC_MODS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    # aleks2: the same mod directories, built into the NRO instead of as
+    # loadable libraries. StaticMods.cmake replaces add_mod(), so each mod's own
+    # CMakeLists.txt is used unchanged.
+    add_custom_target(dusklight_mods)
+    include(platforms/switch/cmake/StaticMods.cmake)
+    aleks2_check_static_mod_selection("${CMAKE_CURRENT_SOURCE_DIR}/mods" "${ALEKS2_STATIC_MODS}")
+    foreach (_aleks2_mod IN LISTS ALEKS2_STATIC_MODS)
+        add_subdirectory(mods/${_aleks2_mod})
+    endforeach ()
+    aleks2_finish_static_mods()
+elseif (DUSK_ENABLE_CODE_MODS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    add_custom_target(dusklight_mods) # Aggregate target for all in-tree mods
+    add_subdirectory(mods/luau_runtime)
+    add_subdirectory(mods/template_mod)
+    add_subdirectory(mods/ao_mod)
+    add_subdirectory(mods/shadow_mod)
+    add_subdirectory(mods/window_demo)
+    add_subdirectory(mods/flow_demo)
+    add_subdirectory(mods/custom_actor_demo)
+    add_subdirectory(mods/cosmetics)
+    add_subdirectory(mods/randomizer)
+    add_subdirectory(mods/audio_mod)
+endif ()
+
+if (APPLE)
+    if (IOS)
+        set(DUSK_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/platforms/ios)
+    elseif (TVOS)
+        set(DUSK_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/platforms/tvos)
+    else ()
+        set(DUSK_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/platforms/macos)
+        set(DUSK_ENTITLEMENTS ${DUSK_RESOURCE_DIR}/Dusklight.entitlements)
+    endif ()
+    set(DUSK_INFO_PLIST ${DUSK_RESOURCE_DIR}/Info.plist.in)
+    file(GLOB_RECURSE DUSK_RESOURCE_FILES
+        "${DUSK_RESOURCE_DIR}/Assets.car"
+        "${DUSK_RESOURCE_DIR}/Base.lproj/*"
+        "${DUSK_RESOURCE_DIR}/Dusklight.icns")
+    file(GLOB_RECURSE DUSK_APP_RESOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/res/*")
+    target_sources(dusklight PRIVATE ${DUSK_RESOURCE_FILES})
+    target_sources(dusklight PRIVATE ${DUSK_APP_RESOURCE_FILES})
+    foreach (FILE ${DUSK_RESOURCE_FILES})
+        file(RELATIVE_PATH NEW_FILE "${DUSK_RESOURCE_DIR}" ${FILE})
+        get_filename_component(NEW_FILE_PATH ${NEW_FILE} DIRECTORY)
+        set_property(SOURCE ${FILE} PROPERTY MACOSX_PACKAGE_LOCATION "Resources/${NEW_FILE_PATH}")
+    endforeach ()
+    foreach (FILE ${DUSK_APP_RESOURCE_FILES})
+        file(RELATIVE_PATH NEW_FILE "${CMAKE_CURRENT_SOURCE_DIR}" ${FILE})
+        get_filename_component(NEW_FILE_PATH ${NEW_FILE} DIRECTORY)
+        set_property(SOURCE ${FILE} PROPERTY MACOSX_PACKAGE_LOCATION "Resources/${NEW_FILE_PATH}")
+    endforeach ()
+    set(_apple_bundle_properties
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME ${DUSK_BUNDLE_NAME}
+        MACOSX_BUNDLE_GUI_IDENTIFIER ${DUSK_BUNDLE_IDENTIFIER}
+        MACOSX_BUNDLE_BUNDLE_VERSION ${BOREALIS_APP_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${BOREALIS_APP_SHORT_VERSION}
+        MACOSX_BUNDLE_INFO_PLIST ${DUSK_INFO_PLIST}
+        OUTPUT_NAME Dusklight
+        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "YES"
+        XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "YES"
+    )
+    if (DUSK_ENTITLEMENTS)
+        list(APPEND _apple_bundle_properties
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS ${DUSK_ENTITLEMENTS})
+    endif ()
+    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        list(APPEND _apple_bundle_properties
+            XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES")
+    endif ()
+    set_target_properties(dusklight PROPERTIES ${_apple_bundle_properties})
+
+    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT "${CMAKE_GENERATOR}" STREQUAL "Xcode")
+        set(_sign_nested_commands)
+        if (TARGET crashpad_handler)
+            list(APPEND _sign_nested_commands
+                COMMAND /usr/bin/codesign --force --sign -
+                    "$<TARGET_FILE_DIR:dusklight>/crashpad_handler")
+        endif ()
+        add_custom_command(TARGET dusklight POST_BUILD
+            ${_sign_nested_commands}
+            COMMAND /usr/bin/codesign --force --sign - --entitlements
+                "${DUSK_ENTITLEMENTS}" "$<TARGET_BUNDLE_DIR:dusklight>"
+            COMMENT "Signing Dusklight.app with entitlements"
+            VERBATIM
+        )
+    endif ()
+endif ()
+
+include(extern/aurora/cmake/AuroraCopyRuntimeDLLs.cmake)
+aurora_copy_runtime_dlls(dusklight)
+
+if (DUSK_SELECTED_OPT)
+    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        set(_opt_flags /O2 /Ob2)
+    elseif (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+        set(_opt_flags -O2)
+    endif ()
+
+    target_compile_options(xxhash PRIVATE ${_opt_flags})
+    target_compile_options(aurora_gx PRIVATE ${_opt_flags})
+    target_compile_options(freeverb PRIVATE ${_opt_flags})
+endif ()
+
+# Packaging logic
+function(get_target_output_name target result_var)
+    get_target_property(output_name ${target} OUTPUT_NAME)
+    if (NOT output_name)
+        set(${result_var} "${target}" PARENT_SCOPE)
+    else ()
+        set(${result_var} "${output_name}" PARENT_SCOPE)
+    endif ()
+endfunction()
+function(get_target_prefix target result_var)
+    set(${result_var} "" PARENT_SCOPE)
+    if (APPLE)
+        # Have to recreate some bundle logic here, since CMake can't tell us
+        get_target_property(is_bundle ${target} MACOSX_BUNDLE)
+        if (is_bundle)
+            get_target_output_name(${target} output_name)
+            if (CMAKE_SYSTEM_NAME STREQUAL Darwin)
+                set(${result_var} "${output_name}.app/Contents/MacOS/" PARENT_SCOPE)
+            else ()
+                set(${result_var} "${output_name}.app/" PARENT_SCOPE)
+            endif ()
+        endif ()
+    endif ()
+endfunction()
+list(APPEND BINARY_TARGETS dusklight)
+set(EXTRA_TARGETS "")
+if (TARGET crashpad_handler)
+    list(APPEND EXTRA_TARGETS crashpad_handler)
+endif ()
+if (DUSK_PACKAGE_INSTALL)
+    install(TARGETS ${BINARY_TARGETS} ${EXTRA_TARGETS} DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+    install(TARGETS ${BINARY_TARGETS} ${EXTRA_TARGETS} DESTINATION ${CMAKE_INSTALL_PREFIX})
+endif()
+aurora_install_runtime_dlls(dusklight ${CMAKE_INSTALL_PREFIX})
+if (NOT APPLE)
+    if (DUSK_PACKAGE_INSTALL)
+        install(DIRECTORY ${CMAKE_SOURCE_DIR}/res DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/dusklight)
+    else()
+        install(DIRECTORY ${CMAKE_SOURCE_DIR}/res DESTINATION ${CMAKE_INSTALL_PREFIX})
+    endif()
+endif ()
+if (CMAKE_BUILD_TYPE STREQUAL Debug OR CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo AND NOT DUSK_PACKAGE_INSTALL)
+    set(DEBUG_FILES_LIST "")
+    foreach (target IN LISTS BINARY_TARGETS EXTRA_TARGETS)
+        get_target_output_name(${target} output_name)
+        if (WIN32)
+            install(FILES $<TARGET_PDB_FILE:${target}> DESTINATION ${CMAKE_INSTALL_PREFIX} OPTIONAL)
+        elseif (APPLE)
+            get_target_prefix(${target} target_prefix)
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND rm -fr \"$<TARGET_FILE_NAME:${target}>.dSYM\")")
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND dsymutil \"${target_prefix}$<TARGET_FILE_NAME:${target}>\")")
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND strip -S \"${target_prefix}$<TARGET_FILE_NAME:${target}>\")")
+            if (NOT target_prefix STREQUAL "")
+                install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND mv \"${target_prefix}$<TARGET_FILE_NAME:${target}>.dSYM\" .)")
+            endif ()
+        elseif (UNIX)
+            get_target_prefix(${target} target_prefix)
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND objcopy --only-keep-debug \"${target_prefix}$<TARGET_FILE_NAME:${target}>\" \"${target_prefix}$<TARGET_FILE_NAME:${target}>.dbg\")")
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND objcopy --strip-debug --add-gnu-debuglink=$<TARGET_FILE_NAME:${target}>.dbg \"${target_prefix}$<TARGET_FILE_NAME:${target}>\")")
+        endif ()
+        list(APPEND DEBUG_FILES_LIST "${output_name}")
+    endforeach ()
+    # This is a terrible hack to only run this on CI
+    # until I turn this into a script or something
+    if(DEFINED ENV{GITHUB_ENV})
+        if (WIN32)
+            list(TRANSFORM DEBUG_FILES_LIST APPEND ".pdb")
+            list(JOIN DEBUG_FILES_LIST " " DEBUG_FILES)
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND 7z a -t7z \"${CMAKE_INSTALL_PREFIX}/debug.7z\" ${DEBUG_FILES})")
+        elseif (APPLE)
+            list(TRANSFORM DEBUG_FILES_LIST APPEND ".dSYM")
+            list(JOIN DEBUG_FILES_LIST " " DEBUG_FILES)
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND tar acfv \"${CMAKE_INSTALL_PREFIX}/debug.tar.xz\" ${DEBUG_FILES})")
+        elseif (UNIX)
+            list(TRANSFORM DEBUG_FILES_LIST APPEND ".dbg")
+            list(JOIN DEBUG_FILES_LIST " " DEBUG_FILES)
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND tar -I \"xz -9 -T0\" -cvf \"${CMAKE_INSTALL_PREFIX}/debug.tar.xz\" ${DEBUG_FILES})")
+        endif ()
+    endif ()
+endif ()
+foreach (target IN LISTS BINARY_TARGETS)
+    get_target_prefix(${target} target_prefix)
+    foreach (extra_target IN LISTS EXTRA_TARGETS)
+        get_target_prefix(${extra_target} extra_prefix)
+        if (NOT "${target_prefix}" STREQUAL "${extra_prefix}")
+            # Copy extra target to target prefix
+            install(CODE "execute_process(WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\" COMMAND cp \"${extra_prefix}$<TARGET_FILE_NAME:${extra_target}>\" \"${target_prefix}$<TARGET_FILE_NAME:${extra_target}>\")")
+        endif ()
+    endforeach ()
+endforeach ()
+
+install_bundled_mods()
+
+if (DUSK_PLATFORM_SWITCH)
+    add_subdirectory(platforms/switch)
+endif ()

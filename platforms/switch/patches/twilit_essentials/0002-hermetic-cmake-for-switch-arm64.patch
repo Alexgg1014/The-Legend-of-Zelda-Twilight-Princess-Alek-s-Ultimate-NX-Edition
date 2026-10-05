@@ -1,0 +1,48 @@
+From: aleks2 (H38)
+Subject: [PATCH 2/2] hermetic CMake for the switch-arm64 build
+
+Twilit Essentials' CMake writes outside its build directory: it rewrites README.md after every build, regenerates
+the logo texture when Python and Pillow happen to be installed (outside CI), and copies the package into the
+user's Dusklight mods folder. None of that belongs in a reproducible console build, so the switch-arm64
+toolchain skips all three.
+---
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 180a2a9..48f2c59 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -126,6 +126,9 @@ target_link_libraries(twilit_essentials PRIVATE collection_lib)
+ # Dusklight internal headers (dusk/settings.h) for the L+A free camera toggle.
+ target_include_directories(twilit_essentials PRIVATE "${DUSKLIGHT_DIR}/src")
+ 
++# aleks2 (H38): the switch-arm64 build is hermetic: it changes nothing outside its build directory (no README
++# rewrite, no logo regeneration, no copy into the user's mods folder), so two builds give the same package.
++if (NOT DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN)
+ # Automatically sync version in README.md on every build
+ add_custom_command(TARGET twilit_essentials POST_BUILD
+     COMMAND ${CMAKE_COMMAND}
+@@ -133,6 +136,7 @@ add_custom_command(TARGET twilit_essentials POST_BUILD
+         -DREADME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SyncReadmeVersion.cmake"
+ )
++endif ()
+ 
+ # Automatically regenerate the logo texture (embeds the version from mod.json) before packaging.
+ # Local-only on purpose: the Ravenna font only exists on the dev machine and CI builds keep using
+@@ -140,7 +144,7 @@ add_custom_command(TARGET twilit_essentials POST_BUILD
+ find_package(Python3 COMPONENTS Interpreter QUIET)
+ set(LOGO_GENERATION_AVAILABLE FALSE)
+ set(_ci "$ENV{CI}")
+-if (Python3_EXECUTABLE AND NOT _ci)
++if (Python3_EXECUTABLE AND NOT _ci AND NOT DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN)
+     execute_process(COMMAND ${Python3_EXECUTABLE} -c "import PIL"
+             RESULT_VARIABLE _pillow_result
+             OUTPUT_QUIET ERROR_QUIET)
+@@ -192,7 +196,7 @@ if (APPLE)
+ endif ()
+ 
+ # Automatically copy the built .dusk archive to the user mods directory after every build (Linux only)
+-if (UNIX AND NOT APPLE)
++if (UNIX AND NOT APPLE AND NOT DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN)
+     set(DUSKLIGHT_USER_MODS_DIR "$ENV{HOME}/.local/share/TwilitRealm/Dusklight/mods")
+ 
+     add_custom_command(TARGET twilit_essentials_package POST_BUILD

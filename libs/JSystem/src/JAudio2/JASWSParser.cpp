@@ -1,0 +1,126 @@
+#include "JSystem/JSystem.h" // IWYU pragma: keep
+
+#include "JSystem/JAudio2/JASWSParser.h"
+#include "JSystem/JAudio2/JASBasicWaveBank.h"
+#include "JSystem/JAudio2/JASSimpleWaveBank.h"
+#include "JSystem/JKernel/JKRHeap.h"
+#include "JSystem/JKernel/JKRSolidHeap.h"
+
+u32 JASWSParser::getGroupCount(void const* stream) {
+	THeader* header = (THeader*)stream;
+    TCtrlGroup* group = header->mCtrlGroupOffset.ptr(header);
+	return group->mGroupCount;
+}
+
+
+JASWaveBank* JASWSParser::createWaveBank(void const* stream, JKRHeap* heap) {
+    if (getGroupCount(stream) == 1) {
+        return createSimpleWaveBank(stream, heap);
+    } else {
+        return createBasicWaveBank(stream, heap);
+    }
+}
+
+DUSK_GAME_DATA u32 JASWSParser::sUsedHeapSize;
+
+JASBasicWaveBank* JASWSParser::createBasicWaveBank(void const* stream, JKRHeap* heap) {
+    if (heap == NULL) {
+        heap = JASDram;
+    }
+    u32 free_size = heap->getFreeSize();
+
+    THeader* header = (THeader*)stream;
+    JASBasicWaveBank* wave_bank = JKR_NEW_ARGS (heap, 0) JASBasicWaveBank IF_DUSK((header->mId));
+    if (wave_bank == NULL) {
+        return NULL;
+    }
+
+    TCtrlGroup* ctrl_group = header->mCtrlGroupOffset.ptr(header);
+    wave_bank->setGroupCount(ctrl_group->mGroupCount, heap);
+    wave_bank->setWaveTableSize(header->mWaveTableSize, heap);
+    for (u32 i = 0; i < ctrl_group->mGroupCount; i++) {
+        TCtrlScene* ctrlScene = ctrl_group->mCtrlSceneOffsets[i].ptr(header);
+        TCtrl* ctrl = ctrlScene->mCtrlOffset.ptr(header);
+        JASBasicWaveBank::TWaveGroup* wave_group = wave_bank->getWaveGroup(i);
+        TWaveArchiveBank* archiveBank = header->mArchiveBankOffset.ptr(header);
+        TWaveArchive* archive = archiveBank->mArchiveOffsets[i].ptr(header);
+        wave_group->setWaveCount(ctrl->mWaveCount, heap);
+        for (int j = 0; j < ctrl->mWaveCount; j++) {
+            TWave* wave = archive->mWaveOffsets[j].ptr(header);
+            JASWaveInfo wave_info;
+            wave_info.mWaveFormat = wave->mWaveFormat;
+            wave_info.mBaseKey = wave->mBaseKey;
+            wave_info.mSampleRate = wave->mSampleRate;
+            wave_info.mOffsetStart = wave->mAWOffsetStart;
+            wave_info.mOffsetLength = wave->mAWOffsetEnd;
+            wave_info.mLoopFlag = wave->mLoopFlags == 0 ? 0 : 0xff;
+            wave_info.mLoopStartSample = wave->mLoopStartSample;
+            wave_info.mLoopEndSample = wave->mLoopEndSample;
+            wave_info.mSampleCount = wave->mSampleCount;
+            wave_info.mpLast = wave->mpLast;
+            wave_info.mpPenult = wave->mpPenult;
+            TCtrlWave* ctrl_wave = ctrl->mCtrlWaveOffsets[j].ptr(header);
+            u16 local_74 = JSULoHalf(ctrl_wave->mWaveAndGroupId);
+            wave_bank->setWaveInfo(wave_group, j, local_74, wave_info);
+        }
+        wave_group->setFileName(archive->mFileName);
+    }
+
+    sUsedHeapSize += (free_size - heap->getFreeSize());
+    return wave_bank;
+}
+
+JASSimpleWaveBank* JASWSParser::createSimpleWaveBank(void const* stream, JKRHeap* heap) {
+    if (heap == NULL) {
+        heap = JASDram;
+    }
+    u32 free_size = heap->getFreeSize();
+    
+    THeader* header = (THeader*)stream;
+    TCtrlGroup* ctrl_group = header->mCtrlGroupOffset.ptr(header);
+    if (ctrl_group->mGroupCount != 1) {
+        return NULL;
+    }
+
+    JASSimpleWaveBank* wave_bank = JKR_NEW_ARGS (heap, 0) JASSimpleWaveBank IF_DUSK((header->mId));
+    if (wave_bank == NULL) {
+        return NULL;
+    }
+
+    u32 max = 0;
+    TCtrlScene* ctrlScene = ctrl_group->mCtrlSceneOffsets[0].ptr(header);
+    TCtrl* ctrl = ctrlScene->mCtrlOffset.ptr(header);
+    TWaveArchiveBank* archiveBank = header->mArchiveBankOffset.ptr(header);
+    TWaveArchive* archive = archiveBank->mArchiveOffsets[0].ptr(header);
+    for (int i = 0; i < ctrl->mWaveCount; i++) {
+        TCtrlWave* ctrlWave = ctrl->mCtrlWaveOffsets[i].ptr(header);
+        u32 tmp = JSULoHalf(ctrlWave->mWaveAndGroupId);
+        if (max < tmp) {
+            max = tmp;
+        }
+    }
+    wave_bank->setWaveTableSize(max + 1, heap);
+    
+    for (int i = 0; i < ctrl->mWaveCount; i++) {
+        TWave* wave = archive->mWaveOffsets[i].ptr(header);
+        JASWaveInfo wave_info;
+        wave_info.mWaveFormat = wave->mWaveFormat;
+        wave_info.mBaseKey = wave->mBaseKey;
+        wave_info.mSampleRate = wave->mSampleRate;
+        wave_info.mOffsetStart = wave->mAWOffsetStart;
+        wave_info.mOffsetLength = wave->mAWOffsetEnd;
+        wave_info.mLoopFlag = wave->mLoopFlags == 0 ? 0 : 0xff;
+        wave_info.mLoopStartSample = wave->mLoopStartSample;
+        wave_info.mLoopEndSample = wave->mLoopEndSample;
+        wave_info.mSampleCount = wave->mSampleCount;
+        wave_info.mpLast = wave->mpLast;
+        wave_info.mpPenult = wave->mpPenult;
+        TCtrlWave* ctrl_wave = ctrl->mCtrlWaveOffsets[i].ptr(header);
+        u32 waveId = JSULoHalf(ctrl_wave->mWaveAndGroupId);
+        wave_bank->setWaveInfo(waveId, wave_info);
+    }
+    wave_bank->setFileName(archive->mFileName);
+
+    sUsedHeapSize += (free_size - heap->getFreeSize());
+    return wave_bank;
+}

@@ -1,0 +1,90 @@
+/**
+ * @file d_a_tag_myna2.cpp
+ * @brief Tag - Creates Plumm's actor.
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_player.h"
+#include "d/actor/d_a_tag_myna2.h"
+#include "f_pc/f_pc_name.h"
+
+s32 daTagMyna2_c::create() {
+    fopAcM_ct(this, daTagMyna2_c);
+    mSwitchNo = getSwBit();
+    mMode = getMode();
+    mTimer = 5;
+    return cPhs_COMPLEATE_e;
+}
+
+s32 daTagMyna2_c::execute() {
+    if (!dComIfGp_event_runCheck() &&
+        !dComIfGs_isSwitch(mSwitchNo,fopAcM_GetRoomNo(this)) &&
+        (daPy_getPlayerActorClass()->current.pos - current.pos).absXZ() < getExtent()) {
+        csXyz actor_angle(30, (s16)fopAcM_searchPlayerAngleY(this), 0);
+        cXyz actor_pos = current.pos;
+        actor_pos.y += 1000.0f;
+
+        if (fopAcM_gc_c::gndCheck(&actor_pos) != 0) {
+            actor_pos.y = fopAcM_gc_c::getGroundY();
+        } else {
+            actor_pos = current.pos;
+        }
+
+        u32 var_r29 = 0xffff0001;
+        if (mTimer == 0) {
+            if (fopAcM_create(fpcNm_MYNA2_e, var_r29 | mSwitchNo << 8, &actor_pos,
+                              fopAcM_GetRoomNo(this), &actor_angle, 0, -1)
+                != fpcM_ERROR_PROCESS_ID_e) {
+                dComIfGs_onSwitch(mSwitchNo,fopAcM_GetRoomNo(this));
+            }
+        }
+    }
+  
+    if (dComIfGp_event_runCheck()) {
+        mTimer = 5;
+    } else {
+        cLib_calcTimer(&mTimer);
+    }
+
+    return 1;
+}
+
+static s32 daTagMyna2_Create(fopAc_ac_c* i_this) {
+    daTagMyna2_c* myna2 = static_cast<daTagMyna2_c*>(i_this);
+    int id = fopAcM_GetID(i_this);
+    return myna2->create();
+}
+
+static s32 daTagMyna2_Execute(daTagMyna2_c* i_this) {
+    return i_this->execute();
+}
+
+static s32 daTagMyna2_Delete(daTagMyna2_c* i_this) {
+    int id = fopAcM_GetID(i_this);
+    i_this->~daTagMyna2_c();
+    return 1;
+}
+
+static DUSK_CONST actor_method_class l_daTagMyna2_Method = {
+    (process_method_func)daTagMyna2_Create,
+    (process_method_func)daTagMyna2_Delete,
+    (process_method_func)daTagMyna2_Execute,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_MYNA2 = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_MYNA2_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTagMyna2_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_MYNA2_e,
+    /* Actor SubMtd */ &l_daTagMyna2_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

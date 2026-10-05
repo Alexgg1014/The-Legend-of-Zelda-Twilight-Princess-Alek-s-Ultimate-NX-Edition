@@ -1,0 +1,14 @@
+# Game functions a mod hooks by name that the Switch build never calls, so --gc-sections would drop them
+# and the hook target would not resolve (the mod would not load). Each is a root: kept, and exported.
+# Written by hand (unlike mod_abi_pinned.txt); one mangled name per line.
+#
+# dMeter2Draw_c::drawOxygen: Dawnlight hooks it. In the Dusklight build dMeter2_c::moveOxygen calls
+# publishOxygen instead (IF_NOT_DUSK around the drawOxygen call), so nothing calls drawOxygen: the hook
+# loads and never fires, as on the desktop build.
+_ZN13dMeter2Draw_c10drawOxygenEifff
+#
+# dBgp_c::modelMaterial_c::drawSimple: Deferred Fog 2.0.0 hooks it (a virtual member, resolved by this name). dBgp_c
+# only runs in DEBUG builds (dStage_roomControl_c::getBgp returns NULL otherwise, drawShare is SHIELD_DEBUG only), so
+# the Switch link dropped it and the mod stayed inactive on H38-c5 ("did not resolve"). Kept, the hook loads and never
+# fires (no release build runs dBgp_c); the mod's other hooks do the fog.
+_ZN6dBgp_c15modelMaterial_c10drawSimpleEv

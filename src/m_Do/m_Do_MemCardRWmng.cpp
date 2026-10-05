@@ -1,0 +1,505 @@
+/**
+ * m_Do_MemCardRWmng.cpp
+ * Memcard Saving and Checksum
+ */
+
+#include "m_Do/m_Do_MemCardRWmng.h"
+#include "m_Do/m_Do_MemCard.h"
+#include "JSystem/JUtility/JUTTexture.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_save.h"
+#include <cstdio>
+#include <cstring>
+
+#include "dusk/version.hpp"
+
+#if VERSION == VERSION_GCN_JPN
+#define HEADER_TITLE   "ゼルダの伝説 ﾄﾜｲﾗｲﾄﾌﾟﾘﾝｾｽ"
+#define HEADER_COMMENT "%d月%d日のセーブデータです"
+#elif PLATFORM_WII
+#define HEADER_TITLE   "The Legend of Zelda: TP"
+#define HEADER_COMMENT "%d/%d Save Data"
+#else
+#define HEADER_TITLE   "Zelda: Twilight Princess"
+#define HEADER_COMMENT "%d/%d Save Data"
+#endif
+
+struct data_s {
+    int unk_0x0;
+    int data_version;
+    u8 data[(SAVEFILE_SIZE) + 0x38];  // unsure what the extra 0x38 is
+    u32 checksum;
+};
+
+static u8 sTmpBuf[SECTOR_SIZE * 2];
+
+#if !PLATFORM_SHIELD
+s32 mDoMemCdRWm_Store(CARDFileInfo* file, void* data, u32 length) {
+    mDoMemCdRWm_BuildHeader((mDoMemCdRWm_HeaderData*)sTmpBuf);
+
+    s32 ret = CARDWrite(file, sTmpBuf, sizeof(sTmpBuf), 0);
+    if (ret != CARD_RESULT_READY) { 
+        return ret;
+    }
+
+    if (!mDoMemCdRWm_CheckCardStat(file)) {
+        memset(sTmpBuf, 0, sizeof(sTmpBuf));
+
+        ret = CARDWrite(file, sTmpBuf, SECTOR_SIZE, 0x4000);
+        if (ret != CARD_RESULT_READY) {
+            return ret;
+        }
+
+        ret = CARDWrite(file, sTmpBuf, SECTOR_SIZE, 0x6000);
+        if (ret != CARD_RESULT_READY) {
+            return ret;
+        }
+    }
+
+    memset(sTmpBuf, 0, sizeof(sTmpBuf));
+
+    data_s* tmp_data = (data_s*)sTmpBuf;
+    tmp_data->data_version = SAVEDATA_VERSION;
+    memcpy(tmp_data->data, data, length);
+    tmp_data->unk_0x0 = 0;
+
+    u32 checksum = mDoMemCdRWm_CalcCheckSum(tmp_data, sizeof(data_s) - 4);
+    tmp_data->checksum = checksum;
+
+    ret = CARDWrite(file, sTmpBuf, SECTOR_SIZE, 0x4000);
+    if (ret != CARD_RESULT_READY) {
+        return ret;
+    }
+
+    ret = CARDRead(file, sTmpBuf, SECTOR_SIZE, 0x4000);
+    if (ret != CARD_RESULT_READY) {
+        return ret;
+    }
+
+    if (checksum != mDoMemCdRWm_CalcCheckSum(sTmpBuf, sizeof(data_s) - 4)) {
+        return ret;
+    }
+
+    ret = CARDWrite(file, sTmpBuf, SECTOR_SIZE, 0x6000);
+    if (ret != CARD_RESULT_READY) {
+        return ret;
+    }
+
+    ret = CARDRead(file, sTmpBuf, SECTOR_SIZE, 0x6000);
+    if (ret != CARD_RESULT_READY) {
+        return ret;
+    }
+
+    if (checksum != mDoMemCdRWm_CalcCheckSum(sTmpBuf, sizeof(data_s) - 4)) {
+        return ret;
+    }
+
+#if TARGET_PC
+    return mDoMemCdRWm_SetCardStat(file);
+#else
+    mDoMemCdRWm_SetCardStat(file);
+    return ret;
+#endif
+}
+
+s32 mDoMemCdRWm_Restore(CARDFileInfo* file, void* data, u32 length) {
+    BOOL rewrite = FALSE;
+
+    data_s* saves = (data_s*)sTmpBuf;
+    data_s* backup_saves = (data_s*)(sTmpBuf + SECTOR_SIZE);
+
+    s32 ret = CARDRead(file, saves, SECTOR_SIZE, 0x4000);
+    if (ret != CARD_RESULT_READY) {
+        return ret;
+    }
+
+    BOOL save1_valid = mDoMemCdRWm_TestCheckSumGameData(&saves->data[SAVEDATA_SIZE * 0]);
+    BOOL save2_valid = mDoMemCdRWm_TestCheckSumGameData(&saves->data[SAVEDATA_SIZE * 1]);
+    BOOL save3_valid = mDoMemCdRWm_TestCheckSumGameData(&saves->data[SAVEDATA_SIZE * 2]);
+
+    ret = CARDRead(file, backup_saves, SECTOR_SIZE, 0x6000);
+    if (ret != CARD_RESULT_READY) {
+        return ret;
+    }
+
+    BOOL backup1_valid = mDoMemCdRWm_TestCheckSumGameData(&backup_saves->data[SAVEDATA_SIZE * 0]);
+    BOOL backup2_valid = mDoMemCdRWm_TestCheckSumGameData(&backup_saves->data[SAVEDATA_SIZE * 1]);
+    BOOL backup3_valid = mDoMemCdRWm_TestCheckSumGameData(&backup_saves->data[SAVEDATA_SIZE * 2]);
+
+    if (!save1_valid && backup1_valid) {
+        memcpy(&saves->data[SAVEDATA_SIZE * 0], &backup_saves->data[SAVEDATA_SIZE * 0], SAVEDATA_SIZE);
+        rewrite = TRUE;
+    }
+
+    if (!save2_valid && backup2_valid) {
+        memcpy(&saves->data[SAVEDATA_SIZE * 1], &backup_saves->data[SAVEDATA_SIZE * 1], SAVEDATA_SIZE);
+        rewrite = TRUE;
+    }
+
+    if (!save3_valid && backup3_valid) {
+        memcpy(&saves->data[SAVEDATA_SIZE * 2], &backup_saves->data[SAVEDATA_SIZE * 2], SAVEDATA_SIZE);
+        rewrite = TRUE;
+    }
+
+    if (!mDoMemCdRWm_CheckCardStat(file)) {
+        return CARD_RESULT_FATAL_ERROR;
+    }
+
+    if (rewrite) {
+        ret = CARDWrite(file, saves, SECTOR_SIZE, 0x4000);
+        if (ret != CARD_RESULT_READY) {
+            return ret;
+        }
+
+        ret = CARDWrite(file, saves, SECTOR_SIZE, 0x6000);
+        if (ret != CARD_RESULT_READY) {
+            return ret;
+        }
+    }
+
+    memcpy(data, saves->data, length);
+    mDoMemCd_setDataVersion(saves->data_version);
+    mDoMemCd_setSerialNo();
+
+    return CARD_RESULT_READY;
+}
+#endif
+
+#if PLATFORM_WII || PLATFORM_SHIELD
+s32 mDoMemCdRWm_StoreNAND(NANDFileInfo* file, void* data, u32 length) {
+    s32 ret;
+
+    memset(sTmpBuf, 0, sizeof(sTmpBuf));
+
+    data_s* tmp_data = (data_s*)sTmpBuf;
+    tmp_data->unk_0x0 = 0;
+    tmp_data->data_version = SAVEDATA_VERSION;
+    memcpy(tmp_data->data, data, length);  
+
+    u32 checksum = tmp_data->checksum = mDoMemCdRWm_CalcCheckSum(tmp_data, sizeof(data_s) - 4);
+
+    ret = NANDWrite(file, sTmpBuf, 0x2000);
+    if (ret != 0x2000) {
+        return ret;
+    }
+
+    NANDSeek(file, 0, 0);
+
+    ret = NANDRead(file, sTmpBuf, 0x2000);
+    if (ret != 0x2000) {
+        return ret;
+    }
+
+    if (checksum != mDoMemCdRWm_CalcCheckSum(sTmpBuf, sizeof(data_s) - 4)) {
+        return ret;
+    }
+
+    NANDSeek(file, 0x2000, 0);
+
+    ret = NANDWrite(file, sTmpBuf, 0x2000);
+    if (ret != 0x2000) {
+        return ret;
+    }
+
+    NANDSeek(file, 0x2000, 0);
+
+    ret = NANDRead(file, sTmpBuf, 0x2000);
+    if (ret != 0x2000) {
+        return ret;
+    }
+
+    if (checksum != mDoMemCdRWm_CalcCheckSum(sTmpBuf, sizeof(data_s) - 4)) {
+        return ret;
+    }
+
+    return NAND_RESULT_OK;
+}
+
+s32 mDoMemCdRWm_RestoreNAND(NANDFileInfo* file, void* data, u32 length) {
+    BOOL rewrite = FALSE;
+
+    data_s* saves = (data_s*)sTmpBuf;
+    data_s* backup_saves = (data_s*)(sTmpBuf + SECTOR_SIZE);
+
+    NANDSeek(file, 0, 0);
+    s32 ret = NANDRead(file, saves, 0x2000);
+    if (ret != 0x2000) {
+        return ret;
+    }
+
+    BOOL save1_valid = mDoMemCdRWm_TestCheckSumGameData(&saves->data[SAVEDATA_SIZE * 0]);
+    BOOL save2_valid = mDoMemCdRWm_TestCheckSumGameData(&saves->data[SAVEDATA_SIZE * 1]);
+    BOOL save3_valid = mDoMemCdRWm_TestCheckSumGameData(&saves->data[SAVEDATA_SIZE * 2]);
+
+    NANDSeek(file, 0x2000, 0);
+    ret = NANDRead(file, backup_saves, 0x2000);
+    if (ret != 0x2000) {
+        return ret;
+    }
+
+    BOOL backup1_valid = mDoMemCdRWm_TestCheckSumGameData(&backup_saves->data[SAVEDATA_SIZE * 0]);
+    BOOL backup2_valid = mDoMemCdRWm_TestCheckSumGameData(&backup_saves->data[SAVEDATA_SIZE * 1]);
+    BOOL backup3_valid = mDoMemCdRWm_TestCheckSumGameData(&backup_saves->data[SAVEDATA_SIZE * 2]);
+
+    if (!save1_valid && backup1_valid) {
+        memcpy(&saves->data[SAVEDATA_SIZE * 0], &backup_saves->data[SAVEDATA_SIZE * 0], SAVEDATA_SIZE);
+        rewrite = TRUE;
+    }
+
+    if (!save2_valid && backup2_valid) {
+        memcpy(&saves->data[SAVEDATA_SIZE * 1], &backup_saves->data[SAVEDATA_SIZE * 1], SAVEDATA_SIZE);
+        rewrite = TRUE;
+    }
+
+    if (!save3_valid && backup3_valid) {
+        memcpy(&saves->data[SAVEDATA_SIZE * 2], &backup_saves->data[SAVEDATA_SIZE * 2], SAVEDATA_SIZE);
+        rewrite = TRUE;
+    }
+
+    BOOL sp10 = FALSE;
+    if (!save1_valid && !backup1_valid &&
+        !save2_valid && !backup2_valid &&
+        !save3_valid && !backup3_valid)
+    {
+        sp10 = TRUE;
+    }
+
+    if (rewrite) {
+        NANDSeek(file, 0, 0);
+        ret = NANDWrite(file, saves, 0x2000);
+        if (ret != 0x2000) {
+            return ret;
+        }
+
+        NANDSeek(file, 0x2000, 0);
+        ret = NANDWrite(file, saves, 0x2000);
+        if (ret != 0x2000) {
+            return ret;
+        }
+    }
+
+    memcpy(data, saves->data, length);
+    mDoMemCd_setDataVersion(saves->data_version);
+
+    return NAND_RESULT_OK;
+}
+#endif
+
+#if PLATFORM_WII || PLATFORM_SHIELD
+s32 mDoMemCdRWm_StoreBannerNAND(NANDFileInfo* file) {
+    static NANDBanner info;
+    static wchar_t titleTxt[] = L"The Legend of Zelda:";
+    static wchar_t commentTxt[] = L"Twilight Princess";
+    u32 size;
+    s32 ret;
+
+    NANDInitBanner(&info, 0, (u16*)titleTxt, (u16*)commentTxt);
+
+    ResTIMG* banner_data = (ResTIMG*)dComIfGp_getCardIconResArchive()->getResource("zelda2_wii_banner.bti");
+    ResTIMG* icon_data = (ResTIMG*)dComIfGp_getCardIconResArchive()->getResource("zelda2_wii_icon.bti");
+
+    u8* banner_base_ptr = (u8*)banner_data;
+    u8* icon_base_ptr = (u8*)icon_data;
+
+    memcpy(info.bannerTexture, banner_base_ptr + banner_data->imageOffset, sizeof(info.bannerTexture));
+    memcpy(info.iconTexture, icon_base_ptr + icon_data->imageOffset, 0x1200);
+    dComIfGp_getCardIconResArchive()->removeResourceAll();
+
+    NANDSetIconSpeed(info, 0, NAND_STAT_SPEED_MIDDLE);
+    NANDSetIconSpeed(info, 1, NAND_STAT_SPEED_END);
+
+    size = 0x72A0;
+    ret = NANDWrite(file, &info, size);
+    if (ret != size) {
+        return ret;
+    }
+
+    return NAND_RESULT_OK;
+}
+#endif
+
+static void mDoMemCdRWm_BuildHeader(mDoMemCdRWm_HeaderData* header) {
+#if !TARGET_PC
+    snprintf(header->mTitle, sizeof(header->mTitle), HEADER_TITLE);
+#endif
+
+    OSCalendarTime time;
+    OSTicksToCalendarTime(DUSK_IF_ELSE(OSGetSystemTime(), OSGetTime()), &time);
+
+#if TARGET_PC
+    if (dusk::version::isRegionPal()) {
+        snprintf(header->mTitle, sizeof(header->mTitle), HEADER_TITLE);
+
+        switch (dComIfGs_getPalLanguage()) {
+        case dSv_player_config_c::LANGUAGE_ENGLISH:
+            snprintf(header->mComment, sizeof(header->mComment), "%d/%d Save Data", time.mon + 1, time.mday);
+            break;
+        case dSv_player_config_c::LANGUAGE_GERMAN:
+            snprintf(header->mComment, sizeof(header->mComment), "%d/%d Spielstand", time.mday, time.mon + 1);
+            break;
+        case dSv_player_config_c::LANGUAGE_FRENCH:
+            snprintf(header->mComment, sizeof(header->mComment), "Donn%ces de jeu %d/%d", 0xE9, time.mday, time.mon + 1);
+            break;
+        case dSv_player_config_c::LANGUAGE_SPANISH:
+            snprintf(header->mComment, sizeof(header->mComment), "Datos guardados el %d/%d", time.mday, time.mon + 1);
+            break;
+        case dSv_player_config_c::LANGUAGE_ITALIAN:
+            snprintf(header->mComment, sizeof(header->mComment), "Dati salvati: %d/%d", time.mday, time.mon + 1);
+            break;
+        }
+    } else if (dusk::version::isRegionUsa()) {
+        snprintf(header->mTitle, sizeof(header->mTitle), HEADER_TITLE);
+
+        snprintf(header->mComment, sizeof(header->mComment), HEADER_COMMENT, time.mon + 1, time.mday);
+    } else {
+        // shift-jis "ゼルダの伝説 ﾄﾜｲﾗｲﾄﾌﾟﾘﾝｾｽ"
+        snprintf(header->mTitle, sizeof(header->mTitle), "\x83\x5b\x83\x8b\x83\x5f\x82\xcc\x93\x60\x90\xe0\x20\xc4\xdc\xb2\xd7\xb2\xc4\xcc\xdf\xd8\xdd\xbe\xbd");
+        // shift-jis "%d月%d日のセーブデータです"
+        snprintf(header->mComment, sizeof(header->mComment), "\x25\x64\x8c\x8e\x25\x64\x93\xfa\x82\xcc\x83\x5a\x81\x5b\x83\x75\x83\x66\x81\x5b\x83\x5e\x82\xc5\x82\xb7", time.mon + 1, time.mday);
+    }
+#elif VERSION == VERSION_GCN_PAL
+    switch (dComIfGs_getPalLanguage()) {
+    case dSv_player_config_c::LANGUAGE_ENGLISH:
+        snprintf(header->mComment, sizeof(header->mComment), "%d/%d Save Data", time.mon + 1, time.mday);
+        break;
+    case dSv_player_config_c::LANGUAGE_GERMAN:
+        snprintf(header->mComment, sizeof(header->mComment), "%d/%d Spielstand", time.mday, time.mon + 1);
+        break;
+    case dSv_player_config_c::LANGUAGE_FRENCH:
+        snprintf(header->mComment, sizeof(header->mComment), "Donn%ces de jeu %d/%d", 0xE9, time.mday, time.mon + 1);
+        break;
+    case dSv_player_config_c::LANGUAGE_SPANISH:
+        snprintf(header->mComment, sizeof(header->mComment), "Datos guardados el %d/%d", time.mday, time.mon + 1);
+        break;
+    case dSv_player_config_c::LANGUAGE_ITALIAN:
+        snprintf(header->mComment, sizeof(header->mComment), "Dati salvati: %d/%d", time.mday, time.mon + 1);
+        break;
+    }
+#else
+    snprintf(header->mComment, sizeof(header->mComment), HEADER_COMMENT, time.mon + 1, time.mday);
+#endif
+
+    ResTIMG* banner_data = (ResTIMG*)dComIfGp_getCardIconResArchive()->getResource("zelda2_gc_banner.bti");
+    ResTIMG* icon_data = (ResTIMG*)dComIfGp_getCardIconResArchive()->getResource("zelda2_gc_icon.bti");
+
+    memcpy(header->mBannerTexData, (u8*)banner_data + banner_data->imageOffset, (banner_data->numColors * 2) + 0xC00);
+    memcpy(header->mIconTexData0, (u8*)icon_data + icon_data->imageOffset, 0x400);
+    memcpy(header->mIconTexData1, (u8*)icon_data + icon_data->imageOffset, 0x400);
+    memcpy(header->mIconTexData2, (u8*)icon_data + icon_data->imageOffset, 0x400);
+    memcpy(header->mIconTexData3, (u8*)icon_data + icon_data->imageOffset, 0x400);
+    memcpy(header->mIconTexData4, (u8*)icon_data + icon_data->imageOffset, (icon_data->numColors * 2) + 0x400);
+
+    dComIfGp_getCardIconResArchive()->removeResourceAll();
+}
+
+#if TARGET_PC
+static s32 mDoMemCdRWm_SetCardStat(CARDFileInfo* file) {
+    CARDStat stat;
+    const s32 result = CARDGetStatus(file->chan, file->fileNo, &stat);
+    if (result != CARD_RESULT_READY) {
+        return result;
+    }
+#else
+static void mDoMemCdRWm_SetCardStat(CARDFileInfo* file) {
+    CARDStat stat;
+    mDoMemCd_getCardStatus(file->fileNo, &stat);
+#endif
+
+    stat.iconAddr = 0;
+    stat.commentAddr = 0x2400;
+    CARDSetBannerFormat(&stat, CARD_STAT_BANNER_C8);
+    CARDSetIconAnim(&stat, CARD_STAT_ANIM_BOUNCE);
+    CARDSetIconFormat(&stat, 0, CARD_STAT_ICON_C8);
+    CARDSetIconFormat(&stat, 1, CARD_STAT_ICON_C8);
+    CARDSetIconFormat(&stat, 2, CARD_STAT_ICON_C8);
+    CARDSetIconFormat(&stat, 3, CARD_STAT_ICON_C8);
+    CARDSetIconFormat(&stat, 4, CARD_STAT_ICON_C8);
+    CARDSetIconFormat(&stat, 5, CARD_STAT_ICON_NONE);
+    CARDSetIconFormat(&stat, 6, CARD_STAT_ICON_NONE);
+    CARDSetIconFormat(&stat, 7, CARD_STAT_ICON_NONE);
+    CARDSetIconSpeed(&stat, 0, CARD_STAT_SPEED_FAST);
+    CARDSetIconSpeed(&stat, 1, CARD_STAT_SPEED_FAST);
+    CARDSetIconSpeed(&stat, 2, CARD_STAT_SPEED_FAST);
+    CARDSetIconSpeed(&stat, 3, CARD_STAT_SPEED_FAST);
+    CARDSetIconSpeed(&stat, 4, CARD_STAT_SPEED_FAST);
+    CARDSetIconSpeed(&stat, 5, CARD_STAT_SPEED_END);
+    CARDSetIconSpeed(&stat, 6, CARD_STAT_SPEED_END);
+    CARDSetIconSpeed(&stat, 7, CARD_STAT_SPEED_END);
+
+#if TARGET_PC
+    return CARDSetStatus(file->chan, file->fileNo, &stat);
+#else
+    mDoMemCd_setCardStatus(file->fileNo, &stat);
+#endif
+}
+
+static BOOL mDoMemCdRWm_CheckCardStat(CARDFileInfo* file) {
+    CARDStat stat;
+    mDoMemCd_getCardStatus(file->fileNo, &stat);
+
+    if (stat.iconAddr != 0 || stat.commentAddr != 0x2400
+        || CARDGetBannerFormat(&stat) != CARD_STAT_BANNER_C8
+        || CARDGetIconAnim(&stat) != CARD_STAT_ANIM_BOUNCE
+        || CARDGetIconFormat(&stat, 0) != CARD_STAT_ICON_C8
+        || CARDGetIconFormat(&stat, 1) != CARD_STAT_ICON_C8
+        || CARDGetIconFormat(&stat, 2) != CARD_STAT_ICON_C8
+        || CARDGetIconFormat(&stat, 3) != CARD_STAT_ICON_C8
+        || CARDGetIconFormat(&stat, 4) != CARD_STAT_ICON_C8
+        || CARDGetIconFormat(&stat, 5) != CARD_STAT_ICON_NONE
+        || CARDGetIconFormat(&stat, 6) != CARD_STAT_ICON_NONE
+        || CARDGetIconFormat(&stat, 7) != CARD_STAT_ICON_NONE
+        || CARDGetIconSpeed(&stat, 0) != CARD_STAT_SPEED_FAST
+        || CARDGetIconSpeed(&stat, 1) != CARD_STAT_SPEED_FAST
+        || CARDGetIconSpeed(&stat, 2) != CARD_STAT_SPEED_FAST
+        || CARDGetIconSpeed(&stat, 3) != CARD_STAT_SPEED_FAST
+        || CARDGetIconSpeed(&stat, 4) != CARD_STAT_SPEED_FAST
+        || CARDGetIconSpeed(&stat, 5) != CARD_STAT_SPEED_END
+        || CARDGetIconSpeed(&stat, 6) != CARD_STAT_SPEED_END
+        || CARDGetIconSpeed(&stat, 7) != CARD_STAT_SPEED_END)
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static u32 mDoMemCdRWm_CalcCheckSum(void* data, u32 size) {
+    int i;
+    u16 high, low;
+    high = low = 0;
+    BE(u16)* d;
+    for (i = 0, d = (BE(u16)*)data; i < size / 2; i++, d++) {
+        high += *d;
+        low += ~*d;
+    }
+
+    return high << 16 | low;
+}
+
+static u64 mDoMemCdRWm_CalcCheckSumGameData(void* data, u32 size) {
+    int i;
+    u32 high, low;
+    high = low = 0;
+
+    u8* d;
+    for (i = 0, d = (u8*)data; i < size; i++, d++) {
+        high += *d;
+        low += ~*d;
+    }
+
+    u64 tmp = high;
+    return tmp << 32 | low;
+}
+
+BOOL mDoMemCdRWm_TestCheckSumGameData(void* data) {
+    u64 checksum;
+    u8* file_ptr = (u8*)data;
+    checksum = mDoMemCdRWm_CalcCheckSumGameData(data, (SAVEDATA_SIZE - sizeof(u64)));
+    return checksum == *(BE(u64)*)(file_ptr + (SAVEDATA_SIZE - sizeof(u64)));
+}
+
+void mDoMemCdRWm_SetCheckSumGameData(u8* data, u8 dataNum) {
+    u8* file_ptr = data + (dataNum * SAVEDATA_SIZE);
+    u64 checksum = mDoMemCdRWm_CalcCheckSumGameData(file_ptr, (SAVEDATA_SIZE - sizeof(u64)));
+    *(BE(u64)*)(file_ptr + (SAVEDATA_SIZE - sizeof(u64))) = checksum;
+}

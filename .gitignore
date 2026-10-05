@@ -1,0 +1,55 @@
+# IDE folders
+.idea/
+.vs/
+
+# Caches
+__pycache__
+.mypy_cache
+.cache/
+
+# Original files
+orig/*/*
+!orig/*/.gitkeep
+*.dol
+*.rel
+*.elf
+*.o
+*.map
+*.MAP
+
+# Save files
+*.raw
+*.gci
+
+# Build files
+build/
+.ninja_*
+build.ninja
+
+# decompctx output
+ctx.*
+*.ctx
+
+# Generated configs
+objdiff.json
+compile_commands.json
+
+# Miscellaneous
+*.exe
+*.zip
+
+# MacOS
+.DS_Store
+
+# direnv / nix
+.direnv/
+.envrc
+
+# ISOs
+*.iso
+
+*.ini
+*.controller
+pipeline_cache.bin
+
+extract

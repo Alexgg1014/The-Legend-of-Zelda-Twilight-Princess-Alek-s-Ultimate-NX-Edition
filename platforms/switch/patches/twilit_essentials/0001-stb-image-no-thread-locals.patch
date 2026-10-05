@@ -1,0 +1,79 @@
+From: aleks2 (H38)
+Subject: [PATCH 1/2] collection-lib: stb_image without thread-local storage on the console
+
+A switch-arm64 module may not use TLS: the loader provides no TLS blocks and H38 adds none. The only TLS in
+Twilit Essentials is stb_image's failure reason, inside collection-lib, which the mod links. For the switch-arm64
+toolchain collection_lib is compiled with STBI_NO_THREAD_LOCALS (the reason becomes one global).
+
+That is safe because stb_image has a single, single-threaded user: tex_replacements_apply() is its only caller
+(decode, stbi_failure_reason and free are all inside it), it is reached from load_icon_uncached on the game thread,
+and neither the library nor the mod starts a thread. tex_replacements_apply() now asserts it: the first caller is
+taken as the owner thread, and a call from any other is refused (falls back to the original texture) instead of
+racing on the decoder.
+---
+diff --git a/collection-lib/CMakeLists.txt b/collection-lib/CMakeLists.txt
+index e1e19cd..4ff5c5a 100644
+--- a/collection-lib/CMakeLists.txt
++++ b/collection-lib/CMakeLists.txt
+@@ -28,6 +28,13 @@ add_library(collection_lib STATIC
+ # reason in a non-PIC object).
+ set_target_properties(collection_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+ 
++# aleks2 (H38): a switch-arm64 module may not use thread-local storage (the loader has no TLS blocks, and no
++# TLS support is planned). The only TLS in this library is stb_image's failure reason, so it is built without it.
++# tex_replacements.cpp says why that is safe (stb_image has one single-threaded user).
++if (DUSK_SWITCH_ARM64_MODULE_TOOLCHAIN)
++    target_compile_definitions(collection_lib PRIVATE STBI_NO_THREAD_LOCALS)
++endif ()
++
+ target_include_directories(collection_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+ # dusklight_mod_api: SDK service headers. dusklight_game_abi_headers: the game's
+ # public include dirs + compile definitions. Deliberately NOT
+diff --git a/collection-lib/src/tex_replacements.cpp b/collection-lib/src/tex_replacements.cpp
+index effd324..a250f07 100644
+--- a/collection-lib/src/tex_replacements.cpp
++++ b/collection-lib/src/tex_replacements.cpp
+@@ -1,5 +1,6 @@
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cmath>
+ #include <cstdarg>
+ #include <cstdio>
+@@ -8,6 +9,7 @@
+ #include <fstream>
+ #include <new>
+ #include <string>
++#include <thread>
+ #include <vector>
+ 
+ #include <mods/svc/host.h>
+@@ -185,10 +187,28 @@ static ResTIMG* tex_rep_build_override(ResTIMG* original, const u8* pngPixels, i
+     return reinterpret_cast<ResTIMG*>(buffer);
+ }
+ 
++// aleks2 (H38): on the console this library is built with STBI_NO_THREAD_LOCALS -- the module loader provides no TLS
++// block, and stb_image's failure reason is thread-local unless told otherwise -- so stbi_failure_reason() is one
++// global here. That is safe only while stb_image has a single, single-threaded user: tex_replacements_apply() is
++// its only caller in this library and in the mod, and it runs on the game thread (load_icon_uncached, a game-thread
++// load of the Collection screen's icons; neither the library nor the mod starts a thread). The first caller is taken
++// as that thread and a call from any other is refused instead of racing on the decoder's state.
++static std::atomic<std::thread::id> g_texRepOwner{};
++
++static bool tex_rep_on_owner_thread() {
++    std::thread::id owner{};
++    const std::thread::id me = std::this_thread::get_id();
++    return g_texRepOwner.compare_exchange_strong(owner, me) || owner == me;
++}
++
+ ResTIMG* tex_replacements_apply(const char* resPath, ResTIMG* fallback) {
+     if (fallback == nullptr) {
+         return nullptr;
+     }
++    if (!tex_rep_on_owner_thread()) {
++        tex_rep_log("texture replacement '%s': called off the game thread, not decoded", resPath);
++        return fallback;
++    }
+ 
+     std::filesystem::path pngPath;
+     std::error_code ec;

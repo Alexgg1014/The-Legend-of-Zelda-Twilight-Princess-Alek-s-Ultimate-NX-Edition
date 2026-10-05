@@ -1,0 +1,78 @@
+#ifndef D_A_OBJ_SEKIDOOR_H
+#define D_A_OBJ_SEKIDOOR_H
+
+#include "d/d_bg_s_movebg_actor.h"
+#include "SSystem/SComponent/c_phase.h"
+#include "d/d_com_inf_game.h"
+#include "f_op/f_op_actor_mng.h"
+
+struct daObj_SekiDoor_HIOParam {
+    /* 0x00 */ u8 field_0x0;
+};
+
+class daObj_SekiDoor_Param_c {
+public:
+    virtual ~daObj_SekiDoor_Param_c() {};
+
+    static DUSK_GAME_DATA daObj_SekiDoor_HIOParam const m;
+};
+
+#if DEBUG
+class daObj_SekiDoor_HIO_c : public mDoHIO_entry_c {
+public:
+    daObj_SekiDoor_HIO_c();
+
+    void listenPropertyEvent(const JORPropertyEvent*);
+
+    void genMessage(JORMContext*);
+
+    daObj_SekiDoor_HIOParam m;
+};
+
+#define OBJ_SEKIDOOR_HIO_CLASS daObj_SekiDoor_HIO_c
+#else
+#define OBJ_SEKIDOOR_HIO_CLASS daObj_SekiDoor_Param_c
+#endif
+
+/**
+ * @ingroup actors-objects
+ * @class daObj_SekiDoor_c
+ * @brief Stone Door
+ *
+ * @details
+ *
+ */
+class daObj_SekiDoor_c : public dBgS_MoveBgActor {
+public:
+    int create();
+    virtual int CreateHeap();
+    virtual int Create();
+    virtual int Delete();
+    virtual int Execute(Mtx**);
+    virtual int Draw();
+    void evtSkip();
+    void setPrtcls();
+    void initBaseMtx();
+    void setBaseMtx();
+
+    u16 getBitSW() { return (fopAcM_GetParam(this) & 0xff); }
+    void open() { mOpening = true; }
+    bool chkDestroy() { return (mDestroyed == true); }
+
+    /* 0x5A0 */ OBJ_SEKIDOOR_HIO_CLASS* mpHIO;
+    /* 0x5A4 */ request_of_phase_process_class mPhaseReq;
+    /* 0x5AC */ J3DModel* mpModel;
+    /* 0x5B0 */ csXyz mRotation;
+    /* 0x5B8 */ int mFrameCounter; 
+    /* 0x5BC */ float mDoorPosY;
+    /* 0x5C0 */ s16 mOpenSpeed;
+    /* 0x5C4 */ u32 mpEmitters[4];
+    /* 0x5D4 */ u8 mDestroyed;
+    /* 0x5D5 */ u8 mOpening;
+    /* 0x5D6 */ u8 mBitSW;
+};
+
+STATIC_ASSERT(sizeof(daObj_SekiDoor_c) == 0x5d8);
+
+
+#endif /* D_A_OBJ_SEKIDOOR_H */

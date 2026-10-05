@@ -1,0 +1,387 @@
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_horse.h"
+#include "d/actor/d_a_tag_event.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_debug_viewer.h"
+#include "d/d_s_play.h"
+
+static fopAc_ac_c* daTag_getBk(u32 param_0) {
+    return fopAcM_searchFromName("Bk", 0xF, param_0);
+}
+
+u8 daTag_Event_c::getEventNo() {
+    return (fopAcM_GetParam(this) & 0xff000000) >> 24;
+}
+
+u8 daTag_Event_c::getSwbit() {
+    return (fopAcM_GetParam(this) & 0xff00) >> 8;
+}
+
+u8 daTag_Event_c::getSwbit2() {
+    return (fopAcM_GetParam(this) & 0xff0000) >> 16;
+}
+
+u8 daTag_Event_c::getType() {
+    return fopAcM_GetParam(this);
+}
+
+u16 daTag_Event_c::getInvalidEventFlag() {
+    return home.angle.x & 0x7FFF;
+}
+
+u16 daTag_Event_c::getAreaType() {
+    return home.angle.x & 0x8000;
+}
+
+u16 daTag_Event_c::getValidEventFlag() {
+    return home.angle.z;
+}
+
+BOOL daTag_Event_c::horseRodeo() {
+    if (getType() == 5) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+BOOL daTag_Event_c::arrivalTerms() {
+    int swbit2 = getSwbit2();
+    if (swbit2 != 0xFF) {
+        if (!dComIfGs_isSwitch(swbit2, fopAcM_GetRoomNo(this))) {
+            return false;
+        }
+    }
+
+    u16 invalid_flag = getInvalidEventFlag();
+    if (invalid_flag != 0x7FFF && invalid_flag != 0 &&
+        dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[invalid_flag]))
+    {
+        return false;
+    }
+
+    u16 valid_flag = getValidEventFlag();
+    if (valid_flag != 0xFFFF && valid_flag != 0 &&
+        !dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[valid_flag]))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void daTag_Event_c::demoInitProc() {
+    field_0x56e = 0;
+}
+
+void daTag_Event_c::demoEndProc() {}
+
+void daTag_Event_c::demoProc() {}
+
+int daTag_Event_c::create() {
+    fopAcM_ct(this, daTag_Event_c);
+
+    int swbit = getSwbit();
+    int room_no = fopAcM_GetRoomNo(this);
+
+    mEventIdx = dComIfGp_getEventManager().getEventIdx(this, getEventNo());
+    mMapToolId = -1;
+    mMapEventIdx = -1;
+
+    dStage_MapEvent_dt_c* event_data = dEvt_control_c::searchMapEventData(getEventNo(), room_no);
+    if (event_data != NULL) {
+        mMapToolId = event_data->field_0x5;
+        mMapEventIdx = dComIfGp_getEventManager().getEventIdx(this, mMapToolId);
+    }
+
+    eventInfo.setEventId(mEventIdx);
+    eventInfo.setMapToolId(getEventNo());
+
+    if (mEventIdx != -1 || horseRodeo() && (swbit == 0xFF || !dComIfGs_isSwitch(swbit, room_no)))
+    {
+        setActio(ACTION_ARRIVAL);
+    } else {
+        setActio(ACTION_WAIT);
+    }
+
+    shape_angle.x = shape_angle.z = 0;
+    current.angle.x = current.angle.z = 0;
+
+    scale.x *= 100.0f;
+    scale.y *= 100.0f;
+    scale.z *= 100.0f;
+
+    if (horseRodeo()) {
+            /* Main Event - Epona rescued flag */
+        if (dComIfGs_isEventBit(dSv_event_flag_c::M_023)) {
+            return cPhs_ERROR_e;
+        }
+
+        scale.x *= 10.0f;
+        scale.y *= 10.0f;
+        scale.z *= 10.0f;
+    }
+
+    return cPhs_COMPLEATE_e;
+}
+
+int daTag_Event_c::actionNext() {
+    if (eventInfo.checkCommandDemoAccrpt()) {
+        mEventIdx = mMapEventIdx;
+        mMapEventIdx = -1;
+
+        int roomNo = fopAcM_GetRoomNo(this);
+        dStage_MapEvent_dt_c* event_data =
+            dEvt_control_c::searchMapEventData(mMapToolId, roomNo);
+        if (event_data != NULL) {
+            mMapToolId = event_data->field_0x5;
+            mMapEventIdx = dComIfGp_getEventManager().getEventIdx(this, mMapToolId);
+        } else {
+            mMapToolId = -1;
+        }
+
+        setActio(ACTION_EVENT);
+        actionEvent();
+    } else {
+        fopAcM_orderOtherEventId(this, mMapEventIdx, mMapToolId, 0xFFFF, 0, 1);
+    }
+
+    return 1;
+}
+
+int daTag_Event_c::actionEvent() {
+    if (dComIfGp_evmng_endCheck(mEventIdx)) {
+        dComIfGp_event_reset();
+
+        if (mMapEventIdx != -1) {
+            setActio(ACTION_NEXT);
+            fopAcM_orderOtherEventId(this, mMapEventIdx, mMapToolId, 0xFFFF, 0, 1);
+        } else {
+            setActio(ACTION_WAIT);
+            demoEndProc();
+            mMapToolId = -1;
+        }
+    } else {
+        demoProc();
+    }
+
+    return 1;
+}
+
+int daTag_Event_c::actionReady() {
+    int swbit = getSwbit();
+
+    if (eventInfo.checkCommandDemoAccrpt()) {
+        demoInitProc();
+        setActio(ACTION_EVENT);
+        actionEvent();
+
+        if (swbit != 0xFF) {
+            dComIfGs_onSwitch(swbit, fopAcM_GetRoomNo(this));
+        }
+
+        if (horseRodeo() && dComIfGp_getHorseActor() != NULL) {
+            dComIfGp_getHorseActor()->onRodeoMode();
+        }
+    } else {
+        if (swbit != 0xFF && dComIfGs_isSwitch(swbit, fopAcM_GetRoomNo(this))) {
+            setActio(ACTION_WAIT);
+        } else {
+            fopAcM_orderOtherEventId(this, mEventIdx, getEventNo(), 0xFFFF, 0, 1);
+        }
+    }
+
+    return 1;
+}
+
+BOOL daTag_Event_c::checkArea() {
+    cXyz pos;
+    daPy_py_c* player = dComIfGp_getLinkPlayer();
+
+    if (getAreaType() == 0x8000) {
+        pos = player->current.pos;
+
+        cXyz start(current.pos.x - scale.x * 0.5f, current.pos.y, current.pos.z - scale.z * 0.5f);
+        cXyz end(current.pos.x + scale.x * 0.5f, current.pos.y + scale.y,
+                 current.pos.z + scale.z * 0.5f);
+
+        if (start.x <= pos.x && pos.x <= end.x && start.y <= pos.y && pos.y <= end.y &&
+            start.z <= pos.z && pos.z <= end.z)
+        {
+            return true;
+        }
+    } else {
+        pos = player->current.pos - current.pos;
+
+        if (pos.y < 0.0f) {
+            pos.y = -pos.y;
+        }
+
+        if (pos.abs2XZ() < scale.x * scale.x && pos.y <= scale.y) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int daTag_Event_c::actionHunt() {
+    int swbit = getSwbit();
+
+    if (swbit != 0xFF && dComIfGs_isSwitch(swbit, fopAcM_GetRoomNo(this))) {
+        setActio(ACTION_WAIT);
+    } else if (arrivalTerms() && checkArea()) {
+#if DEBUG
+        mEventIdx = dComIfGp_getEventManager().getEventIdx(this, getEventNo());
+#endif
+
+        setActio(ACTION_READY);
+        fopAcM_orderOtherEventId(this, mEventIdx, getEventNo(), 0xFFFF, 0, 1);
+    }
+
+    return 1;
+}
+
+int daTag_Event_c::actionArrival() {
+    setActio(ACTION_HUNT);
+    actionHunt();
+    return 1;
+}
+
+int daTag_Event_c::actionWait() {
+    return true;
+}
+
+int daTag_Event_c::actionHunt2() {
+    int swbit = getSwbit();
+
+    if (swbit != 0xFF && dComIfGs_isSwitch(swbit, fopAcM_GetRoomNo(this))) {
+        setActio(ACTION_WAIT);
+    } else if (arrivalTerms() && daTag_getBk(field_0x573) == NULL) {
+        if (mHunt2Timer > 0) {
+            mHunt2Timer--;
+        } else {
+            setActio(ACTION_READY);
+            fopAcM_orderOtherEventId(this, mEventIdx, getEventNo(), 0xFFFF, 0, 1);
+        }
+    } else {
+        mHunt2Timer = 65;
+    }
+
+    return 1;
+}
+
+int daTag_Event_c::execute() {
+    if (home.roomNo != dComIfGp_roomControl_getStayNo()) {
+        return 0;
+    }
+
+    switch (mAction) {
+    case ACTION_ARRIVAL:
+        actionArrival();
+        break;
+    case ACTION_HUNT:
+        actionHunt();
+        break;
+    case ACTION_HUNT2:
+        actionHunt2();
+        break;
+    case ACTION_READY:
+        actionReady();
+        break;
+    case ACTION_NEXT:
+        actionNext();
+        break;
+    case ACTION_EVENT:
+        actionEvent();
+        break;
+    default:
+        actionWait();
+    }
+
+    return 1;
+}
+
+int daTag_Event_c::draw() {
+#if DEBUG
+    static GXColor color = {0x00, 0x00, 0xFF, 0xFF};
+
+    if (g_envHIO.mOther.mDisplayTransparentCyl != 0) {
+        if (getAreaType() == 0x8000) {
+            cXyz sp30[8];
+            cXyz sp20(current.pos.x - scale.x * 0.5f,
+                         current.pos.y,
+                         current.pos.z - scale.z * 0.5f);
+            cXyz sp14(current.pos.x + scale.x * 0.5f,
+                         current.pos.y + scale.y,
+                         current.pos.z + scale.z * 0.5f);
+            sp30[0].set(sp20.x, sp20.y, sp20.z);
+            sp30[1].set(sp20.x, sp20.y, sp14.z);
+            sp30[2].set(sp14.x, sp20.y, sp14.z);
+            sp30[3].set(sp14.x, sp20.y, sp20.z);
+            sp30[4].set(sp20.x, sp14.y, sp20.z);
+            sp30[5].set(sp20.x, sp14.y, sp14.z);
+            sp30[6].set(sp14.x, sp14.y, sp14.z);
+            sp30[7].set(sp14.x, sp14.y, sp20.z);
+            dDbVw_drawCube8pXlu(sp30, color);
+        } else {
+            cXyz sp08(current.pos);
+            sp08.y -= scale.y;
+            dDbVw_drawCylinderXlu(
+                sp08, scale.x, scale.y * 2.0f,
+                color, 1);
+        }
+    }
+#endif
+    return 1;
+}
+
+static int daTag_Event_Draw(daTag_Event_c* i_this) {
+    return i_this->draw();
+}
+
+static int daTag_Event_Execute(daTag_Event_c* i_this) {
+    i_this->execute();
+    return 1;
+}
+
+static int daTag_Event_IsDelete(daTag_Event_c* i_this) {
+    return 1;
+}
+
+static int daTag_Event_Delete(daTag_Event_c* i_this) {
+    u32 actorId = fopAcM_GetID(i_this);
+    i_this->~daTag_Event_c();
+    return 1;
+}
+
+static int daTag_Event_Create(fopAc_ac_c* i_this) {
+    daTag_Event_c* event = static_cast<daTag_Event_c*>(i_this);
+    u32 actorId = fopAcM_GetID(i_this);
+    int result = event->create();
+    return result;
+}
+
+static DUSK_CONST actor_method_class l_daTag_Event_Method = {
+    (process_method_func)daTag_Event_Create,  (process_method_func)daTag_Event_Delete,
+    (process_method_func)daTag_Event_Execute, (process_method_func)daTag_Event_IsDelete,
+    (process_method_func)daTag_Event_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_EVENT = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_EVENT_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTag_Event_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_EVENT_e,
+    /* Actor SubMtd */ &l_daTag_Event_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_6_e,
+};

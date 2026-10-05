@@ -1,0 +1,206 @@
+/**
+ * @file d_a_obj_catdoor.cpp
+ * 
+*/
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_obj_catdoor.h"
+#include "d/d_com_inf_game.h"
+
+static const char* l_arcName = "CatDoor";
+
+DUSK_GAME_DATA const daObjCatDoor_Attr_c daObjCatDoor_c::M_attr = {
+    30,
+    1400,
+};
+
+daObjCatDoor_c::~daObjCatDoor_c() {
+    if (mDoor1.bgw.ChkUsed()) {
+        dComIfG_Bgsp().Release(&mDoor1.bgw);
+    }
+
+    if (mDoor2.bgw.ChkUsed()) {
+        dComIfG_Bgsp().Release(&mDoor2.bgw);
+    }
+
+    dComIfG_resDelete(&mPhaseReq, l_arcName);
+}
+
+int daObjCatDoor_c::createHeap() {
+    J3DModelData* modelData = (J3DModelData*)dComIfG_getObjectRes(l_arcName, 4);
+    JUT_ASSERT(174, modelData != NULL);
+
+    mDoor1.pmodel = mDoExt_J3DModel__create(modelData, 0x80000, 0x11000084);
+    mDoor2.pmodel = mDoExt_J3DModel__create(modelData, 0x80000, 0x11000084);
+    if (mDoor1.pmodel == NULL || mDoor2.pmodel == NULL) {
+        return 0;
+    }
+
+    if (mDoor1.bgw.Set((cBgD_t*)dComIfG_getObjectRes(l_arcName, 7), 1, &mDoor1.mtx)) {
+        return 0;
+    }
+
+    if (mDoor2.bgw.Set((cBgD_t*)dComIfG_getObjectRes(l_arcName, 7), 1, &mDoor2.mtx)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+int daObjCatDoor_c::draw() {
+    g_env_light.settingTevStruct(0x10, &current.pos, &tevStr);
+
+    fopAc_ac_c* actor = (fopAc_ac_c*)this;
+    g_env_light.setLightTevColorType_MAJI(mDoor1.pmodel, &actor->tevStr);
+    g_env_light.setLightTevColorType_MAJI(mDoor2.pmodel, &actor->tevStr);
+
+    dComIfGd_setListBG();
+    mDoExt_modelUpdateDL(mDoor1.pmodel);
+    mDoExt_modelUpdateDL(mDoor2.pmodel);
+    dComIfGd_setList();
+    return 1;
+}
+
+int daObjCatDoor_c::execute() {
+    if (fopAcM_isSwitch(this, getSwitchNo()) || mRotSpeed == 0) {
+        return 1;
+    }
+
+    calcOpen();
+    setBaseMtx();
+    return 1;
+}
+
+const daObjCatDoor_Attr_c* daObjCatDoor_c::attr() const {
+    return &daObjCatDoor_c::M_attr;
+}
+
+static int createSolidHeap(fopAc_ac_c* actor) {
+    daObjCatDoor_c* i_this = (daObjCatDoor_c*)actor;
+    return i_this->createHeap();
+}
+
+int daObjCatDoor_c::create() {
+    fopAcM_ct(this, daObjCatDoor_c);
+
+    int phase_state = dComIfG_resLoad(&mPhaseReq, l_arcName);
+    if (phase_state == cPhs_COMPLEATE_e) {
+        if (!fopAcM_entrySolidHeap(this, createSolidHeap, 0x2520)) {
+            return cPhs_ERROR_e;
+        } else {
+            create_init();
+        }
+    }
+    return phase_state;
+}
+
+void daObjCatDoor_c::create_init() {
+    JUT_ASSERT(295, getSwitchNo() != 0xff);
+
+    fopAcM_setCullSizeBox(this, -200.0f, 0.0f, -20.0f, 200.0f, 260.0f, 100.0f);
+    if (fopAcM_isSwitch(this, getSwitchNo())) {
+        mDoor1.angle = 0x8800;
+        mDoor2.angle = 0x7800;
+    } else {
+        mDoor1.bgw.SetCrrFunc(NULL);
+        mDoor1.bgw.SetRoomId(fopAcM_GetRoomNo(this));
+        dComIfG_Bgsp().Regist(&mDoor1.bgw, this);
+        mDoor2.bgw.SetCrrFunc(NULL);
+        mDoor2.bgw.SetRoomId(fopAcM_GetRoomNo(this));
+        dComIfG_Bgsp().Regist(&mDoor2.bgw, this);
+    }
+
+    initBaseMtx();
+}
+
+void daObjCatDoor_c::initBaseMtx() {
+    fopAcM_SetMtx(this, mMtx);
+    mDoMtx_stack_c::transS(current.pos);
+    mDoMtx_stack_c::YrotM(shape_angle.y);
+    cMtx_copy(mDoMtx_stack_c::get(), mMtx);
+    setBaseMtx();
+}
+
+void daObjCatDoor_c::setBaseMtx() {
+    mDoMtx_stack_c::transS(current.pos);
+    mDoMtx_stack_c::YrotM(shape_angle.y);
+
+    for (int i = 0; i < 2; i++) {
+        daObjCatDoor_Door_c* door = i == 0 ? &mDoor1 : &mDoor2;
+        f32 xOff = i == 0 ? -97.0f : 97.0f;
+        s16 rot = i == 0 ? door->angle : s16(door->angle + 0x8000);
+
+        mDoMtx_stack_c::push();
+        mDoMtx_stack_c::transM(xOff, 0.0, 0.0);
+        mDoMtx_stack_c::YrotM((s16)rot);
+        door->pmodel->setBaseTRMtx(mDoMtx_stack_c::get());
+        cMtx_copy(mDoMtx_stack_c::get(), door->mtx);
+        door->bgw.Move();
+        mDoMtx_stack_c::pop();
+    }
+}
+
+void daObjCatDoor_c::calcOpen() {
+    s16 prev = (s16)mRotSpeed;
+    int res = cLib_chaseS(&mRotSpeed, 0, attr()->speed);
+    for (int i = 0; i < 2; i++) {
+        daObjCatDoor_Door_c* door = i == 0 ? &mDoor1 : &mDoor2;
+        if (i == 0) {
+            door->angle -= mRotSpeed;
+        } else {
+            door->angle += mRotSpeed;
+        }
+    }
+
+    if (prev != 0 && res != 0) {
+        fopAcM_onSwitch(this, getSwitchNo());
+    }
+}
+
+static int daObjCatDoor_Draw(daObjCatDoor_c* i_this) {
+    return static_cast<daObjCatDoor_c*>(i_this)->draw();
+}
+
+static int daObjCatDoor_Execute(daObjCatDoor_c* i_this) {
+    return static_cast<daObjCatDoor_c*>(i_this)->execute();
+}
+
+static int daObjCatDoor_IsDelete(daObjCatDoor_c* i_this) {
+    return 1;
+}
+
+static int daObjCatDoor_Delete(daObjCatDoor_c* i_this) {
+    fpc_ProcID id = fopAcM_GetID(i_this);
+    i_this->~daObjCatDoor_c();
+    return 1;
+}
+
+static int daObjCatDoor_Create(fopAc_ac_c* actor) {
+    daObjCatDoor_c* i_this = (daObjCatDoor_c*)actor;
+    fpc_ProcID id = fopAcM_GetID(actor);
+    return i_this->create();
+}
+
+static DUSK_CONST actor_method_class l_daObjCatDoor_Method = {
+    (process_method_func)daObjCatDoor_Create,  (process_method_func)daObjCatDoor_Delete,
+    (process_method_func)daObjCatDoor_Execute, (process_method_func)daObjCatDoor_IsDelete,
+    (process_method_func)daObjCatDoor_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_Obj_CatDoor = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 3,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_Obj_CatDoor_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daObjCatDoor_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_Obj_CatDoor_e,
+    /* Actor SubMtd */ &l_daObjCatDoor_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e | fopAcStts_CULL_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

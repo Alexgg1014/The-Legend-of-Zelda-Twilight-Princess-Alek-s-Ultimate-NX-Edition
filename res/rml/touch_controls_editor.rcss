@@ -1,0 +1,152 @@
+body.touch-editor {
+    --color-editor-backdrop: rgba(4, 6, 8, 34%);
+    --color-editor-handle: rgba(34, 37, 42, 86%);
+    --color-editor-accent-rgb: 255, 232, 128;
+    --color-editor-highlight-rgb: 255, 244, 190;
+
+    background-color: var(--color-editor-backdrop);
+    z-index: 8;
+}
+
+body.touch-editor .control,
+body.touch-editor action-bar {
+    opacity: 0.88;
+    cursor: move;
+    pointer-events: auto;
+}
+
+body.touch-editor .control:hover,
+body.touch-editor action-bar:hover,
+body.touch-editor .control.editor-selected,
+body.touch-editor action-bar.editor-selected {
+    border-color: rgba(var(--color-editor-accent-rgb), 80%);
+    filter: brightness(1.15);
+}
+
+body.touch-editor action-bar button,
+body.touch-editor action-bar separator {
+    pointer-events: none;
+}
+
+selection-frame {
+    display: none;
+    position: absolute;
+    z-index: 20;
+    border-width: 2dp;
+    border-color: rgba(var(--color-editor-accent-rgb), 88%);
+    background-color: rgba(var(--color-editor-accent-rgb), 7%);
+    pointer-events: none;
+}
+
+selection-frame.visible {
+    display: block;
+}
+
+resize-handle {
+    display: block;
+    position: absolute;
+    width: 22dp;
+    height: 22dp;
+    border-width: 2dp;
+    border-color: rgba(var(--color-editor-highlight-rgb), 96%);
+    border-radius: 11dp;
+    background-color: var(--color-editor-handle);
+    pointer-events: auto;
+}
+
+resize-handle.left {
+    left: -12dp;
+}
+
+resize-handle.right {
+    right: -12dp;
+}
+
+resize-handle.top {
+    top: -12dp;
+}
+
+resize-handle.bottom {
+    bottom: -12dp;
+}
+
+resize-handle.horizontal {
+    top: 50%;
+    margin-top: -11dp;
+}
+
+resize-handle.vertical {
+    left: 50%;
+    margin-left: -11dp;
+}
+
+resize-handle.corner.left {
+    left: -12dp;
+}
+
+resize-handle.corner.right {
+    right: -12dp;
+}
+
+resize-handle.corner.top {
+    top: -12dp;
+}
+
+resize-handle.corner.bottom {
+    bottom: -12dp;
+}
+
+editor-toolbar {
+    --button-background: rgba(17, 19, 24, 88%);
+    --button-background-hover: rgba(78, 85, 96, 92%);
+    --button-border-color: rgba(var(--color-white-rgb), 26%);
+    --button-border-color-hover: rgba(var(--color-editor-highlight-rgb), 92%);
+    --button-color: rgba(255, 250, 232, 94%);
+
+    display: flex;
+    position: absolute;
+    left: 24dp;
+    right: 24dp;
+    top: 50%;
+    z-index: 30;
+    height: 48dp;
+    margin-top: -24dp;
+    gap: var(--space-sm);
+    justify-content: center;
+    pointer-events: auto;
+}
+
+editor-toolbar button.editor-command {
+    flex: 0 1 150dp;
+    min-width: 96dp;
+    height: 48dp;
+    padding: 0 14dp;
+    border-radius: var(--radius-panel);
+    border-width: 1dp;
+    border-color: var(--button-border-color);
+    background-color: var(--button-background);
+    color: var(--button-color);
+    font-family: var(--font-family-body);
+    font-size: var(--font-size-xl);
+    line-height: 48dp;
+    opacity: 1;
+    cursor: pointer;
+}
+
+editor-toolbar button.editor-command span {
+    display: block;
+    width: 100%;
+    line-height: 48dp;
+    text-align: center;
+}
+
+editor-toolbar button.editor-command.primary {
+    --button-border-color: rgba(var(--color-editor-accent-rgb), 70%);
+    --button-background: rgba(96, 82, 38, 90%);
+}
+
+editor-toolbar button.editor-command:hover,
+editor-toolbar button.editor-command:focus-visible {
+    border-color: var(--button-border-color-hover);
+    background-color: var(--button-background-hover);
+}

@@ -1,0 +1,244 @@
+/**
+ * @file d_a_obj_stick.cpp
+ * 
+*/
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_obj_stick.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_resorce.h"
+#include "m_Do/m_Do_ext.h"
+#include "d/actor/d_a_npc.h"
+
+DUSK_GAME_DATA const daObj_Stick_HIOParam daObj_Stick_Param_c::m = {
+    0.0f, -3.0f, 1.0f, 100.0f
+};
+
+DUSK_GAME_DATA dCcD_SrcSph daObj_Stick_c::mCcDSph = {
+    daNpcT_c::mCcDObjData,                                               // mObjInf
+    {
+        {{0.0f, 0.0f, 0.0f}, 0.0f}  // mSph
+    }  // mSphAttr
+};
+
+static DUSK_CONST char* l_resName = "Taro6";
+
+static OBJ_STICK_HIO_CLASS l_HIO;
+
+#if DEBUG
+daObj_Stick_HIO_c::daObj_Stick_HIO_c() {
+    m = daObj_Stick_Param_c::m;
+}
+
+void daObj_Stick_HIO_c::listenPropertyEvent(const JORPropertyEvent* event) {
+    // NONMATCHING
+}
+
+void daObj_Stick_HIO_c::genMessage(JORMContext* ctx) {
+    // NONMATCHING
+}
+#endif
+
+daObj_Stick_c::~daObj_Stick_c() {
+#if DEBUG
+    if (mpHIO != NULL) {
+        mpHIO->removeHIO();
+    }
+#endif
+
+    dComIfG_resDelete(&mPhase, getResName());
+}
+
+int daObj_Stick_c::create() {
+    fopAcM_ct(this, daObj_Stick_c);
+
+    mType = getType();
+    
+    int phase_state = dComIfG_resLoad(&mPhase, getResName());
+
+    if (phase_state == cPhs_COMPLEATE_e) {
+        if (isDelete()) {
+            return cPhs_ERROR_e;
+        }
+        if (!fopAcM_entrySolidHeap(this, createHeapCallBack, 0x810)) {
+            return cPhs_ERROR_e;
+        }
+
+        J3DModelData* modelData;
+        modelData = mpModel->getModelData();
+        fopAcM_SetMtx(this, mpModel->getBaseTRMtx());
+        fopAcM_setCullSizeBox(this, -50.0, -50.0, -75.0, 50.0, 50.0, 75.0);
+
+#if DEBUG
+        mpHIO = &l_HIO;
+        mpHIO->entryHIO("タロの棒");
+#endif
+
+        mAcch.Set(fopAcM_GetPosition_p(this), 
+            fopAcM_GetOldPosition_p(this), 
+            this, 
+            1,
+            &mAcchCir, 
+            fopAcM_GetSpeed_p(this), 
+            fopAcM_GetAngle_p(this), 
+            fopAcM_GetShapeAngle_p(this));
+        mStts.Init(0xFF, 0, this);
+        mSph.Set(daObj_Stick_c::mCcDSph);
+        mSph.SetStts(&mStts);
+        mAcch.CrrPos(dComIfG_Bgsp());
+        mGndChk = mAcch.m_gnd;
+        mGroundHeight = mAcch.GetGroundH();
+
+        if(mGroundHeight != -G_CM3D_F_INF) {
+            setEnvTevColor();
+            setRoomNo();
+        }
+        Execute();
+    }
+
+    return phase_state;
+}
+
+int daObj_Stick_c::CreateHeap() {
+    J3DModelData* objectRes = (J3DModelData*)dComIfG_getObjectRes(getResName(), 3);
+    if (objectRes == NULL) {
+        return 0;
+    }
+
+    mpModel = mDoExt_J3DModel__create(objectRes, 0x80000, 0x11000084);
+    if (mpModel == NULL) {
+        return 0;
+    }
+    
+    return 1;
+}
+
+int daObj_Stick_c::Delete() {
+    this->~daObj_Stick_c();
+
+    return 1;
+}
+
+int daObj_Stick_c::Execute() {
+    mAcch.CrrPos(dComIfG_Bgsp());
+    mGndChk = mAcch.m_gnd;
+    
+    mGroundHeight = mAcch.GetGroundH();
+    if (mGroundHeight != -G_CM3D_F_INF) {
+        setEnvTevColor();
+        setRoomNo();
+    }
+
+    setMtx();
+    mSph.ClrCoHit();
+    attention_info.position = current.pos;
+    attention_info.position.y += mpHIO->m.attention_offset;
+    eyePos = attention_info.position;
+    attention_info.flags = 0;
+    
+    return 1;
+}
+
+int daObj_Stick_c::Draw() {
+    g_env_light.settingTevStruct(0, &current.pos, &tevStr);
+    g_env_light.setLightTevColorType_MAJI(mpModel, &tevStr);
+    mDoExt_modelUpdateDL(mpModel);
+
+    if(mGroundHeight != -G_CM3D_F_INF) {
+        mShadowKey = dComIfGd_setShadow(mShadowKey, 
+            1, 
+            mpModel, 
+            &current.pos, 
+            mpHIO->m.real_shadow_size,
+            20.0f, 
+            current.pos.y,
+            mGroundHeight, 
+            mGndChk, 
+            &tevStr, 
+            0, 
+            1.0, 
+            dDlst_shadowControl_c::getSimpleTex());
+    }
+
+    return 1;
+}
+
+int daObj_Stick_c::createHeapCallBack(fopAc_ac_c* i_this) {
+    return static_cast<daObj_Stick_c*>(i_this)->CreateHeap();
+}
+
+const char* daObj_Stick_c::getResName() {
+    return l_resName;
+}
+
+BOOL daObj_Stick_c::isDelete() {
+    switch(mType) {
+        case 0:
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+void daObj_Stick_c::setEnvTevColor() {
+    tevStr.YukaCol = dComIfG_Bgsp().GetPolyColor(mGndChk);
+    tevStr.room_no = dComIfG_Bgsp().GetRoomId(mGndChk);
+}
+
+void daObj_Stick_c::setRoomNo() {
+    u32 roomId = dComIfG_Bgsp().GetRoomId(mGndChk);
+    fopAcM_SetRoomNo(this, roomId);
+}
+
+void daObj_Stick_c::setMtx() {
+    mDoMtx_stack_c::transS(current.pos.x, current.pos.y, current.pos.z);
+    mDoMtx_stack_c::ZXYrotM(shape_angle);
+    mDoMtx_stack_c::scaleM(scale);
+    mpModel->setBaseTRMtx(mDoMtx_stack_c::get());
+}
+
+static int daObj_Stick_Create(void* i_this) {
+    return static_cast<daObj_Stick_c*>(i_this)->create();
+}
+
+static int daObj_Stick_Delete(void* param_0) {
+    return static_cast<daObj_Stick_c*>(param_0)->Delete();
+}
+
+static int daObj_Stick_Execute(void* param_0) {
+    return static_cast<daObj_Stick_c*>(param_0)->Execute();
+}
+
+static int daObj_Stick_Draw(void* param_0) {
+    return static_cast<daObj_Stick_c*>(param_0)->Draw();
+}
+
+static int daObj_Stick_IsDelete(void* param_0) {
+    return 1;
+}
+
+static DUSK_CONST actor_method_class daObj_Stick_MethodTable = {
+    (process_method_func)daObj_Stick_Create,
+    (process_method_func)daObj_Stick_Delete,
+    (process_method_func)daObj_Stick_Execute,
+    (process_method_func)daObj_Stick_IsDelete,
+    (process_method_func)daObj_Stick_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_OBJ_STICK = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_OBJ_STICK_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daObj_Stick_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_OBJ_STICK_e,
+    /* Actor SubMtd */ &daObj_Stick_MethodTable,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e | fopAcStts_CULL_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

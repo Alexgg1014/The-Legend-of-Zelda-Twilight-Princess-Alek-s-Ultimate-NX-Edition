@@ -1,0 +1,23 @@
+--- a/public/common/TracySystem.cpp
++++ b/public/common/TracySystem.cpp
+@@ -101,6 +101,10 @@
+ #elif defined __EMSCRIPTEN__
+     // Not supported, but let it compile.
+     return 0;
++#elif defined __SWITCH__
++    // Horizon's thread handles are not the identifiers Tracy wants, and the console
++    // build does not run the profiler client; this only has to compile.
++    return 0;
+ #else
+     // To add support for a platform, retrieve and return the kernel thread identifier here.
+     //
+@@ -362,6 +366,9 @@
+     const auto user = getlogin();
+     if( user ) return user;
+     return "(?)";
++#elif defined __SWITCH__
++    // No users on Horizon, and newlib has no getlogin_r.
++    return "switch";
+ #else
+     static char user[1024] = {};
+     getlogin_r( user, sizeof( user ) );

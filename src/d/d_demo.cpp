@@ -1,0 +1,1213 @@
+#include "d/dolzel.h" // IWYU pragma: keep
+
+#include "d/d_demo.h"
+#include "d/d_debug_viewer.h"
+#include "d/d_msg_class.h"
+#include "d/d_msg_object.h"
+#include "f_op/f_op_camera_mng.h"
+#include "m_Do/m_Do_graphic.h"
+#include "d/actor/d_a_movie_player.h"
+#include "JSystem/JGadget/pointer.h"
+#include "JSystem/JGadget/define.h"
+#include <cstring>
+
+#include "dusk/logging.h"
+
+#if TARGET_PC
+#include "dusk/ui/ui.hpp"
+
+namespace {
+static int sJaiSkip = -1;
+
+static JSUList<JAIStream>* get_stream_list() {
+    return Z2GetSoundMgr()->getStreamMgr()->getStreamList();
+}
+
+static int get_stream_count(JSUList<JAIStream>* list) {
+    int i = 0;
+    for (JSULink<JAIStream>* l = list != nullptr ? list->getFirst() : nullptr; l != nullptr;
+        l = l->getNext()) {
+        i++;
+    }
+    return i;
+}
+
+static void pause_stream(int skip_first, bool paused) {
+    int i = 0;
+    JSUList<JAIStream>* list = get_stream_list();
+    for (JSULink<JAIStream>* l = list->getFirst(); l != nullptr; l = l->getNext(), ++i) {
+        if (i >= skip_first) {
+            l->getObject()->pause(paused);
+        }
+    }
+}
+
+static void pause_streams(int skip_first) {
+    if (!dusk::ui::is_prelaunch_open()) {
+        return;
+    }
+    JSUList<JAIStream>* list = get_stream_list();
+    if (list == nullptr || get_stream_count(list) <= skip_first) {
+        return;
+    }
+    pause_stream(skip_first, true);
+    sJaiSkip = skip_first;
+}
+
+static void unpause_streams(bool require_prelaunch_hidden) {
+    if (sJaiSkip < 0) {
+        return;
+    }
+    if (require_prelaunch_hidden && dusk::ui::is_prelaunch_open()) {
+        return;
+    }
+    pause_stream(sJaiSkip, false);
+    sJaiSkip = -1;
+}
+}  // namespace
+#endif
+
+DUSK_GAME_DATA s16 dDemo_c::m_branchId = -1;
+
+namespace {
+class jstudio_tAdaptor_message : public JStudio::TAdaptor_message {
+public:
+    typedef JStudio::TObject_message ObjectType;
+
+    jstudio_tAdaptor_message() {}
+
+    virtual ~jstudio_tAdaptor_message();
+    virtual void adaptor_do_MESSAGE(JStudio::data::TEOperationData, const void*, u32);
+};
+
+class jstudio_tCreateObject_message : public JStudio::TCreateObject {
+public:
+    jstudio_tCreateObject_message() {}
+
+    virtual ~jstudio_tCreateObject_message();
+    virtual bool create(JStudio::TObject**, const JStudio::stb::data::TParse_TBlock_object&);
+};
+
+jstudio_tAdaptor_message::~jstudio_tAdaptor_message() {}
+
+void jstudio_tAdaptor_message::adaptor_do_MESSAGE(JStudio::data::TEOperationData iType,
+                                                  const void* pContent, u32 uSize) {
+    switch (iType) {
+    case JStudio::data::UNK_0x19: {
+        JUT_ASSERT(107, pContent!=NULL);
+        JUT_ASSERT(108, uSize==4);
+        u32 content = *(BE(u32)*)pContent;
+        dMsgObject_setDemoMessage(content);
+        break;
+    }
+    default:
+#if DEBUG
+        JGadget_outMessage msg(JGadget_outMessage::warning, __FILE__, 124);
+        msg << "unknown data-type : " << iType << "\n  demo-object : " << adaptor_getID_string();
+        int x = 0;
+#else
+        break;
+#endif
+    }
+}
+
+jstudio_tCreateObject_message::~jstudio_tCreateObject_message() {}
+
+bool
+jstudio_tCreateObject_message::create(JStudio::TObject** ppObject,
+                                      const JStudio::stb::data::TParse_TBlock_object& iBlock) {
+    JUT_ASSERT(168, ppObject!=NULL);
+
+    u32 type = iBlock.get_type();
+    switch (type) {
+    case 'JMSG': 
+        {
+            jstudio_tAdaptor_message* adaptor = JKR_NEW jstudio_tAdaptor_message();
+            if (adaptor == NULL) {
+                return false;
+            }
+
+            JGadget::TPointer_delete<JStudio::TAdaptor_message> sp8(adaptor);
+            JStudio::TObject_message* object = JStudio::TCreateObject::createFromAdaptor<jstudio_tAdaptor_message>(iBlock, adaptor);
+            if (object == NULL) {
+                return false;
+            }
+
+            sp8.set(NULL);
+            *ppObject = object;
+        }
+        return true;
+    default:
+        return false;
+    }
+}
+
+};  // namespace
+
+dDemo_actor_c::dDemo_actor_c() {
+    mFlags = 0;
+    mTrans.set(0.0f, 0.0f, 0.0f);
+    mScale.set(1.0f, 1.0f, 1.0f);
+    mRotate.set(0, 0, 0);
+    mModel = NULL;
+    mAnmFrameMax = FLT_MAX;
+    mTexAnmFrameMax = FLT_MAX;
+}
+
+dDemo_actor_c::~dDemo_actor_c() {
+    fopAc_ac_c* actor = getActor();
+    if (actor != NULL) {
+        actor->demoActorID = 0;
+    }
+
+    mActorId = -1;
+    mOldAnmId = -1;
+    mBtpId = -1;
+    mBtkId = -1;
+    mBrkId = -1;
+
+    #if DEBUG
+    if(dComIfGp_event_getMode() == 0) {
+        g_dComIfG_gameInfo.play.getEvent()->setDebugStb(0);
+    }
+    #endif
+}
+
+fopAc_ac_c* dDemo_actor_c::getActor() {
+    return fopAcM_SearchByID(mActorId);
+}
+
+void dDemo_actor_c::setActor(fopAc_ac_c* pActor) {
+    if (pActor == NULL) {
+        mActorId = fpcM_ERROR_PROCESS_ID_e;
+    } else {
+        mActorId = fopAcM_GetID(pActor);
+    }
+
+    mOldAnmId = -1;
+    mBtpId = -1;
+    mBtkId = -1;
+    mBrkId = -1;
+}
+
+f32 dDemo_actor_c::getPrm_Morf() {
+    if (checkEnable(ENABLE_ANM_TRANSITION_e)) {
+        return mAnmTransition;
+    }
+
+    if (!checkEnable(1)) {
+        return 0.0f;
+    }
+
+    dDemo_prm_data* prm = mPrm.mData;
+
+    switch (mPrm.field_0x0) {
+    case ID_UNK_1:
+        if (field_0x54 < 4) {
+            return 0.0f;
+        }
+        return prm->field_0x4;
+    case ID_UNK_2:
+        if (field_0x54 < 7) {
+            return 0.0f;
+        }
+        return prm->field_0x7;
+    case ID_UNK_4:
+        if (field_0x54 < 6) {
+            return 0.0f;
+        }
+        return prm->field_0x6;
+    case ID_UNK_5:
+        if (field_0x54 < 0xB) {
+            return 0.0f;
+        }
+        return prm->field_0xb;
+    case ID_UNK_6:
+        if (field_0x54 < 0xF) {
+            return 0.0f;
+        }
+        return prm->field_0xf;
+    default:
+        return 0.0f;
+    }
+}
+
+DUSK_GAME_DATA dDemo_system_c* dDemo_c::m_system;
+
+DUSK_GAME_DATA JStudio::TControl* dDemo_c::m_control;
+
+DUSK_GAME_DATA JStudio_JStage::TCreateObject* dDemo_c::m_stage;
+
+DUSK_GAME_DATA JStudio_JAudio2::TCreateObject* dDemo_c::m_audio;
+
+DUSK_GAME_DATA dDemo_particle_c* dDemo_c::m_particle;
+
+DUSK_GAME_DATA JStudio::TCreateObject* dDemo_c::m_message;
+
+DUSK_GAME_DATA JStudio::TFactory* dDemo_c::m_factory;
+
+DUSK_GAME_DATA jmessage_tControl* dDemo_c::m_mesgControl;
+
+DUSK_GAME_DATA dDemo_object_c* dDemo_c::m_object;
+
+DUSK_GAME_DATA const u8* dDemo_c::m_data;
+
+DUSK_GAME_DATA int dDemo_c::m_frame;
+
+DUSK_GAME_DATA cXyz* dDemo_c::m_translation;
+
+DUSK_GAME_DATA f32 dDemo_c::m_rotationY;
+
+DUSK_GAME_DATA u32 dDemo_c::m_frameNoMsg;
+
+DUSK_GAME_DATA s32 dDemo_c::m_mode;
+
+DUSK_GAME_DATA u32 dDemo_c::m_status;
+
+DUSK_GAME_DATA u16 dDemo_c::m_branchType;
+
+DUSK_GAME_DATA const u8* dDemo_c::m_branchData;
+
+#if DEBUG
+u16 dDemo_c::m_branchNum = 0;
+#endif
+
+int dDemo_actor_c::getDemoIDData(int* o_arg0, int* o_arg1, int* o_arg2, u16* o_resID,
+                                 u8* param_4) {
+    JStudio::stb::TParseData_fixed<51, TValueIterator_misaligned<u32> > data(getPrm()->getData());
+
+    static JStudio::stb::TParseData_fixed<51, TValueIterator_misaligned<u32> > dummy;
+    static JGadget::binary::TValueIterator_misaligned<u32> it = dummy.begin();
+
+    if (it == data.end()) {
+        it = dummy.begin();
+        return 0;
+    }
+
+    if (it == dummy.begin()) {
+        it = data.begin();
+    }
+
+    u32 var_r31 = *it;
+    *o_arg0 = var_r31 >> 0x1E;
+    *o_arg1 = (var_r31 >> 0x18) & 0xF;
+    *o_arg2 = (var_r31 >> 0x10) & 0xF;
+    *o_resID = var_r31 & 0xFFFF;
+
+    if (param_4 != NULL) {
+        *param_4 = (var_r31 >> 0x17) & 1;
+    }
+
+    it++;
+    return 1;
+}
+
+static void* dDemo_getJaiPointer(char const* arcName, u32 anmID, int param_2, u16* param_3) {
+    if (param_2 <= 0 || param_3 == NULL) {
+        return NULL;
+    }
+
+    int i;
+    int var_r31;
+    for (i = var_r31 = 0; i < param_2; i++, var_r31 += 2) {
+        if ((u16)anmID == param_3[var_r31]) {
+            return dComIfG_getObjectIDRes(arcName, param_3[var_r31 + 1]);
+        }
+    }
+
+    return NULL;
+}
+
+int dDemo_setDemoData(fopAc_ac_c* i_actor, u8 i_flags, mDoExt_McaMorf* i_morf, char const* i_arcName,
+                      int param_4, u16* param_5, u32 param_6, s8 i_reverb) {
+    dDemo_actor_c* demo_actor = dDemo_c::getActor(i_actor->demoActorID);
+
+    if (demo_actor == NULL) {
+        return 0;
+    }
+
+    u8 flags = demo_actor->checkEnable(i_flags);
+    if (flags & dDemo_actor_c::ENABLE_TRANS_e) {
+        i_actor->old.pos = i_actor->current.pos = demo_actor->getTrans();
+    }
+
+    if (flags & dDemo_actor_c::ENABLE_ROTATE_e) {
+        i_actor->shape_angle = demo_actor->getRatate();
+    }
+
+    if (flags & dDemo_actor_c::ENABLE_SCALE_e) {
+        i_actor->scale = demo_actor->getScale();
+    }
+
+    if (flags & dDemo_actor_c::ENABLE_ANM_TRANSITION_e) {
+        i_actor->gravity = demo_actor->getPrm_Morf();
+    }
+
+    if (i_morf == NULL) {
+        return 1;
+    }
+
+    demo_actor->setModel(i_morf->getModel());
+
+    u32 anmID;
+    void* ptr;
+    const char* a_name;
+    J3DAnmTransform* i_key;
+    f32 prmMorf;
+    if (flags & dDemo_actor_c::ENABLE_ANM_e) {
+        anmID = demo_actor->getAnmId();
+
+        if (anmID != demo_actor->getOldAnmId()) {
+            if (anmID & 0x10000) {
+                a_name = dStage_roomControl_c::getDemoArcName();
+                JUT_ASSERT(0x267, a_name != NULL);
+            } else {
+                a_name = i_arcName;
+            }
+
+            demo_actor->setOldAnmId(anmID);
+
+            i_key = (J3DAnmTransform*)dComIfG_getObjectIDRes(a_name, anmID & 0xffff);
+            JUT_ASSERT(626, i_key != NULL);
+
+            ptr = dDemo_getJaiPointer(a_name, anmID & 0xffff, param_4, param_5);
+
+            prmMorf = demo_actor->getPrm_Morf();
+            i_morf->setAnm(i_key, -1, prmMorf, 1.0f, 0.0f, -1.0f, ptr);
+            demo_actor->setAnmFrameMax(i_morf->getEndFrame());
+        }
+    }
+
+    f32 anm_frame;
+    if (flags & dDemo_actor_c::ENABLE_ANM_FRAME_e) {
+        anm_frame = demo_actor->getAnmFrame();
+
+        if (anm_frame > 1.0f) {
+            anm_frame -= 1.0f;
+            i_morf->setFrame(anm_frame);
+            i_morf->play(&i_actor->current.pos, param_6, i_reverb);
+        } else {
+            i_morf->setFrame(anm_frame);
+        }
+    } else {
+        i_morf->play(&i_actor->current.pos, param_6, i_reverb);
+    }
+
+    return 1;
+}
+
+static void branchFile(char const* resName) {
+    u8* branchData = (u8*)dComIfG_getObjectRes(dStage_roomControl_c::getDemoArcName(), resName);
+    JUT_ASSERT(712, branchData != NULL);
+
+    dDemo_c::setBranchData(branchData);
+}
+
+void dDemo_actor_c::JSGSetData(u32 id, void const* pdata, u32 param_2) {
+    if (id == ID_UNK_1) {
+        JStudio::stb::TParseData_fixed<50, TValueIterator_misaligned<u16> > data(pdata);
+        if (!data.isEnd() && data.isValid()) {
+            JGadget::binary::TValueIterator_misaligned<u16> value(data.begin());
+            
+            dDemo_c::setBranchType(*value);
+            OS_REPORT("JSGSetData: 分岐条件<%d>\n", *value);
+        }
+    } else if (id == ID_UNK_2) {
+        JUT_ASSERT(728, dDemo_c::getBranchId() >= 0);
+
+        JStudio::stb::TParseData_string string_data(pdata);
+
+        u32 num = string_data.size();
+        // "JSGSetData: Branch<n=%d "
+        OS_REPORT("JSGSetData: 分岐<n=%d ", num);
+        JUT_ASSERT(0x2DD, num == dDemo_c::getBranchNum());
+        JUT_ASSERT(0x2DF, num > dDemo_c::getBranchId());
+
+        const char* str = string_data.getData();
+        for (s16 i = 0; i < dDemo_c::getBranchId(); i++) {
+            OS_REPORT("\"%s\"", str);
+            str += strlen(str) + 1;
+        }
+
+        // "Select<%d:\"%s\">\n"
+        OS_REPORT(" 選択<%d:\"%s\">\n", dDemo_c::getBranchId(), str);
+
+        if (strcmp(str, "-") != 0) {
+            branchFile(str);
+        }
+    } else if (id == ID_UNK_3) {
+        JStudio::stb::TParseData_string data(pdata);
+
+        u32 num = data.size();
+        JUT_ASSERT(0x2ED, num == 1);
+
+        const char* str = data.getData();
+        // "JSGSetData: Change<\"%s\">\n"
+        OS_REPORT("JSGSetData: 切り替え<\"%s\">\n", str);
+
+        branchFile(str);
+    } else {
+        JUT_ASSERT(0x2F3, id == ID_NORMAL);
+
+        mPrm.field_0x0 = id;
+        mPrm.mData = (dDemo_prm_data*)pdata;
+        field_0x54 = param_2;
+        
+        onEnable(1);
+    }
+}
+
+void dDemo_actor_c::JSGSetTranslation(Vec const& i_trans) {
+    if (-1.0E+32f < i_trans.x && i_trans.x < 1.0E+32f && -1.0E+32f < i_trans.y && i_trans.y < 1.0E+32f && -1.0E+32f < i_trans.z && i_trans.z < 1.0E+32f) {
+        mTrans.x = i_trans.x;
+        mTrans.y = i_trans.y;
+        mTrans.z = i_trans.z;
+        onEnable(ENABLE_TRANS_e);
+    } else {
+        // "\n\n!!JSGSetTranslation outside of range. x[%f]y[%f]z[%f]\n"
+        OS_REPORT("\n\n!!JSGSetTranslationで範囲外の指定がされました。x[%f]y[%f]z[%f]\n", i_trans.x, i_trans.y, i_trans.z);
+        JUT_ASSERT(789, FALSE);
+    }
+}
+
+void dDemo_actor_c::JSGSetScaling(Vec const& i_scale) {
+    mScale.x = i_scale.x;
+    mScale.y = i_scale.y;
+    mScale.z = i_scale.z;
+    onEnable(ENABLE_SCALE_e);
+}
+
+void dDemo_actor_c::JSGSetRotation(Vec const& i_rotate) {
+    mRotate.x = DEG2S(i_rotate.x);
+    mRotate.y = DEG2S(i_rotate.y);
+    mRotate.z = DEG2S(i_rotate.z);
+    onEnable(ENABLE_ROTATE_e);
+}
+
+void dDemo_actor_c::JSGSetShape(u32 i_shape) {
+    mShape = i_shape;
+    onEnable(ENABLE_SHAPE_e);
+}
+
+void dDemo_actor_c::JSGSetAnimation(u32 i_anmID) {
+    mAnmId = i_anmID;
+    mAnmFrameMax = FLT_MAX;
+    onEnable(ENABLE_ANM_e);
+}
+
+void dDemo_actor_c::JSGSetAnimationFrame(f32 i_frame) {
+    mAnmFrame = i_frame;
+    onEnable(ENABLE_ANM_FRAME_e);
+}
+
+void dDemo_actor_c::JSGSetAnimationTransition(f32 i_trans) {
+    mAnmTransition = i_trans;
+    onEnable(ENABLE_ANM_TRANSITION_e);
+}
+
+void dDemo_actor_c::JSGSetTextureAnimation(u32 i_anm) {
+    mTexAnm = i_anm;
+    onEnable(ENABLE_TEX_ANM);
+}
+
+void dDemo_actor_c::JSGSetTextureAnimationFrame(f32 i_frame) {
+    mTexAnmFrame = i_frame;
+    onEnable(ENABLE_TEX_ANM_FRAME_e);
+}
+
+static view_class* getView() {
+    if (!dComIfGp_getWindowNum()) {
+        return NULL;
+    }
+
+    dDlst_window_c* window = dComIfGp_getWindow(0);
+    int camID = window->getCameraID();
+    return &dComIfGp_getCamera(camID)->view;
+}
+
+f32 dDemo_camera_c::JSGGetProjectionNear() const {
+    view_class* view = getView();
+
+    if (view == NULL) {
+        return 0.0f;
+    }
+
+    return view->near_;
+}
+
+void dDemo_camera_c::JSGSetProjectionNear(f32 i_projNear) {
+    mProjNear = i_projNear;
+    onEnable(ENABLE_PROJ_NEAR_e);
+}
+
+f32 dDemo_camera_c::JSGGetProjectionFar() const {
+    view_class* view = getView();
+
+    if (view == NULL) {
+        return 1.0f;
+    }
+
+    return view->far_;
+}
+
+void dDemo_camera_c::JSGSetProjectionFar(f32 i_projFar) {
+    mProjFar = i_projFar;
+    onEnable(ENABLE_PROJ_FAR_e);
+}
+
+f32 dDemo_camera_c::JSGGetProjectionFovy() const {
+    view_class* view = getView();
+
+    if (view == NULL) {
+        return 60.0f;
+    }
+
+    return view->fovy;
+}
+
+void dDemo_camera_c::JSGSetProjectionFovy(f32 i_projFovy) {
+    mProjFovy = i_projFovy;
+    onEnable(ENABLE_PROJ_FOVY_e);
+}
+
+f32 dDemo_camera_c::JSGGetProjectionAspect() const {
+    view_class* view = getView();
+
+    if (view == NULL) {
+        return mDoGph_gInf_c::getAspect();
+    }
+
+    return view->aspect;
+}
+
+void dDemo_camera_c::JSGSetProjectionAspect(f32 i_aspect) {
+    mProjAspect = i_aspect;
+    onEnable(ENABLE_PROJ_ASPECT_e);
+}
+
+void dDemo_camera_c::JSGGetViewPosition(Vec* o_position) const {
+    view_class* view = getView();
+
+    if (view == NULL) {
+        o_position->x = 0.0f;
+        o_position->y = 0.0f;
+        o_position->z = 0.0f;
+    } else {
+        *o_position = view->lookat.eye;
+    }
+}
+
+void dDemo_camera_c::JSGSetViewPosition(Vec const& i_position) {
+    mViewPos.x = i_position.x;
+    mViewPos.y = i_position.y;
+    mViewPos.z = i_position.z;
+    onEnable(ENABLE_VIEW_POS_e);
+}
+
+void dDemo_camera_c::JSGGetViewUpVector(Vec* o_upVec) const {
+    view_class* view = getView();
+
+    if (view == NULL) {
+        o_upVec->x = 0.0f;
+        o_upVec->y = 1.0f;
+        o_upVec->z = 0.0f;
+    } else {
+        *o_upVec = view->lookat.up;
+    }
+}
+
+void dDemo_camera_c::JSGSetViewUpVector(Vec const& i_upVec) {
+    mViewUpVector.x = i_upVec.x;
+    mViewUpVector.y = i_upVec.y;
+    mViewUpVector.z = i_upVec.z;
+    onEnable(ENABLE_VIEW_UP_VEC_e);
+}
+
+void dDemo_camera_c::JSGGetViewTargetPosition(Vec* o_targetPos) const {
+    view_class* view = getView();
+
+    if (view == NULL) {
+        o_targetPos->x = 0.0f;
+        o_targetPos->y = 0.0f;
+        o_targetPos->z = 1.0f;
+    } else {
+        *o_targetPos = view->lookat.center;
+    }
+}
+
+void dDemo_camera_c::JSGSetViewTargetPosition(Vec const& i_targetPos) {
+    mViewTargetVector.x = i_targetPos.x;
+    mViewTargetVector.y = i_targetPos.y;
+    mViewTargetVector.z = i_targetPos.z;
+    onEnable(ENABLE_VIEW_TARG_POS_e);
+}
+
+f32 dDemo_camera_c::JSGGetViewRoll() const {
+    view_class* view = getView();
+    
+    if (view == NULL) {
+        return 0.0f;
+    }
+
+    return S2DEG(view->bank);
+}
+
+void dDemo_camera_c::JSGSetViewRoll(f32 i_roll) {
+    mViewRoll = i_roll;
+    onEnable(ENABLE_VIEW_ROLL_e);
+}
+
+void dDemo_ambient_c::JSGSetColor(GXColor i_color) {
+    mColor = i_color;
+    onEnable(ENABLE_COLOR_e);
+}
+
+void dDemo_light_c::JSGSetLightType(JStage::TELight i_lightType) {
+    mLightType = i_lightType;
+    onEnable(ENABLE_LIGHT_TYPE_e);
+}
+
+void dDemo_light_c::JSGSetPosition(Vec const& i_pos) {
+    mPosition.x = i_pos.x;
+    mPosition.y = i_pos.y;
+    mPosition.z = i_pos.z;
+    onEnable(ENABLE_POSITION_e);
+}
+
+void dDemo_light_c::JSGSetColor(GXColor i_color) {
+    mColor = i_color;
+    onEnable(ENABLE_COLOR_e);
+}
+
+void dDemo_light_c::JSGSetDistanceAttenuation(f32 param_0, f32 param_1, GXDistAttnFn i_distAttenFn) {
+    field_0x24 = param_0;
+    field_0x28 = param_1;
+    mDistAttenFn = i_distAttenFn;
+    onEnable(ENABLE_DIST_ATTEN_e);
+}
+
+void dDemo_light_c::JSGSetAngleAttenuation(f32 param_0, GXSpotFn i_spotFn) {
+    field_0x2c = param_0;
+    mSpotFn = i_spotFn;
+    onEnable(ENABLE_ANGLE_ATTEN_e);
+}
+
+void dDemo_light_c::JSGSetDirection(Vec const& i_direction) {
+    mDirection.x = i_direction.x;
+    mDirection.y = i_direction.y;
+    mDirection.z = i_direction.z;
+    onEnable(ENABLE_DIRECTION_e);
+}
+
+void dDemo_fog_c::JSGSetFogFunction(GXFogType i_fogType) {
+    mFogType = i_fogType;
+    onEnable(ENABLE_FOG_FN_e);
+}
+
+void dDemo_fog_c::JSGSetStartZ(f32 i_startZ) {
+    mStartZ = i_startZ;
+    onEnable(ENABLE_START_Z_e);
+}
+
+void dDemo_fog_c::JSGSetEndZ(f32 i_endZ) {
+    mEndZ = i_endZ;
+    onEnable(ENABLE_END_Z_e);
+}
+
+void dDemo_fog_c::JSGSetColor(GXColor i_color) {
+    mColor = i_color;
+    onEnable(ENABLE_COLOR_e);
+}
+
+dDemo_object_c::dDemo_object_c() {
+    mActorNum = 0;
+    mLightNum = 0;
+    mpCamera = NULL;
+#if DEBUG
+    mpEditorCamera = NULL;
+#endif
+    mpAmbient = NULL;
+    mpFog = NULL;
+}
+
+dDemo_object_c::~dDemo_object_c() {
+    remove();
+#if DEBUG
+    removeEditorCamera();
+#endif
+}
+
+JStage::TObject* dDemo_object_c::appendActor(fopAc_ac_c* p_actor) {
+    dDemo_actor_c* demoActor = dDemo_c::getActor(p_actor->demoActorID);
+
+    if (demoActor != NULL) {
+        return demoActor;
+    }
+
+    if (mActorNum >= 32) {
+        // "Too many Demo Actors!!\n"
+        OS_REPORT("デモアクター登録数オーバー！！\n");
+        return NULL;
+    }
+
+    demoActor = JKR_NEW dDemo_actor_c();
+    if (demoActor == NULL) {
+        // "Failed to get Demo Actor!!\n"
+        OS_REPORT("デモアクター確保失敗！！\n");
+        return NULL;
+    }
+
+    mpActors[mActorNum++] = demoActor;
+    demoActor->setActor(p_actor);
+    p_actor->demoActorID = mActorNum;
+
+    if (p_actor->model != NULL) {
+        demoActor->setModel((J3DModel*)p_actor->model);
+    }
+
+    return demoActor;
+}
+
+dDemo_actor_c* dDemo_object_c::getActor(u8 actorId) {
+    if (actorId == 0 || actorId > 32) {
+        return NULL;
+    }
+
+    return mpActors[actorId - 1];
+}
+
+dDemo_camera_c* dDemo_object_c::createCamera() {
+    if (mpCamera != NULL) {
+        // "2 demo cameras!!\n"
+        OS_REPORT("デモカメラが２つも！！\n");
+        return mpCamera;
+    }
+
+    mpCamera = JKR_NEW dDemo_camera_c();
+    return mpCamera;
+}
+
+#if DEBUG
+dDemo_camera_c* dDemo_object_c::createEditorCamera() {
+    if (mpEditorCamera) {
+        OSReport("エディターカメラが２つも！！\n");
+        return mpEditorCamera;
+    }
+
+    mpEditorCamera = JKR_NEW dDemo_camera_c();
+    return mpEditorCamera;
+}
+#endif
+
+dDemo_camera_c* dDemo_object_c::getActiveCamera() {
+    if (getCamera() != NULL) {
+        return getCamera();
+    }
+
+    return NULL;
+}
+
+JStage::TObject* dDemo_object_c::createAmbient() {
+    if (mpAmbient != NULL) {
+        // "2 demo ambient lights!\n"
+        OS_REPORT("デモアンビエントライトが２つも！！\n");
+        return mpAmbient;
+    }
+
+    mpAmbient = JKR_NEW dDemo_ambient_c();
+    return mpAmbient;
+}
+
+JStage::TObject* dDemo_object_c::appendLight() {
+    if (mLightNum >= 8) {
+        // "Too many Demo Lights!!\n"
+        OS_REPORT("デモライト登録数オーバー！！\n");
+        return NULL;
+    }
+
+    dDemo_light_c* demoLight = JKR_NEW dDemo_light_c();
+    if (demoLight == NULL) {
+        // "Failed to get Demo Light!!\n"
+        OS_REPORT("デモライト確保失敗！！\n");
+        return NULL;
+    }
+
+    mpLights[mLightNum++] = demoLight;
+
+    return demoLight;
+}
+
+JStage::TObject* dDemo_object_c::createFog() {
+    if (mpFog != NULL) {
+        // "2 demo fogs!\n"
+        OS_REPORT("デモフォグが２つも！！\n");
+        return mpFog;
+    }
+
+    mpFog = JKR_NEW dDemo_fog_c();
+    return mpFog;
+}
+
+void dDemo_object_c::remove() {
+    while (mActorNum != 0) {
+        JKR_DELETE(mpActors[--mActorNum]);
+    }
+
+    if (mpCamera != NULL) {
+        JKR_DELETE(mpCamera);
+        mpCamera = NULL;
+    }
+
+    if (mpAmbient != NULL) {
+        JKR_DELETE(mpAmbient);
+        mpAmbient = NULL;
+    }
+
+    while (mLightNum != 0) {
+        JKR_DELETE(mpLights[--mLightNum]);
+    }
+
+    if (mpFog != NULL) {
+        JKR_DELETE(mpFog);
+        mpFog = NULL;
+    }
+}
+
+#if DEBUG
+void dDemo_object_c::removeEditorCamera() {
+    if (mpEditorCamera) {
+        JKR_DELETE(mpEditorCamera);
+        mpEditorCamera = NULL;
+    }
+}
+#endif
+
+dDemo_fog_c::~dDemo_fog_c() {}
+
+dDemo_light_c::~dDemo_light_c() {}
+
+dDemo_ambient_c::~dDemo_ambient_c() {}
+
+int dDemo_system_c::JSGFindObject(JStage::TObject** p_TObj, char const* actorName,
+                                   JStage::TEObject objType) const {
+    if (mpObject == NULL) {
+        // "No Demo Object Class!!"
+        OS_REPORT("デモオブジェクトクラスが無い！！");
+        return true;
+    }
+
+    if (objType == JStage::OBJECT_ACTOR || objType == JStage::OBJECT_UNDEFINED) {
+        if (DEBUG && dComIfGp_event_getMode() == 0) {
+            g_dComIfG_gameInfo.play.getEvent()->setDebugStb(true);
+        }
+        fopAc_ac_c* actor = fopAcM_searchFromName(actorName, 0, 0);
+
+        if (actor == NULL) {
+            if (objType == JStage::OBJECT_ACTOR && !strncmp(actorName, "d_act", 5)) {
+                actor =
+                    (fopAc_ac_c*)fopAcM_fastCreate(actorName, 0, NULL, -1, NULL, NULL, NULL, NULL);
+                if (actor == NULL) {
+                    // "Generic-actor<%s> creation failed!!\n"
+                    OS_WARNING("汎用くん<%s>生成失敗！！\n", actorName);
+                    return true;
+                }
+
+                fopAcM_setStageLayer(actor);
+                // "Generated Generic-actor<%s>!!\n"
+                OS_REPORT("汎用くん<%s>生成！！\n", actorName);
+            } else {
+                // "No Demo Actors available!!\n"
+                OS_WARNING("デモの出演者<%s>がいません！！\n", actorName);
+                return true;
+            }
+        }
+
+        *p_TObj = mpObject->appendActor(actor);
+    } else if (objType == JStage::OBJECT_CAMERA) {
+        if (DEBUG && !strcmp(actorName, "EditCam")) {
+#if DEBUG
+            *p_TObj = mpObject->createEditorCamera();
+#endif
+        } else {
+            *p_TObj = mpObject->createCamera();
+        }
+    } else if (objType == JStage::OBJECT_AMBIENT) {
+        *p_TObj = mpObject->createAmbient();
+    } else if (objType == JStage::OBJECT_LIGHT) {
+        *p_TObj = mpObject->appendLight();
+    } else if (objType == JStage::OBJECT_FOG) {
+        *p_TObj = mpObject->createFog();
+    } else {
+        // "Strange Demo Object type!! Type<%d>\n"
+        OS_REPORT("へんなデモオブジェクトタイプです！！ タイプ<%d>\n", objType);
+        JUT_ASSERT(1755, FALSE);
+    }
+
+    if (*p_TObj == NULL) {
+        return true;
+    } else  {
+        return false;
+    }
+}
+
+void dDemo_c::create() {
+    m_system = JKR_NEW dDemo_system_c();
+    JUT_ASSERT(1774, m_system != NULL);
+
+    m_control = JKR_NEW JStudio::TControl();
+    JUT_ASSERT(1776, m_control != NULL);
+
+    m_mesgControl = JKR_NEW jmessage_tControl();
+    JUT_ASSERT(1778, m_mesgControl != NULL);
+
+    m_stage = JKR_NEW JStudio_JStage::TCreateObject(m_system);
+    JUT_ASSERT(1781, m_stage != NULL);
+
+    JStudio_JAudio2::TCreateObject* p_audio = JKR_NEW JStudio_JAudio2::TCreateObject(Z2GetSoundStarter(), m_system);
+    m_audio = p_audio;
+    JUT_ASSERT(1787, m_audio != NULL);
+    p_audio->setPermit_onExit_notEnd(true);
+
+    m_particle = JKR_NEW dDemo_particle_c(dPa_control_c::getEmitterManager(), m_system);
+    JUT_ASSERT(1794, m_particle != NULL);
+
+    m_message = JKR_NEW jstudio_tCreateObject_message();
+    JUT_ASSERT(1797, m_message != NULL);
+
+    m_factory = JKR_NEW JStudio::TFactory();
+    JUT_ASSERT(1800, m_factory != NULL);
+
+    m_object = JKR_NEW dDemo_object_c();
+    JUT_ASSERT(1802, m_object != NULL);
+
+    m_control->setSecondPerFrame(1.0f / 30.0f);
+    m_control->setFactory(m_factory);
+    m_factory->appendCreateObject(m_stage);
+    m_factory->appendCreateObject(m_audio);
+    m_factory->appendCreateObject(m_particle);
+    m_factory->appendCreateObject(m_message);
+
+    m_system->setObject(m_object);
+    m_data = NULL;
+    m_mode = 0;
+    reset();
+}
+
+void dDemo_c::remove() {
+    end();
+
+    if (m_object != NULL) {
+        JKR_DELETE(m_object);
+        m_object = NULL;
+    }
+
+    if (m_factory != NULL) {
+        JKR_DELETE(m_factory);
+        m_factory = NULL;
+    }
+
+    if (m_message != NULL) {
+        JKR_DELETE(m_message);
+        m_message = NULL;
+    }
+
+    if (m_particle != NULL) {
+        JKR_DELETE(m_particle);
+        m_particle = NULL;
+    }
+
+    if (m_audio != NULL) {
+        JKR_DELETE(m_audio);
+        m_audio = NULL;
+    }
+
+    if (m_stage != NULL) {
+        JKR_DELETE(m_stage);
+        m_stage = NULL;
+    }
+
+    if (m_mesgControl != NULL) {
+        JKR_DELETE(m_mesgControl);
+        m_mesgControl = NULL;
+    }
+
+    if (m_control != NULL) {
+        JKR_DELETE(m_control);
+        m_control = NULL;
+    }
+
+    if (m_system != NULL) {
+        JKR_DELETE(m_system);
+        m_system = NULL;
+    }
+}
+
+dDemo_system_c::~dDemo_system_c() {}
+
+jmessage_tControl::~jmessage_tControl() {}
+
+int dDemo_c::start(u8 const* p_data, cXyz* p_translation, f32 rotationY) {
+    JUT_ASSERT(1886, m_system != NULL);
+
+    m_control->reset();
+    JStudio::TParse parser(m_control);
+
+    if (!parser.parse(p_data, 0)) {
+        // "Demo data read error!!\n"
+        OSReport_Error("デモデータ読み込みエラー！！\n");
+        return 0;
+    }
+
+    if (m_data == NULL) {
+        m_control->setSuspend(0);
+    }
+
+#if TARGET_PC
+    const int existing_streams = get_stream_count(get_stream_list());
+#endif
+
+    m_control->forward(0);
+
+#if TARGET_PC
+    pause_streams(existing_streams);
+#endif
+
+    m_translation = p_translation;
+
+    if (m_translation != NULL) {
+        static cXyz l_translation;
+        l_translation = *m_translation;
+        m_translation = &l_translation;
+        m_rotationY = rotationY;
+
+        m_control->transform_enable(true);
+        m_control->transform_setOrigin(*m_translation, m_rotationY);
+    }
+
+    m_mode = 1;
+    reset();
+
+    m_data = NULL;
+    m_branchData = (u8*)p_data;
+    return 1;
+}
+
+static void dummyString2() {
+    DEAD_STRING("デモデータ再読み込みエラー！！\n");
+}
+
+void dDemo_c::end() {
+    JUT_ASSERT(1956, m_system != NULL);
+
+#if TARGET_PC
+    unpause_streams(false);
+#endif
+
+    m_control->destroyObject_all();
+    m_object->remove();
+    m_data = NULL;
+    m_mode = 0;
+}
+
+void dDemo_c::branch() {
+    JUT_ASSERT(1995, m_system != NULL);
+
+    m_control->destroyObject_all();
+    const u8* branchData = m_branchData;
+    m_branchData = NULL;
+
+    int rt = start(branchData, m_translation, m_rotationY);
+    JUT_ASSERT(2007, rt);
+}
+
+int dDemo_c::update() {
+    JUT_ASSERT(2064, m_system != NULL);
+
+#if TARGET_PC
+    unpause_streams(true);
+#endif
+
+    if (m_data == NULL) {
+        if (m_branchData == NULL) {
+            return 0;
+        } else {
+            m_data = m_branchData;
+            m_branchData = NULL;
+            return 1;
+        }
+    } else if (isStatus(1)) {
+        OS_REPORT(">>>>>>>>>>>>>>>>>>>>>>>>>>>> Movie Start Wait !\n");
+        daMP_c::daMP_c_THPPlayerPlay();
+        if (isStatus(1)) {
+            return 1;
+        }
+    }
+
+    if (m_control->forward(1) != 0) {
+        m_frame++;
+
+        if (m_control->getSuspend() <= 0) {
+            m_frameNoMsg++;
+        }
+    } else {
+        m_mode = 2;
+    }
+
+    if (m_branchData != NULL) {
+        branch();
+    }
+
+    if (dComIfGs_staffroll_next_go_check() != 0) {
+        dScnKy_env_light_c* env_light = dKy_getEnvlight();
+
+        if (dComIfGs_staffroll_next_go_check() > 10) {
+            env_light->staffroll_next_timer = 0;
+            m_mode = 2;
+        } else {
+            if (dComIfGs_staffroll_next_go_check() == 1) {
+                mDoGph_gInf_c::fadeOut(0.1f, g_blackColor);
+            }
+            env_light->staffroll_next_timer++;
+        }
+    }
+
+#if DEBUG
+    dDbVw_Report(480, 30, "Frame %d", m_frame);
+    dDbVw_Report(480, 40, "NoMSg %d", m_frameNoMsg);
+#endif
+
+    return 1;
+}
+
+void dDemo_c::setBranchType(u16 type) {
+    m_branchType = type;
+    m_branchId = -1;
+#if DEBUG
+    m_branchNum = 0;
+#endif
+}
+
+void dDemo_c::setBranchId(u16 param_0, s16 branchId) {
+    if (param_0 != m_branchType) {
+        return;
+    }
+
+    m_branchId = branchId;
+}
+
+void dDemo_c::reset() {
+    m_frame = 0;
+    m_frameNoMsg = 0;
+    m_status = 0;
+    m_branchData = NULL;
+}
+
+JPABaseEmitter* dDemo_particle_c::emitter_create(u32 i_id) {
+    cXyz pos(0.0f, 0.0f, 0.0f);
+    JPABaseEmitter* emitter = dComIfGp_particle_set(i_id, &pos, NULL, NULL, 0xFF, NULL, dComIfGp_roomControl_getStayNo(), NULL, NULL, NULL);
+    return emitter;
+}
+
+dDemo_particle_c::~dDemo_particle_c() {}
+
+dDemo_camera_c::~dDemo_camera_c() {}

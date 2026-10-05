@@ -1,0 +1,179 @@
+From: aleks2 (H37-c7)
+Subject: [PATCH 6/6] seed generation and preload threads get an 8 MiB stack
+
+std::thread on libnx starts a thread with a 128 KiB stack (__syscall_thread_create's default).
+The seed generator needs a good part of that on the PC's 8 MiB main stack (it ran in 64-96 KiB
+there, measured with ulimit -s) and on the console it crashed the process seconds after
+"Generating Hints...", from hid and the swapchain rather than from the generator thread, which is
+what a stack overflow into a neighbouring mapping looks like. LargeStackThread starts the thread
+through pthread attributes with a stack of 8 MiB (the default stack if the system refuses it) and is
+joinable like std::thread; the generation and preload threads use it. The log says when a
+generation starts, so a console log shows how far one got.
+---
+diff --git a/src/large_stack_thread.hpp b/src/large_stack_thread.hpp
+new file mode 100644
+index 0000000..393adf3
+--- /dev/null
++++ b/src/large_stack_thread.hpp
+@@ -0,0 +1,93 @@
++// aleks2 (H37-c7): a joinable thread with a large stack.
++//
++// On Horizon, std::thread -> pthread_create -> libnx gives a thread a 128 KiB stack (the default in
++// __syscall_thread_create), where the generator that runs on the PC's 8 MiB main stack needs a good part of
++// that: seed generation recurses through the world graph, the requirement flattening and the hint search.
++// An overflow there writes below the stack into whatever is mapped next to it and takes the process down
++// seconds later, from somewhere else (hid, the swapchain). The threads that run the generator and the data
++// preload are therefore given a stack of kStackBytes, through pthread attributes; if the system refuses it
++// the thread is started with the default one rather than not at all.
++#pragma once
++
++#include <pthread.h>
++
++#include <cstddef>
++#include <exception>
++#include <functional>
++#include <memory>
++#include <system_error>
++#include <utility>
++
++namespace randomizer {
++
++class LargeStackThread {
++public:
++    static constexpr std::size_t kStackBytes = 8u * 1024u * 1024u;
++
++    LargeStackThread() noexcept = default;
++    template <class F>
++    explicit LargeStackThread(F&& fn) {
++        start(std::function<void()>(std::forward<F>(fn)));
++    }
++    LargeStackThread(const LargeStackThread&) = delete;
++    LargeStackThread& operator=(const LargeStackThread&) = delete;
++    LargeStackThread(LargeStackThread&& other) noexcept : m_thread(other.m_thread), m_joinable(other.m_joinable) {
++        other.m_joinable = false;
++    }
++    LargeStackThread& operator=(LargeStackThread&& other) noexcept {
++        if (m_joinable) {
++            std::terminate();  // as std::thread: a running thread must be joined first
++        }
++        m_thread = other.m_thread;
++        m_joinable = other.m_joinable;
++        other.m_joinable = false;
++        return *this;
++    }
++    ~LargeStackThread() {
++        if (m_joinable) {
++            std::terminate();
++        }
++    }
++
++    bool joinable() const noexcept { return m_joinable; }
++
++    void join() {
++        if (!m_joinable) {
++            throw std::system_error(std::make_error_code(std::errc::invalid_argument));
++        }
++        pthread_join(m_thread, nullptr);
++        m_joinable = false;
++    }
++
++private:
++    static void* entry(void* arg) {
++        std::unique_ptr<std::function<void()>> fn(static_cast<std::function<void()>*>(arg));
++        (*fn)();
++        return nullptr;
++    }
++
++    void start(std::function<void()> fn) {
++        auto* heap = new std::function<void()>(std::move(fn));
++        int rc = -1;
++        pthread_attr_t attr;
++        if (pthread_attr_init(&attr) == 0) {
++            if (pthread_attr_setstacksize(&attr, kStackBytes) == 0) {
++                rc = pthread_create(&m_thread, &attr, &entry, heap);
++            }
++            pthread_attr_destroy(&attr);
++        }
++        if (rc != 0) {
++            rc = pthread_create(&m_thread, nullptr, &entry, heap);
++        }
++        if (rc != 0) {
++            delete heap;
++            throw std::system_error(rc, std::generic_category(), "pthread_create");
++        }
++        m_joinable = true;
++    }
++
++    pthread_t m_thread{};
++    bool m_joinable = false;
++};
++
++}  // namespace randomizer
+diff --git a/src/session.cpp b/src/session.cpp
+index 6e07cd0..88cd475 100644
+--- a/src/session.cpp
++++ b/src/session.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "randomizer_context.hpp"
+ #include "hooks.hpp"
++#include "large_stack_thread.hpp"
+ #include "ui/ui.hpp"
+ #include "ui/rando_config.hpp"
+ #include "flags.h"
+@@ -33,7 +34,7 @@ std::string g_pending_seed_hash{};
+ bool g_seedActivated = false;
+ 
+ SaveObserverHandle s_save_observer{};
+-static std::thread s_preloadThread;
++static randomizer::LargeStackThread s_preloadThread;
+ ItemCheckHandle s_check_resolver{};
+ ItemGiveHandle s_check_observer{};
+ std::vector<StageActorHandle> s_stage_edits{};
+@@ -507,7 +508,7 @@ ModResult onGameModeActivated(void*, ModError* error) {
+     if (s_preloadThread.joinable()) {
+         s_preloadThread.join();
+     }
+-    s_preloadThread = std::thread{preLoadRandomizerData};
++    s_preloadThread = randomizer::LargeStackThread{preLoadRandomizerData};
+ 
+     mods::log::info("randomizer game mode activated");
+     return MOD_OK;
+diff --git a/src/ui/rando_seed_generation.cpp b/src/ui/rando_seed_generation.cpp
+index c9e64a0..dda7f65 100644
+--- a/src/ui/rando_seed_generation.cpp
++++ b/src/ui/rando_seed_generation.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "../session.hpp"
+ #include "../randomizer_context.hpp"
++#include "../large_stack_thread.hpp"
+ 
+ #include "m_Do/m_Do_audio.h"
+ 
+@@ -29,7 +30,7 @@ static std::atomic seedGenProgressValueTarget = 0.0f;
+ static float seedGenProgressValueCurrent = 0.0f;
+ static std::string generationStatusMsg{};
+ static std::mutex generationStatusMutex;
+-static std::thread seedGenThread;
++static randomizer::LargeStackThread seedGenThread;
+ 
+ void OnDialogActionOK(ModContext* ctx, UiDialogHandle dialogHandle, void*) {
+     mDoAud_seStartMenu(Z2SE_SY_MENU_BACK);
+@@ -44,6 +45,7 @@ void OnDialogActionOK(ModContext* ctx, UiDialogHandle dialogHandle, void*) {
+ static void StartSeedGeneration() {
+     // aleks2 (H37): how long a seed takes, for the hardware protocol (generation must stay off the
+     // game thread and finish in reasonable time on the console).
++    mods::log::info("seed generation started");
+     const auto started = std::chrono::steady_clock::now();
+     const bool ok = GenerateAndWriteSeed();
+     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+@@ -115,7 +117,7 @@ void GenerateRandomizerSeed() {
+     JoinSeedGeneration();
+     seedGenStatus.store(SeedGenerateStatus::Generating);
+     seedGenProgressValueTarget.store(0.f);
+-    seedGenThread = std::thread(StartSeedGeneration);
++    seedGenThread = randomizer::LargeStackThread(StartSeedGeneration);
+ }
+ 
+ void JoinSeedGeneration() {

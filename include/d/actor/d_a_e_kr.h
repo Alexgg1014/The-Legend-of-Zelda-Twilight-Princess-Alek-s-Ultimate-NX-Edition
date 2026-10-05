@@ -1,0 +1,120 @@
+#ifndef D_A_E_KR_H
+#define D_A_E_KR_H
+#include "d/d_bg_s_acch.h"
+#include "d/d_cc_d.h"
+#include "d/d_cc_uty.h"
+#include "d/d_path.h"
+#include "f_op/f_op_actor_mng.h"
+
+/**
+ * @ingroup actors-enemies
+ * @class e_kr_class
+ * @brief Kargorok
+ *
+ * @details
+ *
+ */
+class e_kr_class {
+public:
+    e_kr_class();
+
+    s32 getId() { return field_0xf00; }
+    s32 checkBombDrop() { return field_0xf04; }
+
+    /* 0x000 */ fopEn_enemy_c enemy;
+    /* 0x5AC */ request_of_phase_process_class mPhase;
+    /* 0x5B4 */ mDoExt_McaMorfSO* mpMorf;
+    /* 0x5B8 */ s32 field_0x5b8;
+    /* 0x5BC */ s32 field_0x5bc;
+    /* 0x5C0 */ Z2CreatureEnemy mSound;
+    /* 0x664 */ u8 field_0x664;
+    /* 0x665 */ u8 field_0x665;
+    /* 0x666 */ u8 field_0x666;
+    /* 0x666 */ u8 field_0x667;
+    /* 0x668 */ s16 mCurAction;
+    /* 0x66A */ u8 field_0x66a;
+    /* 0x66B */ u8 field_0x66b;
+    /* 0x66C */ fpc_ProcID mBombId;
+    /* 0x670 */ s8 field_0x670;
+    /* 0x672 */ s16 field_0x672;
+    /* 0x674 */ u8 field_0x674;
+    /* 0x678 */ cXyz field_0x678;
+    /* 0x684 */ f32 field_0x684;
+    /* 0x688 */ f32 field_0x688;
+    /* 0x68C */ f32 field_0x68c;
+    /* 0x690 */ f32 field_0x690;
+    /* 0x694 */ f32 field_0x694;
+    /* 0x698 */ u8 field_0x698[0x69c - 0x698];
+    /* 0x69C */ s16 field_0x69c[6];
+    /* 0x6A8 */ s16 field_0x6a8;
+    /* 0x6AA */ s16 field_0x6aa;
+    /* 0x6AC */ u8 field_0x6ac[0x6b4 - 0x6ac];
+    /* 0x6B4 */ f32 field_0x6b4;
+    /* 0x6B8 */ f32 field_0x6b8;
+    /* 0x6BC */ s16 field_0x6bc;
+    /* 0x6BE */ u8 field_0x6be[0x6c0 - 0x6be];
+    /* 0x6C0 */ s16 field_0x6c0;
+    /* 0x6C2 */ s16 field_0x6c2;
+    /* 0x6C4 */ f32 field_0x6c4;
+    /* 0x6C8 */ s16 field_0x6c8;
+    /* 0x6CA */ s16 field_0x6ca;
+    /* 0x6CC */ s16 field_0x6cc;
+    /* 0x6D0 */ f32 field_0x6d0;
+    /* 0x6D4 */ s16 field_0x6d4;
+    /* 0x6D6 */ s16 field_0x6d6;
+    /* 0x6D8 */ s16 field_0x6d8;
+    /* 0x6DA */ u8 field_0x6da[0x6de - 0x6da];
+    /* 0x6DE */ s16 field_0x6de;
+    /* 0x6E0 */ u8 field_0x6e0[0x6e1 - 0x6e0];
+    /* 0x6E1 */ s8 field_0x6e1;
+    /* 0x6E2 */ s8 field_0x6e2;
+    /* 0x6E3 */ s8 field_0x6e3;
+    /* 0x6E4 */ dPath* field_0x6e4;
+    /* 0x6E8 */ u8 field_0x6e8[0x6ea - 0x6e8];
+    /* 0x6EC */ csXyz field_0x6ea;
+    /* 0x6F2 */ csXyz field_0x6f0;
+    /* 0x6EA */ s16 field_0x6f6;
+    /* 0x6F8 */ cXyz field_0x6f8;
+    /* 0x704 */ dBgS_AcchCir mAcchCir;
+    /* 0x744 */ dBgS_ObjAcch mAcch;
+    /* 0x91C */ bool field_0x91c;
+    /* 0x920 */ f32 field_0x920;
+    /* 0x924 */ dCcD_Stts mStts;
+    /* 0x960 */ dCcD_Sph mSphere1;
+    /* 0xA98 */ dCcD_Sph mSphere2;
+    /* 0xBD0 */ dCcD_Sph mSphere3;
+    /* 0xD08 */ dCcD_Sph mSphere4;
+    /* 0xE40 */ dCcU_AtInfo mAtInfo;
+    /* 0xE64 */ cXyz field_0xe64[2];
+    /* 0xE7C */ s16 field_0xe7c;
+    /* 0xE7E */ s16 field_0xe7e;
+    /* 0xE80 */ s16 field_0xe80;
+    /* 0xE82 */ s16 field_0xe82;
+    /* 0xE84 */ s16 field_0xe84;
+    /* 0xE88 */ JAISoundID field_0xe88;
+    /* 0xE8C */ u8 field_0xe8c;
+    /* 0xE8E */ s16 field_0xe8e[11];
+    /* 0xEA4 */ u8 field_0xea4[0xea8 - 0xea4];
+    /* 0xEA8 */ f32 field_0xea8;
+    /* 0xEAC */ s16 field_0xeac;
+    /* 0xEAE */ s16 field_0xeae;
+    /* 0xEB0 */ s16 field_0xeb0;
+    /* 0xEB2 */ s16 field_0xeb2;
+    /* 0xEB4 */ s16 field_0xeb4;
+    /* 0xEB6 */ s16 field_0xeb6;
+    /* 0xEB8 */ f32 field_0xeb8;
+    /* 0xEBC */ s16 field_0xebc;
+    /* 0xEBE */ s16 field_0xebe;
+    /* 0xEC0 */ s8 field_0xec0;
+    /* 0xEC4 */ u32 field_0xec4[5];
+    /* 0xED8 */ u32 field_0xed8[5];
+    /* 0xEDC */ u8 field_0xedc[0xef8 - 0xeec];
+    /* 0xEF8 */ f32 field_0xef8;
+    /* 0xEFC */ s8 field_0xefc;
+    /* 0xF00 */ s32 field_0xf00;
+    /* 0xF04 */ s32 field_0xf04;
+};
+
+STATIC_ASSERT(sizeof(e_kr_class) == 0xf08);
+
+#endif /* D_A_E_KR_H */

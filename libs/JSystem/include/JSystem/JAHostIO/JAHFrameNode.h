@@ -1,0 +1,31 @@
+#ifndef JAHFRAMENODE_H
+#define JAHFRAMENODE_H
+
+#include <types.h>
+#include "JSystem/JAHostIO/JAHioNode.h"
+
+class JAHVirtualNode;
+
+class JAHFrameNode : public JAHioNode {
+public:
+    JAHFrameNode(const char*);
+    /* vt[02] */ virtual void listenPropertyEvent(const JORPropertyEvent*);
+    /* vt[05] */ virtual void genMessage(JORMContext*);
+    /* vt[06] */ virtual void listenNodeEvent(const JORNodeEvent*);
+    /* vt[0C] */ virtual s32 getNodeType() { return 1; }
+    /* vt[11] */ virtual void onCurrentNodeFrame();
+    /* vt[12] */ virtual void onFrame();
+
+    void framework();
+    void currentFramework();
+
+    void callAllVirtualMessages(JAHControl&);
+    void appendVirNode(JAHVirtualNode*);
+
+    JSULink<JAHFrameNode>* getFrameNodeLink() { return &mFrameNodeLink; }
+
+    /* 0x44 */ JSUTree<JAHVirtualNode> mTree;
+    /* 0x60 */ JSULink<JAHFrameNode> mFrameNodeLink;
+};
+
+#endif /* JAHFRAMENODE_H */

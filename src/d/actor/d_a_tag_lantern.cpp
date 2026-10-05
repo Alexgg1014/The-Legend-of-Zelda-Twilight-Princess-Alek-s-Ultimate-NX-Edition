@@ -1,0 +1,189 @@
+/**
+ * d_a_tag_lantern.cpp
+ * Tag - Lantern
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_tag_lantern.h"
+
+#include "JSystem/JHostIO/JORFile.h"
+#include "d/d_debug_viewer.h"
+#include "f_pc/f_pc_name.h"
+#include <cstring>
+
+static TAG_LANTERN_HIO_CLASS l_HIO;
+
+DUSK_GAME_DATA daTag_Lantern_HIOParam const daTag_Lantern_Param_c::m = {0};
+
+#if DEBUG
+daTag_Lantern_HIO_c::daTag_Lantern_HIO_c() {
+    m = daTag_Lantern_Param_c::m;
+}
+
+void daTag_Lantern_HIO_c::listenPropertyEvent(const JORPropertyEvent* event) {
+    JORReflexible::listenPropertyEvent(event);
+    JORFile file;
+    switch ((int)event->id) {
+    case 0x40000002:
+        if (file.open(JORFile::EFlags_WRITE | JORFile::EFlags_UNK_0x4, "すべてのファイル(*.*)\0*.*\0", NULL, NULL, NULL)) {
+            char sp138[0x7d0];
+            memset(sp138, 0, sizeof(sp138));
+            int msgLen = 0;
+            sprintf(sp138 + msgLen, "%d,   \t//  デバグ情報ＯＮ\n", m.enable_debug_info);
+            msgLen = strlen(sp138);
+            file.writeData(sp138, msgLen);
+            file.close();
+            OS_REPORT("write append success!::%6d\n", msgLen);
+        } else {
+            OS_REPORT("write append failure!\n");
+        }
+        break;
+    }
+}
+
+void daTag_Lantern_HIO_c::genMessage(JORMContext* ctx) {
+    // "Debug information ON"
+    ctx->genCheckBox("デバグ情報ＯＮ  ", &m.enable_debug_info, 1);
+    // "Export file"
+    ctx->genButton("ファイル書き出し", 0x40000002, 0);
+}
+#endif
+
+daTag_Lantern_c::~daTag_Lantern_c() {
+#if DEBUG
+    if (mpHIO != NULL) {
+        mpHIO->removeHIO();
+    }
+#endif
+}
+
+int daTag_Lantern_c::create() {
+    fopAcM_ct(this, daTag_Lantern_c);
+    initialize();
+    return cPhs_COMPLEATE_e;
+}
+
+int daTag_Lantern_c::Delete() {
+    fopAcM_RegisterDeleteID(this, "TAG_LANTERN");
+    this->~daTag_Lantern_c();
+    return 1;
+}
+
+int daTag_Lantern_c::Execute() {
+    if (dComIfGp_event_runCheck()) {
+        if (eventInfo.checkCommandTalk()) {
+            if (!field_0x604) {
+                mMsgFlow.init(this, mFlowIndex, 0, NULL);
+                field_0x604++;
+            } else if (field_0x604 == 1 && mMsgFlow.doFlow(this, NULL, 0)) {
+                dComIfGp_event_reset();
+                field_0x604 = 0;
+                field_0x5f8 = 0;
+            }
+        }
+    } else if (field_0x5f8) {
+        eventInfo.onCondition(dEvtCnd_CANTALK_e);
+        fopAcM_orderSpeakEvent(this, 0, 0);
+    }
+
+    mGndChk.SetPos(&current.pos);
+    mGroundCross = dComIfG_Bgsp().GroundCross(&mGndChk);
+
+    s32 room_no;
+    if (mGroundCross != -G_CM3D_F_INF) {
+        room_no = dComIfG_Bgsp().GetRoomId(mGndChk);
+        tevStr.YukaCol = dComIfG_Bgsp().GetPolyColor(mGndChk);
+    } else {
+        room_no = dComIfGp_roomControl_getStayNo();
+    }
+
+    tevStr.room_no = room_no;
+    fopAcM_SetRoomNo(this, tevStr.room_no);
+    attention_info.flags = 0;
+    attention_info.position = current.pos;
+    eyePos = attention_info.position;
+    return 1;
+}
+
+int daTag_Lantern_c::Draw() {
+#if DEBUG
+    if (mpHIO->m.enable_debug_info) {
+        dDbVw_drawCylinderXlu(current.pos, scale.x, scale.y,
+                              (GXColor){0x80, 0x80, 0x80, 0x80}, 1);
+    }
+#endif
+
+    return 1;
+}
+
+void daTag_Lantern_c::initialize() {
+    fopAcM_setCullSizeBox(this, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+
+#if DEBUG
+    mpHIO = &l_HIO;
+    // "Lantern check tag"
+    mpHIO->entryHIO("カンテラチェックタグ");
+#endif
+
+    // !@bug home.angle.x is promoted to a 32-bit signed integer prior
+    //       to being compared, so the compared value can never exceed
+    //       SHORT_MAX and the condition always passes.
+    if (home.angle.z != 0xFFFF) {
+        mFlowIndex = home.angle.z;
+    } else {
+        mFlowIndex = -1;
+    }
+
+    home.angle.z = 0;
+    field_0x5fc = fopAcM_GetParam(this) & 0xFFF;
+
+    scale.x *= 100.0f;
+    scale.y *= 100.0f;
+    scale.z *= 100.0f;
+
+    Execute();
+}
+
+static int daTag_Lantern_Create(void* i_this) {
+    return static_cast<daTag_Lantern_c*>(i_this)->create();
+}
+
+static int daTag_Lantern_Delete(void* i_this) {
+    return static_cast<daTag_Lantern_c*>(i_this)->Delete();
+}
+
+static int daTag_Lantern_Execute(void* i_this) {
+    return static_cast<daTag_Lantern_c*>(i_this)->Execute();
+}
+
+static int daTag_Lantern_Draw(void* i_this) {
+    return static_cast<daTag_Lantern_c*>(i_this)->Draw();
+}
+
+static int daTag_Lantern_IsDelete(void* i_this) {
+    return 1;
+}
+
+static DUSK_CONST actor_method_class daTag_Lantern_MethodTable = {
+    (process_method_func)daTag_Lantern_Create,  (process_method_func)daTag_Lantern_Delete,
+    (process_method_func)daTag_Lantern_Execute, (process_method_func)daTag_Lantern_IsDelete,
+    (process_method_func)daTag_Lantern_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_LANTERN = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_LANTERN_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTag_Lantern_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_LANTERN_e,
+    /* Actor SubMtd */ &daTag_Lantern_MethodTable,
+    /* Status       */ fopAcStts_UNK_0x40000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

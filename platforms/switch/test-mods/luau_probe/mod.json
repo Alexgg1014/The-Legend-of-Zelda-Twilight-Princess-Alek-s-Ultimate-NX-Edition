@@ -1,0 +1,8 @@
+{
+  "id": "dev.aleks2.luau_probe",
+  "name": "Luau Probe (H36)",
+  "version": "1.0.0",
+  "author": "Alek's Ultimate NX Edition",
+  "description": "Diagnostic: shows that a script mod loads from the SD card through the Luau runtime built into the NRO. It logs, shows one notice and writes nothing.",
+  "runtime": "dev.twilitrealm.luau@1.0"
+}

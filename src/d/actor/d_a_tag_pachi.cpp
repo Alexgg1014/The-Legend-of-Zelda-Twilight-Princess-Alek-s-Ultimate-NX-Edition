@@ -1,0 +1,104 @@
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_tag_pachi.h"
+#include "d/d_com_inf_game.h"
+#include "f_pc/f_pc_name.h"
+#include "d/d_s_play.h"
+
+daTagPati_c::~daTagPati_c() {}
+
+static dCcD_SrcCyl const l_sph_src = {
+    {
+        {0x0, {{0x0, 0x0, 0x0}, {0xD8FBFDFF, 0x0}, 0x19}},  // mObj
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x8},                 // mGObjAt
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x0},                 // mGObjTg
+        {0x0},                                              // mGObjCo
+    },                                                      // mObjInf
+    {
+        {
+            {0.0f, 0.0f, 0.0f},  // mCenter
+            0.0f,                // mRadius
+            0.0f                 // mHeight
+        }                        // mCyl
+    }
+};
+
+int daTagPati_c::create() {
+    fopAcM_ct(this, daTagPati_c);
+    OS_REPORT("-------------- TAG YAMI CREATE!!\n");
+    field_0x6E0 = get_prm();
+    mStts.Init(0xFF, 0xFF, this);
+    mCyl.Set(l_sph_src);
+    mCyl.SetStts(&mStts);
+    field_0x6E4 = 0;
+    return cPhs_COMPLEATE_e;
+}
+
+int daTagPati_c::Execute() {
+    col_set();
+    field_0x6E4 = chk_CoHit();
+    return 1;
+}
+
+void daTagPati_c::col_set() {
+    f32 var_f31 = 1350.f;
+    if (field_0x6E0 == 0 || field_0x6E0 == 1) {
+        var_f31 += tREG_F(18);
+    } else if (field_0x6E0 == 2 || field_0x6E0 == 3) {
+        var_f31 += tREG_F(19);
+    }
+    mCyl.SetR(var_f31);
+    mCyl.SetH(300000.0f);
+    mCyl.SetC(home.pos);
+    dComIfG_Ccsp()->Set(&mCyl);
+}
+
+u32 daTagPati_c::chk_CoHit() {
+    if (mCyl.ChkCoHit()) {
+        OS_REPORT("----mtype = %d\n", field_0x6E0);
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+static int daTagPati_Create(fopAc_ac_c* i_this) {
+    daTagPati_c* pati = static_cast<daTagPati_c*>(i_this);
+    int id = fopAcM_GetID(i_this);
+    return pati->create();
+}
+
+static int daTagPati_Execute(fopAc_ac_c* i_this) {
+    daTagPati_c* pati = static_cast<daTagPati_c*>(i_this);
+    int id = fopAcM_GetID(i_this);
+    return pati->Execute();
+}
+
+static int daTagPati_Delete(daTagPati_c* i_this) {
+    int id = fopAcM_GetID(i_this);
+    i_this->~daTagPati_c();
+    return 1;
+}
+
+static DUSK_CONST actor_method_class l_daTagPati_Method = {
+    (process_method_func)daTagPati_Create,
+    (process_method_func)daTagPati_Delete,
+    (process_method_func)daTagPati_Execute,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_PATI = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_PATI_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTagPati_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_PATI_e,
+    /* Actor SubMtd */ &l_daTagPati_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

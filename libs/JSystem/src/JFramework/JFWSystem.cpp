@@ -1,0 +1,124 @@
+#include "JSystem/JSystem.h" // IWYU pragma: keep
+
+#include "JSystem/JFramework/JFWSystem.h"
+#include "JSystem/JKernel/JKRExpHeap.h"
+#include "JSystem/JUtility/JUTConsole.h"
+#include "JSystem/JUtility/JUTGraphFifo.h"
+#include "JSystem/JKernel/JKRAram.h"
+#include "JSystem/JUtility/JUTVideo.h"
+#include "JSystem/JUtility/JUTGamePad.h"
+#include "JSystem/JUtility/JUTDirectPrint.h"
+#include "JSystem/JUtility/JUTAssert.h"
+#include "JSystem/JUtility/JUTException.h"
+#include "JSystem/JUtility/JUTResFont.h"
+#include "JSystem/JUtility/JUTDbPrint.h"
+
+DUSK_GAME_DATA s32 JFWSystem::CSetUpParam::maxStdHeaps = 2;
+
+DUSK_GAME_DATA u32 JFWSystem::CSetUpParam::sysHeapSize = 0x400000;
+
+DUSK_GAME_DATA JKRExpHeap* JFWSystem::rootHeap;
+
+DUSK_GAME_DATA JKRExpHeap* JFWSystem::systemHeap;
+
+
+DUSK_GAME_DATA u32 JFWSystem::CSetUpParam::fifoBufSize = 0x40000;
+
+DUSK_GAME_DATA u32 JFWSystem::CSetUpParam::aramAudioBufSize = 0x800000;
+
+DUSK_GAME_DATA u32 JFWSystem::CSetUpParam::aramGraphBufSize = 0x600000;
+
+DUSK_GAME_DATA s32 JFWSystem::CSetUpParam::streamPriority = 8;
+
+DUSK_GAME_DATA s32 JFWSystem::CSetUpParam::decompPriority = 7;
+
+DUSK_GAME_DATA s32 JFWSystem::CSetUpParam::aPiecePriority = 6;
+
+DUSK_GAME_DATA ResFONT* JFWSystem::CSetUpParam::systemFontRes = (ResFONT*)&JUTResFONT_Ascfont_fix12;
+
+DUSK_GAME_DATA const GXRenderModeObj* JFWSystem::CSetUpParam::renderMode = &GXNtsc480IntDf;
+
+DUSK_GAME_DATA u32 JFWSystem::CSetUpParam::exConsoleBufferSize = 0x24FC;
+
+void JFWSystem::firstInit() {
+    JUT_ASSERT(80, rootHeap == NULL);
+    OSInit();
+    DVDInit();
+    rootHeap = JKRExpHeap::createRoot(CSetUpParam::maxStdHeaps, false);
+    systemHeap = JKRExpHeap::create(CSetUpParam::sysHeapSize, rootHeap, false);
+    JKRHEAP_NAME(systemHeap, "System");
+}
+
+DUSK_GAME_DATA JKRThread* JFWSystem::mainThread;
+
+DUSK_GAME_DATA JUTDbPrint* JFWSystem::debugPrint;
+
+DUSK_GAME_DATA JUTResFont* JFWSystem::systemFont;
+
+DUSK_GAME_DATA JUTConsoleManager* JFWSystem::systemConsoleManager;
+
+DUSK_GAME_DATA JUTConsole* JFWSystem::systemConsole;
+
+DUSK_GAME_DATA bool JFWSystem::sInitCalled = false;
+
+void JFWSystem::init() {
+    JUT_ASSERT(101, sInitCalled == false);
+
+    if (rootHeap == NULL) {
+        firstInit();
+    }
+    sInitCalled = true;
+
+    JKRAram::create(CSetUpParam::aramAudioBufSize, CSetUpParam::aramGraphBufSize,
+                    CSetUpParam::streamPriority, CSetUpParam::decompPriority,
+                    CSetUpParam::aPiecePriority);
+    mainThread = JKR_NEW JKRThread(OSGetCurrentThread(), 4);
+
+    JUTVideo::createManager(CSetUpParam::renderMode);
+    JUTCreateFifo(CSetUpParam::fifoBufSize);
+
+    JUTGamePad::init();
+
+#ifndef TARGET_PC
+    JUTDirectPrint* dbPrint = JUTDirectPrint::start();
+#endif
+
+    JUTAssertion::create();
+
+#ifndef TARGET_PC
+    JUTException::create(dbPrint);
+#endif
+
+    systemFont = JKR_NEW JUTResFont(CSetUpParam::systemFontRes, NULL);
+
+    debugPrint = JUTDbPrint::start(NULL, NULL);
+    debugPrint->changeFont(systemFont);
+
+    systemConsoleManager = JUTConsoleManager::createManager(NULL);
+
+    systemConsole = JUTConsole::create(60, 200, NULL);
+    systemConsole->setFont(systemFont);
+
+    if (CSetUpParam::renderMode->efbHeight < 300) {
+        systemConsole->setFontSize(systemFont->getWidth() * 0.85f, systemFont->getHeight() * 0.5f);
+        systemConsole->setPosition(20, 25);
+    } else {
+        systemConsole->setFontSize(systemFont->getWidth(), systemFont->getHeight());
+        systemConsole->setPosition(20, 50);
+    }
+
+    systemConsole->setHeight(25);
+    systemConsole->setVisible(false);
+    systemConsole->setOutput(JUTConsole::OUTPUT_OSREPORT | JUTConsole::OUTPUT_CONSOLE);
+    JUTSetReportConsole(systemConsole);
+    JUTSetWarningConsole(systemConsole);
+
+    void* buffer = systemHeap->alloc(CSetUpParam::exConsoleBufferSize, 4);
+    JUTException::createConsole(buffer, CSetUpParam::exConsoleBufferSize);
+}
+
+#if TARGET_PC
+void JFWSystem::shutdown() {
+    JKRAram::destroy();
+}
+#endif

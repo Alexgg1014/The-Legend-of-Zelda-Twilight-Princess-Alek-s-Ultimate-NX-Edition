@@ -1,0 +1,118 @@
+#include "JSystem/JSystem.h" // IWYU pragma: keep
+
+#include "JSystem/JAudio2/JASDrumSet.h"
+#include "JSystem/JAudio2/JASCalc.h"
+#include "JSystem/JKernel/JKRHeap.h"
+
+
+JASDrumSet::JASDrumSet() {
+    mPercArray = NULL;
+    mPercNumMax = 0;
+}
+
+JASDrumSet::~JASDrumSet() {
+}
+
+void JASDrumSet::newPercArray(u8 num, JKRHeap* heap) {
+    if (num) {
+        JUT_ASSERT(39, num <= 128);
+        mPercNumMax = num;
+        mPercArray = JKR_NEW_ARRAY_ARGS(TPerc*, mPercNumMax, heap, 0);
+#if TARGET_ANDROID
+        JASCalc::_bzero(mPercArray, mPercNumMax * sizeof(TPerc*));
+#else
+        JASCalc::bzero(mPercArray, mPercNumMax * sizeof(TPerc*));
+#endif
+    }
+}
+
+bool JASDrumSet::getParam(int key, int velocity, JASInstParam* o_param) const {
+    UNUSED(velocity);
+    JUT_ASSERT(48, key >= 0);
+    if (mPercArray == NULL) {
+        return false;
+    }
+
+    if (key >= mPercNumMax) {
+        JUT_WARN(54, "JASDrumSet: key %d >= PERC_MAX %d\n", key, mPercNumMax);
+        return false;
+    }
+
+    TPerc* perc = mPercArray[key];
+    if (perc == NULL) {
+        return false;
+    }
+
+    o_param->mChannelType = 0;
+    o_param->mDontSetKey = 1;
+    o_param->mVolume = perc->mVolume;
+    o_param->mPitch = perc->mPitch;
+    o_param->mPan = perc->mPan;
+    o_param->mDirectRelease = u16(perc->mDirectRelease);
+
+    static JASOscillator::Data osc;
+
+    osc.mTarget = 0;
+    osc.mRate = 1.0f;
+    osc.mTable = NULL;
+    osc.rel_table = NULL;
+    osc.mScale = 1.0f;
+    osc.mVertex = 0.0f;
+
+    static JASOscillator::Data* oscp = &osc;
+
+    o_param->mOscillators = &oscp;
+    o_param->mOscillatorCount = 1;
+    o_param->mVolume *= perc->mVolumeMult;
+    o_param->mPitch *= perc->mPitchMult;
+    o_param->mWaveId = u16(perc->mWaveId);
+    return true;
+}
+
+void JASDrumSet::setPerc(int index, JASDrumSet::TPerc* param_1) {
+    JUT_ASSERT(123, index >= 0);
+    JUT_ASSERT(125, index < mPercNumMax);
+    JUT_ASSERT(126, mPercArray);
+    JUT_ASSERT(127, mPercArray[index] == 0);
+    mPercArray[index] = param_1;
+}
+
+JASDrumSet::TPerc* JASDrumSet::getPerc(int index) {
+    if (index < 0) {
+        return NULL;
+    }
+    if (index >= mPercNumMax) {
+        return NULL;
+    }
+    if (!mPercArray) {
+        return NULL;
+    }
+    return mPercArray[index];
+}
+
+JASDrumSet::TPerc* JASDrumSet::getPerc(int index) const {
+    if (index < 0) {
+        return NULL;
+    }
+    if (index >= mPercNumMax) {
+        return NULL;
+    }
+    if (!mPercArray) {
+        return NULL;
+    }
+    return mPercArray[index];
+}
+
+JASDrumSet::TPerc::TPerc() {
+    mVolume = 1.0f;
+    mPitch = 1.0f;
+    mPan = 0.5f;
+    mDirectRelease = 1000;
+}
+
+void JASDrumSet::TPerc::setRelease(u32 release) {
+    JUT_ASSERT(224, release < 0x10000);
+    mDirectRelease = release;
+}
+
+u32 JASDrumSet::getType() const { return 'PERC'; }

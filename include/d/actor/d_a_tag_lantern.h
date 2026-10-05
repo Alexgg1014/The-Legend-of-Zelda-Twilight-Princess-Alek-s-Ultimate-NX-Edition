@@ -1,0 +1,69 @@
+#ifndef D_A_TAG_LANTERN_H
+#define D_A_TAG_LANTERN_H
+
+#include "d/d_com_inf_game.h"
+#include "d/d_msg_flow.h"
+
+struct daTag_Lantern_HIOParam {
+    u8 enable_debug_info;
+};
+
+class daTag_Lantern_Param_c {
+public:
+    inline virtual ~daTag_Lantern_Param_c() {}
+
+    static DUSK_GAME_DATA daTag_Lantern_HIOParam const m;
+};
+
+#if DEBUG
+class daTag_Lantern_HIO_c : public mDoHIO_entry_c {
+public:
+    daTag_Lantern_HIO_c();
+
+    void listenPropertyEvent(const JORPropertyEvent*);
+
+    void genMessage(JORMContext*);
+
+    daTag_Lantern_HIOParam m;
+};
+
+#define TAG_LANTERN_HIO_CLASS daTag_Lantern_HIO_c
+#else
+#define TAG_LANTERN_HIO_CLASS daTag_Lantern_Param_c
+#endif
+
+class daTag_Lantern_c : public fopAc_ac_c {
+public:
+    int create();
+    int Delete();
+    int Execute();
+    int Draw();
+    void initialize();
+
+    BOOL chkClimbDownLadderStatus() {
+        f32 var_f31 = fopAcM_searchPlayerDistanceY(this);
+        BOOL rt = false;
+
+        if (fopAcM_searchPlayerDistanceXZ(this) < scale.x && 0.0f <= var_f31 && var_f31 < scale.y) {
+            rt = dComIfGp_checkItemGet(dItemNo_KANTERA_e, 1) && dComIfGs_getOil() != 0;
+            field_0x5f8 = rt == true ? 0 : 1;
+        } else {
+            rt = true;
+        }
+
+        return rt;
+    }
+
+    /* 0x568 */ dMsgFlow_c mMsgFlow;
+    /* 0x5B4 */ cBgS_GndChk mGndChk;
+    /* 0x5F0 */ TAG_LANTERN_HIO_CLASS* mpHIO;
+    /* 0x5F4 */ f32 mGroundCross;
+    /* 0x5F8 */ s32 field_0x5f8;
+    /* 0x5FC */ u32 field_0x5fc;
+    /* 0x600 */ int mFlowIndex;
+    /* 0x604 */ u8 field_0x604;
+    
+    virtual ~daTag_Lantern_c();
+}; // Size: 0x60C
+
+#endif /* D_A_TAG_LANTERN_H */

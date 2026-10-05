@@ -1,0 +1,149 @@
+/**
+ * d_a_tag_yami.cpp
+ * Tag - Yami (Twili)
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_tag_yami.h"
+#include "d/d_com_inf_game.h"
+#include "d/actor/d_a_player.h"
+
+const static dCcD_SrcCyl l_sph_src = {
+    {
+        {0x0, {{0x0, 0x0, 0x0}, {0xd8fbfdff, 0x0}, 0x19}},  // mObj
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x8},                 // mGObjAt
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x0},                 // mGObjTg
+        {0x0},                                              // mGObjCo
+    },                                                      // mObjInf
+    {
+        {
+            {0.0f, 0.0f, 0.0f},  // mCenter
+            0.0f,                // mRadius
+            0.0f                 // mHeight
+        }  // mCyl
+    }
+};
+
+int daTagYami_c::create() {
+    fopAcM_ct(this, daTagYami_c);
+
+        /* dSv_event_flag_c::F_0570 - Palace of Twilight - Cleared Palace of Twilight */
+    if (dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[570])) {
+        return cPhs_ERROR_e;
+    }
+
+    OS_REPORT("-------------- TAG YAMI CREATE!!\n");
+    mStts.Init(0xff, 0xff, this);
+    mCyl.Set(l_sph_src);
+    mCyl.SetStts(&mStts);
+
+    mIsCoHit = 0;
+    mMTagSw = get_MTagSw();
+    mMTagSw2 = get_MTagSw2();
+
+    switch (get_prm()) {
+    case 2: {
+        cXyz coC;
+        calcCoC(coC);
+        setCoC(coC);
+        setCoR(700.0f);
+        setCoH(300.0f);
+
+        if (fopAcM_isSwitch(this, 0x3d) && fopAcM_isSwitch(this, 0x3e)) {
+            off_CoHit();
+        } else {
+            on_CoHit();
+        }
+    }
+        break;
+    default:
+        return cPhs_ERROR_e;
+    }
+
+    return cPhs_COMPLEATE_e;
+}
+
+int daTagYami_c::Execute() {
+    col_set();
+    mIsCoHit = chk_CoHit();
+    return 1;
+}
+
+void daTagYami_c::calcCoC(cXyz& i_dst) {
+    cXyz base(0.0f, 0.0f, 430.0f);
+    csXyz sp10(0, -0x7f96, 0);
+    mDoMtx_stack_c::ZXYrotS(sp10);
+    mDoMtx_stack_c::multVec(&base, &base);
+    i_dst = home.pos + base;
+}
+
+void daTagYami_c::col_set() {
+    /* empty function */
+}
+
+u32 daTagYami_c::chk_CoHit() {
+    if (!mCoHitValid) {
+        return 0;
+    }
+
+    f32 coR = getCoR();
+    return getPlDist() < coR;
+}
+
+f32 daTagYami_c::getPlDist() {
+    cXyz coC(mCoC);
+    cXyz pyPos = *fopAcM_GetPosition_p(daPy_getPlayerActorClass());
+    cXyz diff = pyPos - coC;
+    return diff.absXZ();
+}
+
+void daTagYami_c::onMidnaTagSw() {
+    fopAcM_onSwitch(this, mMTagSw);
+}
+
+void daTagYami_c::offMidnaTagSw2() {
+    OS_REPORT("-----------off mtag2 sw!!\n");
+    fopAcM_offSwitch(this, mMTagSw2);
+}
+
+int daTagYami_Create(fopAc_ac_c* i_this) {
+    daTagYami_c* yami = static_cast<daTagYami_c*>(i_this);
+    int id = fopAcM_GetID(i_this);
+    return yami->create();
+}
+
+int daTagYami_Execute(fopAc_ac_c* i_this) {
+    daTagYami_c* yami = static_cast<daTagYami_c*>(i_this);
+    int id = fopAcM_GetID(i_this);
+    return yami->Execute();
+}
+
+int daTagYami_Delete(daTagYami_c* i_this) {
+    int id = fopAcM_GetID(i_this);
+    i_this->~daTagYami_c();
+    return 1;
+}
+
+static DUSK_CONST actor_method_class l_daTagYami_Method = {
+    (process_method_func)daTagYami_Create,
+    (process_method_func)daTagYami_Delete,
+    (process_method_func)daTagYami_Execute,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_YAMI = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 3,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_YAMI_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTagYami_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_YAMI_e,
+    /* Actor SubMtd */ &l_daTagYami_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

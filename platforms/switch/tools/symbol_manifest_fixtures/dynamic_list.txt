@@ -1,0 +1,7 @@
+/* What the fixture game exports, as ModAbiExports.cmake's --dynamic-list does for the NRO. */
+{
+  game_c_function;
+  _ZN12dMenu_Ring_c7_createEv;
+  name_that_nothing_defines;
+  game_tls_counter;
+};

@@ -1,0 +1,1578 @@
+#include "d/actor/d_flower.h"
+#include "d/d_com_inf_game.h"
+#include "d/actor/d_a_player.h"
+#include "d/d_s_play.h"
+#include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
+#include "SSystem/SComponent/c_counter.h"
+
+#if TARGET_PC
+#include "dusk/interp/frame_interpolation.h"
+#endif
+
+const u16 l_J_Ohana00_64TEX__width = 63;
+const u16 l_J_Ohana00_64TEX__height = 63;
+
+#if TARGET_PC
+DEFINE_GRASS_ASSET(l_J_Ohana00_64TEX, u8, 0x800, {
+    {GameVersion::GcnUsa,     0x9060},
+    {GameVersion::GcnPal,     0x9060},
+    {GameVersion::GcnJpn,     0x9060},
+    {GameVersion::WiiUsaRev0, 0x7B60},
+    {GameVersion::WiiUsa,     0x7BC0},
+    {GameVersion::WiiPal,     0x7BC0},
+    {GameVersion::WiiJpn,     0x7BC0},
+});
+
+#define l_J_Ohana00_64TEX (l_J_Ohana00_64TEX_get())
+
+// from d_grass.inc
+static MtxP get_model_mtx(Mtx modelMtx, Mtx storage);
+static void transform_positions(
+    const batch::LeafTemplate& tpl, const Vec* posArray, const Mtx mtx, Vec* xfPos);
+static void split_batch(u32& emitted, u32 vtxCount);
+#else
+#include "assets/l_J_Ohana00_64TEX.h"
+#endif
+
+static u8 l_flowerPos[708] = {
+    0xC0, 0x8C, 0x2C, 0xF7, 0x42, 0x05, 0xBC, 0xDF, 0xC1, 0xA1, 0x00, 0x70, 0xBF, 0x50, 0x51, 0xB9,
+    0x42, 0x12, 0x58, 0xAD, 0xC0, 0xDE, 0xCE, 0x40, 0xC1, 0x04, 0x67, 0x23, 0x41, 0xE5, 0x87, 0x25,
+    0xC1, 0x1B, 0xF3, 0xF8, 0xC1, 0x8F, 0x17, 0x3E, 0x42, 0x05, 0x7F, 0xC6, 0xC1, 0x83, 0x9B, 0xFC,
+    0xC1, 0x65, 0x1D, 0x1B, 0x42, 0x12, 0x1B, 0x94, 0xC0, 0x52, 0x78, 0xE2, 0x41, 0x4A, 0xF2, 0x65,
+    0x41, 0xB8, 0x6D, 0xEC, 0xC1, 0x05, 0xB8, 0xB9, 0x41, 0x59, 0xA0, 0x35, 0x41, 0xC8, 0x8E, 0xEA,
+    0x3F, 0xD7, 0x00, 0xBD, 0x40, 0xFD, 0x20, 0x08, 0x41, 0xA5, 0x7C, 0x50, 0xC0, 0x1A, 0x58, 0x21,
+    0x40, 0x45, 0x4A, 0xF1, 0x41, 0xD5, 0xC3, 0x79, 0xC1, 0x03, 0x76, 0xC0, 0x40, 0x80, 0x01, 0x19,
+    0x41, 0xE5, 0xE4, 0x79, 0x3F, 0xE9, 0x10, 0x80, 0xC0, 0xC5, 0xE3, 0xA8, 0x41, 0x8D, 0x10, 0xEF,
+    0x41, 0x5D, 0x5E, 0x8F, 0xC1, 0x83, 0x4F, 0x3A, 0x41, 0x95, 0x37, 0x4A, 0x41, 0x13, 0xAB, 0xB0,
+    0xC1, 0x0B, 0x2F, 0x13, 0x41, 0x82, 0x79, 0x28, 0x40, 0xBC, 0x27, 0x0F, 0xBF, 0xE5, 0x81, 0x9D,
+    0x41, 0xBD, 0xAD, 0xB1, 0x40, 0xAD, 0xAF, 0x4F, 0xC1, 0x40, 0x5C, 0xAB, 0x41, 0xC5, 0xD4, 0x0B,
+    0x3F, 0x52, 0x4A, 0x06, 0xC1, 0x92, 0x9C, 0x90, 0x41, 0x6B, 0x5E, 0x96, 0xC1, 0x70, 0xB5, 0x34,
+    0x40, 0x09, 0xC7, 0xFC, 0x41, 0xA1, 0xD1, 0xA9, 0xC1, 0x99, 0xED, 0xD6, 0x40, 0x93, 0x3C, 0x3E,
+    0x41, 0x91, 0x1A, 0x4B, 0xC0, 0xFD, 0x15, 0x96, 0xC1, 0x7E, 0x0D, 0x00, 0x41, 0x49, 0xEF, 0xDC,
+    0xC0, 0x6D, 0x90, 0xAC, 0x40, 0x51, 0xDE, 0xF0, 0x40, 0x89, 0x1C, 0x93, 0xBE, 0xF1, 0xC4, 0x11,
+    0xC1, 0x70, 0xB0, 0x8B, 0x40, 0xFE, 0x20, 0x45, 0x41, 0x30, 0xC6, 0x50, 0xC1, 0xA1, 0x7C, 0x11,
+    0x41, 0x24, 0xCB, 0xE5, 0x3F, 0xE9, 0xDE, 0xBE, 0xBF, 0xEE, 0x7E, 0xD8, 0x40, 0xD4, 0x94, 0x18,
+    0xC1, 0x1B, 0x18, 0xC1, 0xC1, 0x84, 0x20, 0x71, 0x40, 0xF3, 0x8A, 0x69, 0x40, 0x98, 0xEA, 0x1F,
+    0x40, 0x97, 0xB4, 0x48, 0x41, 0x51, 0xF6, 0x25, 0x40, 0xA6, 0xAE, 0x30, 0x40, 0x5F, 0xA7, 0xB1,
+    0x41, 0x89, 0x17, 0x78, 0x41, 0x75, 0xAC, 0x70, 0xC1, 0x8E, 0x18, 0x8E, 0x41, 0x39, 0xFE, 0x02,
+    0x41, 0x6E, 0xCA, 0x67, 0x40, 0x9E, 0x6A, 0x68, 0x41, 0x10, 0x81, 0x11, 0x41, 0x1B, 0x6F, 0x7F,
+    0x40, 0xAD, 0x4B, 0x29, 0x41, 0x3B, 0x3A, 0x41, 0xC1, 0x41, 0x4C, 0x98, 0x41, 0x7E, 0x28, 0x15,
+    0x41, 0x6F, 0x56, 0x2E, 0xC1, 0x37, 0x57, 0x88, 0x41, 0x76, 0xB7, 0xB5, 0x41, 0x44, 0x9C, 0xFE,
+    0x41, 0x25, 0x64, 0x90, 0x40, 0xE2, 0xFC, 0xE5, 0x41, 0xA7, 0xF4, 0x9C, 0xBF, 0xE7, 0xAE, 0x14,
+    0x41, 0x0A, 0x36, 0x26, 0x41, 0xA4, 0x39, 0xDE, 0xC0, 0x24, 0xAB, 0x93, 0xBB, 0xF0, 0x06, 0x8E,
+    0xC1, 0x20, 0x00, 0x00, 0x3F, 0x16, 0x81, 0x13, 0xBD, 0x88, 0xA2, 0x66, 0xC1, 0x20, 0x00, 0x00,
+    0x3F, 0x1D, 0xDC, 0x0E, 0x40, 0xF1, 0x74, 0x95, 0x41, 0xA6, 0x44, 0xA9, 0xC0, 0x36, 0xA5, 0x59,
+    0x41, 0x02, 0xFB, 0x9C, 0x41, 0xA5, 0xE9, 0xDA, 0xBF, 0xC3, 0xB5, 0x4A, 0xBC, 0xD0, 0x6B, 0xBE,
+    0xC1, 0x20, 0x00, 0x00, 0x3F, 0x20, 0x46, 0x20, 0xBD, 0x47, 0x89, 0x61, 0xC1, 0x1F, 0xFF, 0xFF,
+    0x3F, 0x14, 0x35, 0xDF, 0xC0, 0xFA, 0x9D, 0xC7, 0x41, 0x85, 0xC1, 0xB7, 0x40, 0xAA, 0xE7, 0x6F,
+    0xC1, 0x10, 0x29, 0xEB, 0x41, 0x80, 0x9F, 0x20, 0x40, 0xD0, 0x7A, 0xD1, 0x3E, 0xC2, 0x2B, 0x7C,
+    0xC1, 0x20, 0x00, 0x00, 0x3F, 0x29, 0xC0, 0x01, 0x3F, 0x38, 0x85, 0x7F, 0xC1, 0x1F, 0xFF, 0xFF,
+    0x3E, 0xAF, 0xF4, 0x56, 0xC0, 0xFD, 0x71, 0xD8, 0x41, 0x83, 0xAB, 0x96, 0x40, 0xCE, 0xD3, 0xB1,
+    0xC1, 0x0E, 0xBE, 0xA4, 0x41, 0x82, 0xB5, 0x43, 0x40, 0xAC, 0x90, 0x1F, 0x3E, 0xD9, 0x21, 0x68,
+    0xC1, 0x20, 0x00, 0x00, 0x3E, 0xBF, 0x6C, 0x48, 0x3F, 0x2D, 0xCF, 0xBC, 0xC1, 0x20, 0x00, 0x00,
+    0x3F, 0x21, 0x31, 0x44, 0xC0, 0xF8, 0xE0, 0x22, 0x41, 0xE8, 0x4B, 0x4B, 0xC1, 0x14, 0x36, 0x1F,
+    0xC1, 0x0C, 0x7F, 0xA6, 0x41, 0xE4, 0x93, 0x45, 0xC1, 0x24, 0x12, 0xDA, 0xC0, 0x01, 0x25, 0x39,
+    0xC1, 0x20, 0x00, 0x00, 0x3F, 0xB5, 0xEB, 0x3A, 0xBF, 0xF6, 0x43, 0x3D, 0xC1, 0x1F, 0xFF, 0xFE,
+    0x3F, 0xC2, 0x77, 0x2D, 0xC1, 0x0B, 0x64, 0x82, 0x41, 0xE6, 0x84, 0x99, 0xC1, 0x15, 0x34, 0xD0,
+    0xC0, 0xFB, 0x14, 0x70, 0x41, 0xE6, 0x5A, 0x05, 0xC1, 0x23, 0x13, 0xB7, 0xBF, 0xF7, 0x6B, 0x09,
+    0xC1, 0x20, 0x00, 0x00, 0x3F, 0xB7, 0x60, 0x63, 0xC0, 0x00, 0x83, 0x99, 0xC1, 0x20, 0x00, 0x01,
+    0x3F, 0xC1, 0x1A, 0x97, 0xC0, 0xCA, 0x0C, 0x4E, 0x41, 0x9A, 0x38, 0x78, 0xC0, 0xD2, 0x29, 0xBB,
+    0xC0, 0xE2, 0xE4, 0x1F, 0x41, 0x97, 0x6E, 0x73, 0xC0, 0xEA, 0xBD, 0x92, 0xC0, 0xE1, 0x27, 0x37,
+    0x41, 0x98, 0xE3, 0x73, 0xC0, 0xD3, 0xBD, 0x8E, 0xC0, 0xCB, 0xC6, 0x04, 0x41, 0x98, 0xC3, 0x84,
+    0xC0, 0xE9, 0x27, 0x8D,
+};
+
+static u8 l_flowerNormal[180] = {
+    0x3C, 0x8D, 0x2C, 0x38, 0x3F, 0x7F, 0xF5, 0xF9, 0x3B, 0x46, 0xF7, 0xA1, 0x3C, 0x76, 0x83,
+    0x7F, 0x3F, 0x7F, 0xF5, 0xF9, 0x3C, 0x12, 0x5F, 0xE9, 0xBB, 0xE5, 0xA3, 0x5D, 0x3F, 0x7F,
+    0xF5, 0xF9, 0x3C, 0x83, 0x57, 0xA3, 0x3B, 0xF9, 0xB1, 0x31, 0x3F, 0x7F, 0xF5, 0xF9, 0x3C,
+    0x81, 0x0A, 0x57, 0xBC, 0x80, 0x86, 0x38, 0x3F, 0x7F, 0xF5, 0xF9, 0x3B, 0xFD, 0xE2, 0xEF,
+    0xBC, 0x43, 0xEB, 0x7D, 0x3F, 0x7F, 0xF5, 0xF9, 0xBC, 0x51, 0x4E, 0x3C, 0x3C, 0x4B, 0x2D,
+    0x90, 0x3F, 0x7F, 0xF5, 0xF9, 0xBC, 0x4A, 0x42, 0xAF, 0x3C, 0x4F, 0x0B, 0x6B, 0x3F, 0x7F,
+    0xF5, 0xF9, 0xBC, 0x46, 0x4B, 0xA9, 0x3C, 0x4B, 0xF2, 0xB2, 0x3F, 0x7F, 0xF5, 0xF9, 0x3C,
+    0x49, 0x7D, 0x8D, 0x3C, 0x8D, 0x2A, 0x20, 0x3F, 0x7F, 0xF5, 0xF9, 0x3B, 0x47, 0x5C, 0x4B,
+    0xBC, 0x80, 0x84, 0x1F, 0x3F, 0x7F, 0xF5, 0xF9, 0x3B, 0xFD, 0xF3, 0xB6, 0xBC, 0x43, 0xFC,
+    0x44, 0x3F, 0x7F, 0xF5, 0xF9, 0xBC, 0x51, 0x3D, 0x75, 0x3C, 0x4B, 0x3E, 0x57, 0x3F, 0x7F,
+    0xF5, 0xF9, 0xBC, 0x4A, 0x31, 0xE8, 0x3C, 0x4F, 0x07, 0x3A, 0x3F, 0x7F, 0xF5, 0xF9, 0xBC,
+    0x46, 0x54, 0x0D, 0x3C, 0x4B, 0xEE, 0x80, 0x3F, 0x7F, 0xF5, 0xF9, 0x3C, 0x49, 0x81, 0xBF,
+};
+
+static GXColor l_flowerColor[2] = {
+    {0xFF, 0xFF, 0xFF, 0xFF}, {0xB2, 0xB2, 0xB2, 0xFF}
+};
+
+static u8 l_flowerTexCoord[] = {
+    0x40, 0x40, 0xD0, 0xEA, 0x3D, 0x69, 0x70, 0x72, 0x40, 0x7D, 0xD8, 0x30, 0x3F, 0x81, 0x3D, 0xC9,
+    0x40, 0x40, 0xCE, 0x85, 0x3F, 0x81, 0x3D, 0xC9, 0x40, 0x01, 0xDD, 0x33, 0x3F, 0x81, 0x3D, 0xC9,
+    0x40, 0x40, 0xD0, 0xEA, 0x3F, 0xF9, 0x46, 0xD4, 0x40, 0x00, 0xCD, 0xB8, 0xBF, 0x7F, 0xD4, 0x39,
+    0x40, 0x40, 0xC2, 0xC6, 0x00, 0x00, 0x00, 0x00, 0x40, 0x20, 0xC8, 0x3F, 0x3E, 0xFF, 0xD4, 0x39,
+    0x3F, 0xC1, 0xA6, 0x61, 0xBE, 0xFF, 0xD4, 0x39, 0x40, 0x00, 0xCD, 0xB8, 0x3F, 0x7F, 0xD4, 0x39,
+    0x3F, 0x81, 0xB1, 0x53, 0x00, 0x00, 0x00, 0x00, 0x3D, 0x49, 0x75, 0x29, 0xBD, 0xFA, 0x4F, 0x87,
+    0x3C, 0x54, 0x88, 0x83, 0xBD, 0xFA, 0x4F, 0x87, 0x3C, 0xF8, 0x85, 0x4D, 0xBF, 0x27, 0x85, 0x40,
+    0x3D, 0x01, 0x8D, 0x69, 0xBF, 0x27, 0x98, 0x20, 0xBD, 0x44, 0x30, 0xB1, 0xBD, 0xFC, 0xC3, 0xA0,
+    0xBB, 0xEE, 0x06, 0xD9, 0xBD, 0xFC, 0xC3, 0xA0, 0xBC, 0xF4, 0x1F, 0x21, 0xBF, 0x27, 0x90, 0xA8,
+    0xBD, 0x00, 0x00, 0x00, 0xBF, 0x27, 0x92, 0x7D, 0xBE, 0x03, 0x5A, 0x86, 0xBD, 0x67, 0x4C, 0x0A,
+    0xBE, 0x03, 0x5A, 0x86, 0xBC, 0x82, 0xCD, 0x3A, 0xBF, 0x25, 0x30, 0x59, 0xBD, 0x06, 0x8E, 0xC5,
+    0xBF, 0x25, 0xFA, 0x66, 0xBD, 0x2F, 0x2B, 0x67, 0xBE, 0x03, 0x59, 0x79, 0x3D, 0x40, 0x8E, 0x9B,
+    0xBE, 0x03, 0x59, 0x79, 0x3B, 0xAF, 0xE6, 0x0C, 0xBF, 0x25, 0xB3, 0x4A, 0x3C, 0x9E, 0x81, 0xCB,
+    0xBF, 0x25, 0xD9, 0x3C, 0x3C, 0xF1, 0xE6, 0xCD, 0x3E, 0x1C, 0xD0, 0x78, 0x3D, 0x36, 0xDC, 0xA0,
+    0x3E, 0x1C, 0xD0, 0x78, 0x3B, 0x48, 0x68, 0xBA, 0x3F, 0x59, 0x32, 0x61, 0x3C, 0xDD, 0x5F, 0x57,
+    0x3F, 0x59, 0x61, 0xF6, 0x3C, 0xFB, 0x13, 0x9D, 0x3E, 0x1C, 0xD0, 0x78, 0xBB, 0xEB, 0xED, 0xFA,
+    0x3E, 0x1C, 0xD0, 0x78, 0xBD, 0x47, 0xD3, 0xD4, 0x3F, 0x59, 0x49, 0x41, 0xBC, 0xCB, 0x3E, 0x57,
+    0x3F, 0x59, 0x4B, 0x6A, 0xBC, 0xAD, 0x94, 0x8E, 0x3E, 0xA7, 0x7F, 0x28, 0x3D, 0x28, 0x87, 0xA9,
+    0x3E, 0xA7, 0x67, 0x4D, 0x3C, 0x14, 0x46, 0x74, 0x3E, 0xA7, 0x73, 0xE2, 0xBC, 0x2F, 0x46, 0xAA,
+    0x3E, 0xA7, 0x72, 0xD6, 0xBD, 0x2F, 0x46, 0xAA};
+
+#if TARGET_PC
+DEFINE_GRASS_ASSET(l_J_hana00DL, u8, 0x150, {
+    {GameVersion::GcnUsa,     0x9D20},
+    {GameVersion::GcnPal,     0x9D20},
+    {GameVersion::GcnJpn,     0x9D20},
+    {GameVersion::WiiUsaRev0, 0x8820},
+    {GameVersion::WiiUsa,     0x8880},
+    {GameVersion::WiiPal,     0x8880},
+    {GameVersion::WiiJpn,     0x8880},
+});
+
+DEFINE_GRASS_ASSET(l_J_hana00_cDL, u8, 0xDE, {
+    {GameVersion::GcnUsa,     0x9E80},
+    {GameVersion::GcnPal,     0x9E80},
+    {GameVersion::GcnJpn,     0x9E80},
+    {GameVersion::WiiUsaRev0, 0x8980},
+    {GameVersion::WiiUsa,     0x89E0},
+    {GameVersion::WiiPal,     0x89E0},
+    {GameVersion::WiiJpn,     0x89E0},
+});
+
+DEFINE_GRASS_ASSET(l_matDL, u8, 0x99, {
+    {GameVersion::GcnUsa,     0x9F60},
+    {GameVersion::GcnPal,     0x9F60},
+    {GameVersion::GcnJpn,     0x9F60},
+    {GameVersion::WiiUsaRev0, 0x8A60},
+    {GameVersion::WiiUsa,     0x8AC0},
+    {GameVersion::WiiPal,     0x8AC0},
+    {GameVersion::WiiJpn,     0x8AC0},
+});
+
+DEFINE_GRASS_ASSET(l_matLight4DL, u8, 0x99, {
+    {GameVersion::GcnUsa,     0xA000},
+    {GameVersion::GcnPal,     0xA000},
+    {GameVersion::GcnJpn,     0xA000},
+    {GameVersion::WiiUsaRev0, 0x8B00},
+    {GameVersion::WiiUsa,     0x8B60},
+    {GameVersion::WiiPal,     0x8B60},
+    {GameVersion::WiiJpn,     0x8B60},
+});
+
+#define l_J_hana00DL   (l_J_hana00DL_get())
+#define l_J_hana00_cDL (l_J_hana00_cDL_get())
+#define l_matDL        (l_matDL_get())
+#define l_matLight4DL  (l_matLight4DL_get())
+#else
+#include "assets/l_J_hana00DL.h"
+
+#include "assets/l_J_hana00_cDL.h"
+
+#include "assets/l_matDL__d_a_grass.h"
+l_matDL__d_a_grass(l_J_Ohana00_64TEX)
+
+#include "assets/l_matLight4DL.h"
+l_matLight4DL(l_J_Ohana00_64TEX)
+#endif
+
+const u16 l_J_Ohana01_64128_0419TEX__width = 63;
+const u16 l_J_Ohana01_64128_0419TEX__height = 127;
+
+#if TARGET_PC
+DEFINE_GRASS_ASSET(l_J_Ohana01_64128_0419TEX, u8, 0x1000, {
+    {GameVersion::GcnUsa,     0xA0A0},
+    {GameVersion::GcnPal,     0xA0A0},
+    {GameVersion::GcnJpn,     0xA0A0},
+    {GameVersion::WiiUsaRev0, 0x8BA0},
+    {GameVersion::WiiUsa,     0x8C00},
+    {GameVersion::WiiPal,     0x8C00},
+    {GameVersion::WiiJpn,     0x8C00},
+});
+
+#define l_J_Ohana01_64128_0419TEX (l_J_Ohana01_64128_0419TEX_get())
+#else
+#include "assets/l_J_Ohana01_64128_0419TEX.h"
+#endif
+
+static u8 l_flowerPos2[1224] = {
+    0x40, 0x25, 0x9F, 0x34, 0x42, 0xC2, 0x95, 0x72, 0xC1, 0x22, 0x34, 0x78, 0x41, 0x4D, 0xF9, 0x63,
+    0x43, 0x09, 0x35, 0x0D, 0x40, 0x97, 0xD7, 0x54, 0x41, 0x76, 0x80, 0x55, 0x42, 0xBA, 0x1C, 0xB4,
+    0x41, 0x91, 0x3E, 0x0D, 0xC0, 0x99, 0x8D, 0x47, 0x42, 0xC2, 0x8D, 0xF5, 0x41, 0x12, 0xA1, 0x12,
+    0x41, 0xB9, 0x1A, 0xFF, 0x42, 0xBA, 0x37, 0xE3, 0xBF, 0xBD, 0xD2, 0xA6, 0x41, 0x4D, 0xF9, 0x34,
+    0x43, 0x09, 0x35, 0x0F, 0x40, 0x97, 0xD6, 0xB6, 0xC1, 0x07, 0x14, 0xD0, 0x42, 0xCC, 0x9E, 0xFD,
+    0xC1, 0x42, 0x39, 0x8F, 0xC0, 0xC1, 0xA4, 0x94, 0x43, 0x14, 0xDF, 0xBB, 0x40, 0xD1, 0x75, 0xE2,
+    0x40, 0x32, 0xFE, 0x8B, 0x42, 0xC7, 0x29, 0xAC, 0x41, 0x9E, 0x0C, 0xC8, 0xC0, 0xC1, 0xA4, 0xE1,
+    0x43, 0x14, 0xDF, 0xBB, 0x40, 0xD1, 0x75, 0x8E, 0xC1, 0x95, 0xAF, 0x93, 0x42, 0xC4, 0x31, 0xF1,
+    0x41, 0x1A, 0xB9, 0x87, 0x41, 0x51, 0x09, 0xAB, 0x42, 0xCF, 0x96, 0xC1, 0xC0, 0x03, 0x66, 0x1F,
+    0xC1, 0x01, 0x95, 0x6E, 0x42, 0xB3, 0x6A, 0x42, 0xC1, 0x8B, 0x4C, 0x1D, 0xC0, 0xD4, 0xA5, 0x9C,
+    0x42, 0xFE, 0x7B, 0x90, 0xC1, 0x0A, 0x4F, 0x99, 0x40, 0x1C, 0xE1, 0x15, 0x42, 0xC2, 0x2D, 0x47,
+    0x41, 0x06, 0xA6, 0x41, 0xC1, 0x7B, 0x73, 0x6E, 0x42, 0xB8, 0x6D, 0x93, 0x3F, 0x5A, 0xCC, 0xA3,
+    0x41, 0x21, 0x15, 0xF4, 0x42, 0xBD, 0x29, 0xFE, 0xC1, 0x1D, 0x9F, 0x3A, 0xC0, 0xD4, 0xA5, 0xEC,
+    0x42, 0xFE, 0x7B, 0x93, 0xC1, 0x0A, 0x4F, 0xE9, 0x41, 0x06, 0x70, 0xFC, 0x42, 0xC4, 0x24, 0x9D,
+    0x40, 0x7C, 0x3E, 0xE6, 0x41, 0x24, 0x1D, 0x91, 0x42, 0xC3, 0xD6, 0x8C, 0x40, 0x7C, 0x3E, 0xE6,
+    0x3F, 0xEA, 0x26, 0xBB, 0xC1, 0x20, 0x00, 0x00, 0x3E, 0x25, 0x61, 0x91, 0xBF, 0x8B, 0x0E, 0xC3,
+    0xC1, 0x20, 0x00, 0x01, 0x3E, 0x1C, 0xD6, 0x80, 0x41, 0x15, 0x52, 0x2B, 0x42, 0xC4, 0x0E, 0x24,
+    0x40, 0x40, 0xBB, 0xC3, 0x41, 0x15, 0x3C, 0x61, 0x42, 0xC3, 0xED, 0x00, 0x40, 0x9B, 0xE1, 0x05,
+    0x3E, 0xBE, 0xC3, 0xFC, 0xC1, 0x20, 0x00, 0x00, 0x3F, 0xCE, 0x28, 0xBB, 0x3E, 0xBE, 0xBA, 0x6B,
+    0xC1, 0x1F, 0xFF, 0xFF, 0xBF, 0xA5, 0xFF, 0xCE, 0xC0, 0x6B, 0x3A, 0x75, 0x42, 0xC1, 0x3D, 0x51,
+    0xC0, 0xA0, 0xCD, 0x8E, 0xBF, 0xDC, 0xEC, 0x63, 0x42, 0xC1, 0x54, 0xB6, 0xC0, 0xA0, 0x6C, 0x42,
+    0x3F, 0x88, 0xCC, 0x2D, 0xC1, 0x1F, 0xFF, 0xFF, 0xBF, 0x24, 0x6B, 0xBE, 0xBF, 0xC0, 0xE6, 0x08,
+    0xC1, 0x20, 0x00, 0x01, 0xBF, 0x29, 0x08, 0x81, 0xC0, 0x2C, 0x6A, 0x66, 0x42, 0xC1, 0x36, 0x4D,
+    0xC0, 0xBF, 0xC9, 0xD6, 0xC0, 0x2D, 0x46, 0x30, 0x42, 0xC1, 0x5B, 0xB5, 0xC0, 0x81, 0x6F, 0xF4,
+    0xBE, 0x68, 0x6B, 0xDF, 0xC1, 0x20, 0x00, 0x00, 0x3F, 0x23, 0x29, 0xD4, 0xBE, 0x58, 0xD0, 0xCC,
+    0xC1, 0x20, 0x00, 0x01, 0xBF, 0xF8, 0x39, 0x71, 0xC0, 0x79, 0x82, 0x0E, 0x42, 0xD0, 0x8E, 0xE6,
+    0x40, 0x7C, 0x3E, 0xE6, 0xC0, 0x00, 0x2E, 0x23, 0x42, 0xD0, 0xA5, 0xB2, 0x40, 0x7C, 0x3E, 0xE6,
+    0x3F, 0x2F, 0x08, 0x57, 0xC1, 0x1F, 0x8E, 0x06, 0xBB, 0xAE, 0xF2, 0xC7, 0xBF, 0xD7, 0xC7, 0x1D,
+    0xC1, 0x20, 0x71, 0xFC, 0xBB, 0xAE, 0xF2, 0xC7, 0xC0, 0x3C, 0xE3, 0xDE, 0x42, 0xD0, 0xAB, 0x13,
+    0x40, 0x3F, 0x99, 0x18, 0xC0, 0x3C, 0xCC, 0x57, 0x42, 0xD0, 0x89, 0x86, 0x40, 0x9C, 0x72, 0x58,
+    0xBF, 0x00, 0x08, 0x31, 0xC1, 0x20, 0xA7, 0xBD, 0x3F, 0x96, 0xEC, 0x4A, 0xBF, 0x00, 0x7D, 0xB3,
+    0xC1, 0x1F, 0x58, 0x45, 0xBF, 0x98, 0x4A, 0x30, 0x40, 0xBD, 0x8F, 0x9B, 0x42, 0x63, 0xF3, 0x30,
+    0x40, 0x23, 0x56, 0x11, 0x41, 0x65, 0x2F, 0xC6, 0x42, 0xBB, 0x00, 0xB1, 0xC1, 0x8C, 0x12, 0x7A,
+    0x41, 0xCA, 0x62, 0xA7, 0x42, 0xBB, 0x00, 0xB0, 0x41, 0x28, 0xB1, 0x15, 0xC1, 0x5B, 0xA6, 0x8E,
+    0x42, 0xBB, 0x00, 0xAE, 0xC0, 0xD1, 0x1E, 0x86, 0xC0, 0x30, 0x44, 0xBF, 0x42, 0xBB, 0x00, 0xAD,
+    0x41, 0xAC, 0x23, 0x4E, 0xBF, 0xAD, 0xFA, 0x8F, 0x41, 0xB0, 0x93, 0x1B, 0x3F, 0x85, 0x39, 0x9F,
+    0x41, 0x9F, 0x2B, 0xD3, 0x42, 0x90, 0x9F, 0x64, 0xC1, 0x8A, 0x85, 0x5E, 0x41, 0x7B, 0x1C, 0x3E,
+    0x42, 0x90, 0x9F, 0x63, 0x41, 0xA7, 0xF3, 0x96, 0xC1, 0x13, 0xCB, 0x32, 0x42, 0x90, 0x9F, 0x65,
+    0xC1, 0x92, 0x20, 0x52, 0xC1, 0x7F, 0xDB, 0xED, 0x42, 0x90, 0x9F, 0x65, 0x41, 0x46, 0xD3, 0x80,
+    0xBF, 0x24, 0xCA, 0xC5, 0x42, 0x44, 0xF1, 0x22, 0xC0, 0x3B, 0xEA, 0xC4, 0xC0, 0x35, 0x33, 0xCE,
+    0x42, 0x44, 0xDE, 0xC0, 0xC0, 0x3C, 0xDA, 0x27, 0xBF, 0xDF, 0x4A, 0x77, 0x42, 0x44, 0xF6, 0xA3,
+    0xBF, 0xEC, 0xBC, 0x8C, 0xBF, 0xDD, 0x8A, 0x1A, 0x42, 0x44, 0xD9, 0x3D, 0xC0, 0x81, 0x30, 0x55,
+    0xBF, 0x4A, 0x36, 0xF4, 0x42, 0x56, 0x1A, 0x91, 0x40, 0x0B, 0xFC, 0x11, 0xC0, 0x3B, 0xC6, 0x93,
+    0x42, 0x55, 0xE6, 0xFE, 0x40, 0x0B, 0xFC, 0x0D, 0xBF, 0xEE, 0x39, 0xBD, 0x42, 0x55, 0xDA, 0xD7,
+    0x40, 0x50, 0x93, 0xC4, 0xBF, 0xEE, 0x6E, 0xEB, 0x42, 0x56, 0x26, 0xB9, 0x3F, 0x8E, 0xC8, 0xB4,
+    0x40, 0xBF, 0xC7, 0x22, 0x42, 0x8E, 0x14, 0xBA, 0x40, 0x3F, 0x9A, 0x4E, 0x41, 0x03, 0x00, 0x18,
+    0x42, 0x8D, 0xE7, 0xA4, 0x40, 0x3F, 0xCE, 0xF6, 0x40, 0xE2, 0xF3, 0x95, 0x42, 0x8E, 0x07, 0xC0,
+    0x3F, 0xF2, 0xF4, 0xA5, 0x40, 0xE2, 0xDA, 0xA3, 0x42, 0x8D, 0xF4, 0x9D, 0x40, 0x82, 0xF4, 0x90,
+    0xBE, 0x9C, 0x1E, 0xDE, 0x42, 0x00, 0x1D, 0x6A, 0xC0, 0xD3, 0x0E, 0xA8, 0x41, 0x2D, 0xDB, 0x19,
+    0x42, 0x00, 0x1D, 0x68, 0xC0, 0xC8, 0xE4, 0xE0, 0x40, 0x17, 0x47, 0xAA, 0x41, 0x99, 0xE3, 0xCB,
+    0x3F, 0x88, 0x3F, 0x79, 0x41, 0x12, 0xF6, 0x8B, 0x42, 0x00, 0x1D, 0x67, 0x41, 0x10, 0xBB, 0x1F,
+    0xC0, 0x40, 0x6B, 0x66, 0x42, 0x00, 0x1D, 0x68, 0x40, 0xB5, 0xCE, 0x40, 0x40, 0xB0, 0x3B, 0xDA,
+    0x42, 0x08, 0x7F, 0x60, 0x40, 0xB3, 0xDC, 0xD7, 0xC0, 0x7B, 0x9C, 0x13, 0x42, 0x08, 0x7F, 0x5F,
+    0x41, 0x39, 0xAA, 0x67, 0xBF, 0x7D, 0x10, 0x1B, 0x41, 0xB4, 0xF6, 0xEB, 0x3F, 0x43, 0x3A, 0x04,
+    0xC1, 0x31, 0xB5, 0x84, 0x42, 0x08, 0x7F, 0x5E, 0xC0, 0x02, 0x89, 0x9C, 0x3F, 0x61, 0xC2, 0x2B,
+    0x42, 0x08, 0x7F, 0x5F, 0xC0, 0xC2, 0x2D, 0xCD, 0xC0, 0xB7, 0xA5, 0x40, 0x42, 0x03, 0xBD, 0x64,
+    0xC0, 0xF9, 0x2E, 0x71, 0x40, 0x97, 0xF6, 0x62, 0x42, 0x03, 0xBD, 0x63, 0xC1, 0x3A, 0x58, 0x92,
+    0xBE, 0xD3, 0x65, 0xED, 0x41, 0x99, 0xE3, 0xCC, 0xBF, 0xD5, 0x9D, 0xED, 0x41, 0x0E, 0x33, 0x4E,
+    0x42, 0x03, 0xBD, 0x61, 0x40, 0x4C, 0xFD, 0x0D, 0xBE, 0x25, 0xBF, 0xF0, 0x42, 0x09, 0x9F, 0xF5,
+    0xC0, 0x05, 0xBD, 0x6F, 0x3F, 0x87, 0x66, 0x17, 0xC1, 0x1E, 0x5D, 0x2E, 0xBF, 0x22, 0xBD, 0x5E,
+    0xBF, 0xBE, 0xED, 0x1C, 0xC1, 0x1E, 0x5D, 0x30, 0xBF, 0x27, 0x4E, 0x12, 0xC0, 0x0C, 0x84, 0x34,
+    0x42, 0x09, 0x96, 0x95, 0xC0, 0x06, 0xA0, 0xBA, 0xBF, 0x97, 0xAF, 0xEA, 0x42, 0x09, 0xA2, 0xC4,
+    0xBF, 0x8A, 0x29, 0x63, 0xBE, 0x66, 0x0B, 0x70, 0xC1, 0x1E, 0x5D, 0x2E, 0x3F, 0x21, 0x7E, 0xBB,
+    0xBE, 0x56, 0x99, 0x42, 0xC1, 0x1E, 0x5D, 0x30, 0xBF, 0xF5, 0xAF, 0xB0, 0xBF, 0x96, 0x19, 0x3B,
+    0x42, 0x09, 0x93, 0xC4, 0xC0, 0x47, 0x42, 0x91, 0xBE, 0xB2, 0xE9, 0xEE, 0x42, 0x09, 0x50, 0x68,
+    0x3F, 0xB1, 0x1A, 0xCA, 0x3F, 0x2D, 0x3E, 0x2D, 0xC1, 0x1D, 0xEC, 0x5F, 0xBB, 0xAD, 0x2D, 0xCB,
+    0xBF, 0xD5, 0x92, 0x4B, 0xC1, 0x1E, 0xCE, 0x00, 0xBB, 0xAD, 0x2D, 0xCB, 0xC0, 0x17, 0x75, 0x3A,
+    0x42, 0x09, 0x1F, 0xE3, 0x3F, 0xB1, 0x1A, 0xCA, 0xBF, 0xAD, 0xB9, 0x73, 0x42, 0x09, 0x14, 0x75,
+    0x40, 0x19, 0x14, 0xF9, 0xBE, 0xFD, 0x72, 0x15, 0xC1, 0x1F, 0x03, 0x34, 0x3F, 0x95, 0x61, 0x35,
+    0xBE, 0xFE, 0x5A, 0xBC, 0xC1, 0x1D, 0xB7, 0x2A, 0xBF, 0x96, 0xBB, 0x88, 0xBF, 0xAD, 0xEB, 0x7D,
+    0x42, 0x09, 0x5B, 0xD8, 0x3E, 0xC0, 0x2E, 0xA9, 0x40, 0x1E, 0x27, 0x67, 0x42, 0x02, 0x4C, 0x03,
+    0x3F, 0xC0, 0x2D, 0xB6, 0x40, 0x94, 0xBE, 0xD1, 0x42, 0x02, 0x30, 0x38, 0x3F, 0xC0, 0xDA, 0xE4,
+    0x3F, 0xE7, 0xC1, 0xCE, 0xC1, 0x1E, 0x5D, 0x2E, 0x3E, 0x23, 0xB0, 0x81, 0xBF, 0x89, 0xA2, 0xBE,
+    0xC1, 0x1E, 0x5D, 0x30, 0x3E, 0x1B, 0x3B, 0xFB, 0x40, 0x63, 0xE5, 0x3F, 0x42, 0x02, 0x44, 0x03,
+    0x3E, 0xD5, 0xAB, 0x19, 0x40, 0x63, 0xD6, 0x7C, 0x42, 0x02, 0x38, 0x37, 0x40, 0x25, 0xC5, 0x61,
+    0x3E, 0xBC, 0xD0, 0x9A, 0xC1, 0x1E, 0x5D, 0x2E, 0x3F, 0xCC, 0x0D, 0x13, 0x3E, 0xBC, 0xC7, 0x2A,
+    0xC1, 0x1E, 0x5D, 0x2D, 0xBF, 0xA4, 0x4D, 0x4D,
+};
+
+static u8 l_flowerNormal2[288] = {
+    0xBB, 0xC4, 0x93, 0x42, 0x3F, 0x7F, 0xF6, 0x6F, 0xBC, 0x83, 0x0E, 0x3D, 0x3C, 0x83, 0x0C, 0x24,
+    0x3F, 0x7F, 0xF5, 0x84, 0x3C, 0x03, 0x0E, 0x3D, 0xB8, 0x51, 0xB7, 0x17, 0x3F, 0x7F, 0xF5, 0xF9,
+    0x3C, 0x8F, 0x57, 0xF7, 0xBC, 0x8F, 0x57, 0xF7, 0x3F, 0x7F, 0xF5, 0xF9, 0x38, 0x1F, 0x62, 0x30,
+    0xBD, 0xB8, 0xC9, 0xFB, 0x3F, 0x7E, 0x68, 0x3C, 0xBD, 0x85, 0xBD, 0x94, 0xBD, 0xD9, 0x65, 0xB2,
+    0x3F, 0x7E, 0x28, 0x13, 0xBD, 0x63, 0x62, 0xA6, 0xBD, 0xB8, 0x12, 0x7B, 0x3F, 0x7E, 0x6B, 0x0E,
+    0xBD, 0x85, 0x62, 0x5A, 0xBD, 0xFD, 0x2D, 0x88, 0x3F, 0x7D, 0x58, 0x32, 0xBD, 0x95, 0xE3, 0x97,
+    0xBD, 0xB5, 0xC6, 0x3B, 0x3F, 0x7E, 0xFB, 0x4C, 0x3C, 0x01, 0xC7, 0x15, 0xB8, 0xFF, 0xDA, 0x40,
+    0x3F, 0x7F, 0xF5, 0xF9, 0x3C, 0x8F, 0x57, 0xF7, 0x37, 0x38, 0x8C, 0xA4, 0x3F, 0x7F, 0xF5, 0xF9,
+    0xBC, 0x8F, 0x57, 0xF7, 0xBC, 0x8F, 0x57, 0xF7, 0x3F, 0x7F, 0xF5, 0xF9, 0xB8, 0xBE, 0xD7, 0x41,
+    0x38, 0x06, 0x37, 0xBD, 0x3F, 0x7F, 0xF5, 0xF9, 0xBC, 0x8F, 0x57, 0xF7, 0x37, 0x6A, 0xE1, 0x8B,
+    0x3F, 0x7F, 0xF5, 0xF9, 0x3C, 0x8F, 0x57, 0xF7, 0xBC, 0x8E, 0xC7, 0x43, 0x3F, 0x7F, 0xF5, 0xF9,
+    0x3A, 0xCB, 0xF2, 0xB2, 0xBC, 0x8F, 0x57, 0xF7, 0x3F, 0x7F, 0xF5, 0xF9, 0x00, 0x00, 0x00, 0x00,
+    0xBC, 0x8F, 0x57, 0xF7, 0x3F, 0x7F, 0xF5, 0xF9, 0xB7, 0xD1, 0xB7, 0x17, 0xBC, 0x8F, 0x55, 0xDE,
+    0x3F, 0x7F, 0xF5, 0xF9, 0x39, 0x4E, 0x91, 0xC9, 0xBA, 0x02, 0x49, 0x1B, 0x3F, 0x7F, 0xF5, 0xF9,
+    0x3C, 0x8F, 0x49, 0x49, 0x3C, 0x80, 0x34, 0x6E, 0x3F, 0x7F, 0xF5, 0xF9, 0x3C, 0x00, 0x3C, 0xD1,
+    0xBC, 0x8E, 0x7F, 0xF6, 0x3F, 0x7F, 0xF5, 0xF9, 0xBA, 0xF8, 0xE7, 0xDE, 0x3B, 0x98, 0xD4, 0x78,
+    0x3F, 0x7F, 0xF5, 0xF9, 0xBC, 0x8A, 0x28, 0x78, 0x3C, 0x8B, 0xFE, 0x3B, 0x3F, 0x7F, 0xF5, 0xF9,
+    0x3B, 0x76, 0x7B, 0x1C, 0x3B, 0x99, 0x6B, 0x76, 0x3F, 0x7F, 0xF5, 0xF9, 0xBC, 0x8A, 0x1D, 0xFC,
+};
+
+static GXColor l_flowerColor2[2] = {
+    {0xFF, 0xFF, 0xFF, 0xFF}, {0xFF, 0xFF, 0xB2, 0xFF}
+};
+
+static u8 l_flowerTexCoord2[] = {
+    0x3F, 0xF3, 0x6D, 0x11, 0x3F, 0x72, 0x0B, 0xA2, 0x3F, 0x80, 0x00, 0x00, 0x3C, 0xAB, 0xDC, 0x27,
+    0x3D, 0xC9, 0x2E, 0xE8, 0x3F, 0x72, 0x0B, 0xA2, 0x40, 0x2B, 0x93, 0x9A, 0x3F, 0x81, 0x7B, 0x96,
+    0x40, 0x2B, 0x93, 0x9A, 0x3F, 0x7B, 0xB5, 0x18, 0x40, 0x06, 0x1F, 0xCD, 0x3F, 0x7B, 0xB5, 0x18,
+    0x40, 0x06, 0x00, 0x47, 0x3F, 0x81, 0x7B, 0x96, 0x40, 0x06, 0x16, 0xBE, 0x3F, 0x81, 0x7B, 0x96,
+    0x40, 0x06, 0x09, 0x5B, 0x3F, 0x7B, 0xB5, 0x18, 0x40, 0x07, 0xBB, 0x1F, 0x3F, 0x7B, 0xB5, 0x18,
+    0x40, 0x07, 0xC2, 0xF8, 0x3F, 0x81, 0x7B, 0x96, 0x40, 0x07, 0xB8, 0xC3, 0x3F, 0x81, 0x7B, 0x96,
+    0x40, 0x07, 0xC5, 0x50, 0x3F, 0x7B, 0xB5, 0x18, 0x40, 0x03, 0xA9, 0x58, 0x3F, 0x7B, 0xB5, 0x18,
+    0x40, 0x03, 0xA9, 0x58, 0x3F, 0x81, 0x7B, 0x96, 0x40, 0x00, 0x7B, 0xB7, 0xC0, 0xA0, 0x9B, 0xA2,
+    0x40, 0x39, 0x01, 0x1D, 0xC0, 0xBD, 0x25, 0x1C, 0x40, 0x00, 0x7B, 0xB7, 0xC0, 0xBE, 0x0D, 0xCC,
+    0x40, 0x00, 0x7B, 0xB7, 0xC0, 0xBD, 0x25, 0x1C, 0x40, 0x25, 0xD5, 0xA2, 0x3F, 0x7B, 0xB5, 0x18,
+    0x40, 0x25, 0xD9, 0x1F, 0x3F, 0x81, 0x7B, 0x96, 0x40, 0x25, 0xD4, 0x95, 0x3F, 0x81, 0x7B, 0x96,
+    0x40, 0x25, 0xDA, 0x2B, 0x3F, 0x7B, 0xB5, 0x18, 0x40, 0x24, 0x06, 0x9E, 0x3F, 0x7B, 0xB5, 0x18,
+    0x40, 0x24, 0x06, 0x9E, 0x3F, 0x81, 0x7B, 0x96, 0x40, 0x2F, 0xF0, 0x35, 0x3F, 0x81, 0x7B, 0x96,
+    0x40, 0x2F, 0xF8, 0x16, 0x3F, 0x7B, 0xB5, 0x18, 0x40, 0x2F, 0xF2, 0x78, 0x3F, 0x7B, 0xB5, 0x18,
+    0x40, 0x2F, 0xF5, 0xCF, 0x3F, 0x81, 0x7B, 0x96, 0x40, 0x66, 0xBD, 0x6A, 0x3F, 0x51, 0x10, 0x6F,
+    0x40, 0x66, 0xBD, 0x6A, 0x3F, 0x97, 0xF6, 0xBA, 0x40, 0x7C, 0x19, 0xB1, 0x3F, 0x80, 0x5E, 0x57,
+    0x40, 0x1B, 0x7D, 0x52, 0x3F, 0x97, 0xF6, 0xBA, 0x40, 0x04, 0x26, 0x74, 0x3F, 0x80, 0x3F, 0x79,
+    0x40, 0x1B, 0x7D, 0x52, 0x3F, 0x80, 0x3F, 0x79, 0x40, 0x1B, 0x7D, 0x52, 0x3F, 0x51, 0x10, 0x6F};
+
+#if TARGET_PC
+DEFINE_GRASS_ASSET(l_J_hana01DL, u8, 0x138, {
+    {GameVersion::GcnUsa,     0xB7C0},
+    {GameVersion::GcnPal,     0xB7C0},
+    {GameVersion::GcnJpn,     0xB7C0},
+    {GameVersion::WiiUsaRev0, 0xA2C0},
+    {GameVersion::WiiUsa,     0xA320},
+    {GameVersion::WiiPal,     0xA320},
+    {GameVersion::WiiJpn,     0xA320},
+});
+
+DEFINE_GRASS_ASSET(l_J_hana01_c_00DL, u8, 0xDE, {
+    {GameVersion::GcnUsa,     0xB900},
+    {GameVersion::GcnPal,     0xB900},
+    {GameVersion::GcnJpn,     0xB900},
+    {GameVersion::WiiUsaRev0, 0xA400},
+    {GameVersion::WiiUsa,     0xA460},
+    {GameVersion::WiiPal,     0xA460},
+    {GameVersion::WiiJpn,     0xA460},
+});
+
+DEFINE_GRASS_ASSET(l_J_hana01_c_01DL, u8, 0x128, {
+    {GameVersion::GcnUsa,     0xB9E0},
+    {GameVersion::GcnPal,     0xB9E0},
+    {GameVersion::GcnJpn,     0xB9E0},
+    {GameVersion::WiiUsaRev0, 0xA4E0},
+    {GameVersion::WiiUsa,     0xA540},
+    {GameVersion::WiiPal,     0xA540},
+    {GameVersion::WiiJpn,     0xA540},
+});
+
+DEFINE_GRASS_ASSET(l_mat2DL, u8, 0x99, {
+    {GameVersion::GcnUsa,     0xBB20},
+    {GameVersion::GcnPal,     0xBB20},
+    {GameVersion::GcnJpn,     0xBB20},
+    {GameVersion::WiiUsaRev0, 0xA620},
+    {GameVersion::WiiUsa,     0xA680},
+    {GameVersion::WiiPal,     0xA680},
+    {GameVersion::WiiJpn,     0xA680},
+});
+
+DEFINE_GRASS_ASSET(l_mat2Light4DL, u8, 0x99, {
+    {GameVersion::GcnUsa,     0xBBC0},
+    {GameVersion::GcnPal,     0xBBC0},
+    {GameVersion::GcnJpn,     0xBBC0},
+    {GameVersion::WiiUsaRev0, 0xA6C0},
+    {GameVersion::WiiUsa,     0xA720},
+    {GameVersion::WiiPal,     0xA720},
+    {GameVersion::WiiJpn,     0xA720},
+});
+
+#define l_J_hana01DL      (l_J_hana01DL_get())
+#define l_J_hana01_c_00DL (l_J_hana01_c_00DL_get())
+#define l_J_hana01_c_01DL (l_J_hana01_c_01DL_get())
+#define l_mat2DL          (l_mat2DL_get())
+#define l_mat2Light4DL    (l_mat2Light4DL_get())
+#else
+#include "assets/l_J_hana01DL.h"
+
+#include "assets/l_J_hana01_c_00DL.h"
+
+#include "assets/l_J_hana01_c_01DL.h"
+
+#include "assets/l_mat2DL__d_a_grass.h"
+l_mat2DL__d_a_grass(l_J_Ohana01_64128_0419TEX)
+
+#include "assets/l_mat2Light4DL.h"
+l_mat2Light4DL(l_J_Ohana01_64128_0419TEX)
+#endif
+
+void dFlower_data_c::WorkCo(fopAc_ac_c* i_hitActor, u32 i_massFlg, int i_roomNo) {
+    cXyz sp8;
+    sp8.x = m_pos.x - i_hitActor->current.pos.x;
+    sp8.z = m_pos.z - i_hitActor->current.pos.z;
+
+    f32 temp_f1 = sp8.abs2XZ();
+    if (!(temp_f1 > 900.0f)) {
+        sp8.y = m_pos.y - i_hitActor->current.pos.y;
+
+        s16 temp_r26 = cM_atan2s(sp8.x, sp8.z);
+        f32 var_f31 = JMAFastSqrt(temp_f1);
+
+        dFlower_anm_c* var_r29;
+        if (field_0x01 < 8) {
+            int temp_r3_2 = daGrass_c::getFlower()->newAnm();
+            if (temp_r3_2 < 0) {
+                return;
+            }
+
+            field_0x01 = temp_r3_2;
+            var_r29 = daGrass_c::getFlower()->getAnm(field_0x01);
+        } else {
+            var_r29 = daGrass_c::getFlower()->getAnm(field_0x01);
+        }
+
+        var_r29->m_angY = temp_r26;
+        var_r29->m_angX = cM_atan2s(30.0f -  var_f31, 65.0f);
+    }
+}
+
+void dFlower_data_c::deleteAnm() {
+    if (field_0x01 >= 8) {
+        daGrass_c::getFlower()->deleteAnm(field_0x01);
+        dFlower_anm_c* anm_p = daGrass_c::getFlower()->getAnm(field_0x01);
+        field_0x01 = (anm_p->m_angY >> 0xD) & 7;
+    }
+}
+
+void dFlower_data_c::WorkAt_NoCutAnim(fopAc_ac_c* i_hitActor, u32 i_massFlg, int i_roomNo,
+                                      dCcMassS_HitInf* i_hitinf, cCcD_Obj* i_hitobj) {
+    dCcD_GObjInf* var_r26 = dCcD_GetGObjInf(i_hitobj);
+    cXyz sp14(*var_r26->GetAtVecP());
+
+    f32 temp_f31 = sp14.abs2XZ();
+    if (cM3d_IsZero(temp_f31) && fopAcM_GetName(i_hitActor) == fpcNm_ALINK_e) {
+        sp14.x = m_pos.x - i_hitActor->current.pos.x;
+        sp14.y = m_pos.y - i_hitActor->current.pos.y;
+        sp14.z = m_pos.z - i_hitActor->current.pos.z;
+        temp_f31 = sp14.abs2XZ();
+    }
+
+    temp_f31 = sp14.abs2XZ();
+
+    s16 temp_r25 = cM_atan2s(sp14.x, sp14.z);
+    temp_f31 = JMAFastSqrt(temp_f31);
+
+    dFlower_anm_c* var_r29;
+    if (field_0x01 < 8) {
+        int temp_r3_2 = daGrass_c::getFlower()->newAnm();
+        if (temp_r3_2 < 0) {
+           return; 
+        }
+        field_0x01 = temp_r3_2;
+        var_r29 = daGrass_c::getFlower()->getAnm(field_0x01);
+    } else {
+        var_r29 = daGrass_c::getFlower()->getAnm(field_0x01);
+    }
+
+    var_r29->m_angY = temp_r25;
+    var_r29->m_angX = cM_atan2s(temp_f31, 220.0f);
+}
+
+static bool data_805284E8;
+
+void dFlower_data_c::WorkAt(fopAc_ac_c* i_hitActor, u32 i_massFlg, int i_roomNo, dCcMassS_HitInf* i_hitinf) {
+    cCcD_Obj* hitobj_p = i_hitinf->GetAtHitObj();
+
+    if (hitobj_p != NULL &&
+        (hitobj_p->ChkAtType(0) || hitobj_p->ChkAtType(AT_TYPE_ARROW) || hitobj_p->ChkAtType(AT_TYPE_SLINGSHOT) ||
+         hitobj_p->ChkAtType(AT_TYPE_20000000) || hitobj_p->ChkAtType(AT_TYPE_SHIELD_ATTACK) ||
+         hitobj_p->ChkAtType(AT_TYPE_BOOMERANG) || hitobj_p->ChkAtType(AT_TYPE_100) ||
+         hitobj_p->ChkAtType(AT_TYPE_LANTERN_SWING) || hitobj_p->ChkAtType(AT_TYPE_HOOKSHOT)))
+    {
+        WorkAt_NoCutAnim(i_hitActor, i_massFlg, i_roomNo, i_hitinf, hitobj_p);
+        return;
+    }
+
+    if (field_0x03 == 0) {
+        fopAc_ac_c* temp_r26 = dComIfGp_getPlayer(0);
+        if (hitobj_p->ChkAtType(AT_TYPE_BOMB) || hitobj_p->ChkAtType(AT_TYPE_IRON_BALL) ||
+            hitobj_p->ChkAtType(AT_TYPE_SPINNER) || hitobj_p->ChkAtType(AT_TYPE_WOLF_ATTACK) ||
+            hitobj_p->ChkAtType(AT_TYPE_WOLF_CUT_TURN))
+        {
+            if (i_hitActor != NULL && !hitobj_p->ChkAtType(AT_TYPE_IRON_BALL) && m_pos.abs(i_hitActor->current.pos) > 200.0f) {
+                WorkAt_NoCutAnim(i_hitActor, i_massFlg, i_roomNo, i_hitinf, hitobj_p);
+                return;
+            }
+        } else {
+            if (cLib_checkBit<u8>(m_state, 0x10) || !cLib_checkBit<u8>(m_state, 0x40)) {
+                if ((daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_NM_VERTICAL) ||
+                    (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_NM_STAB) ||
+                    (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_TURN_RIGHT) ||
+                    (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_TURN_LEFT) ||
+                    (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_LARGE_TURN_RIGHT) ||
+                    (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_LARGE_TURN_LEFT))
+                {
+                    if (m_pos.abs(temp_r26->current.pos) > 180.0f) {
+                        WorkAt_NoCutAnim(i_hitActor, i_massFlg, i_roomNo, i_hitinf, hitobj_p);
+                        return;
+                    }
+                } else {
+                    WorkAt_NoCutAnim(i_hitActor, i_massFlg, i_roomNo, i_hitinf, hitobj_p);
+                    return;
+                }
+            } 
+            
+            if ((daPy_getPlayerActorClass()->getCutType() >= daPy_py_c::CUT_TYPE_NM_RIGHT) && (daPy_getPlayerActorClass()->getCutType() <= daPy_py_c::CUT_TYPE_FINISH_VERTICAL)) {
+                if (m_pos.abs(temp_r26->current.pos) > 128.0f) {
+                    if (m_pos.abs(temp_r26->current.pos) < 200.0f) {
+                        WorkAt_NoCutAnim(i_hitActor, i_massFlg, i_roomNo, i_hitinf, hitobj_p);
+                    }
+                    return;
+                }
+            } else if ((daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_TURN_RIGHT) ||
+                (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_TURN_LEFT) ||
+                (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_LARGE_TURN_RIGHT) ||
+                (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_LARGE_TURN_LEFT))
+            {
+                if (m_pos.abs(temp_r26->current.pos) > 150.0f) {
+                    WorkAt_NoCutAnim(i_hitActor, i_massFlg, i_roomNo, i_hitinf, hitobj_p);
+                    return;
+                }
+            } else if ((daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_NM_VERTICAL) || (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_NM_STAB)) {
+                if (m_pos.abs(temp_r26->current.pos) > 80.0f) {
+                    return;
+                }
+            } else if ((m_pos.abs(i_hitActor->current.pos) > 128.0f) && (m_pos.abs(temp_r26->current.pos) < 200.0f)) {
+                WorkAt_NoCutAnim(i_hitActor, i_massFlg, i_roomNo, i_hitinf, hitobj_p);
+                return;
+            }
+        }
+
+        if (field_0x01 >= 8) {
+            deleteAnm();
+        }
+
+        if (cLib_checkBit<u8>(m_state, 0x40)) {
+            if (hitobj_p->ChkAtType(AT_TYPE_BOMB) || hitobj_p->ChkAtType(AT_TYPE_IRON_BALL) ||
+                hitobj_p->ChkAtType(AT_TYPE_SPINNER) || hitobj_p->ChkAtType(AT_TYPE_WOLF_ATTACK) ||
+                hitobj_p->ChkAtType(AT_TYPE_WOLF_CUT_TURN) ||
+                (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_TURN_RIGHT) ||
+                (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_TURN_LEFT) ||
+                (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_LARGE_TURN_RIGHT) ||
+                (daPy_getPlayerActorClass()->getCutType() == daPy_py_c::CUT_TYPE_LARGE_TURN_LEFT))
+            {
+                cLib_onBit<u8>(m_state, 8);
+            } else if (cLib_checkBit<u8>(m_state, 0x10)) {
+                cLib_onBit<u8>(m_state, 8);
+            } else {
+                field_0x03 = 0x14;
+                cLib_onBit<u8>(m_state, 0x10);
+            }
+        } else {
+            cLib_onBit<u8>(m_state, 8);
+        }
+
+        static csXyz ang(0, 0, 0);
+
+        cXyz particle_pos;
+        dKy_tevstr_c* room_tevstr = dComIfGp_roomControl_getTevStr(i_roomNo);
+
+        particle_pos.set(m_pos.x, m_pos.y, m_pos.z);
+
+        if (cLib_checkBit<u8>(m_state, 0x40)) {
+            dComIfGp_particle_set(0x8297, &particle_pos, room_tevstr, NULL, NULL);
+            dComIfGp_particle_set(0x8298, &particle_pos, room_tevstr, NULL, NULL);
+        } else {
+            dComIfGp_particle_set(0x8299, &particle_pos, room_tevstr, NULL, NULL);
+            dComIfGp_particle_set(0x829A, &particle_pos, room_tevstr, NULL, NULL);
+        }
+
+        if (m_tableNo >= 0) {
+            fopAcM_createItemFromTable(&m_pos, m_tableNo, -1, i_roomNo, NULL, 0, NULL, NULL, NULL, false);
+        }
+
+        if (data_805284E8 == 0) {
+            data_805284E8 = 1;
+            mDoAud_seStart(JA_SE_LK_CUT_GRASS, &m_pos, 0, dComIfGp_getReverb(i_roomNo));
+        }
+    }
+}
+
+void dFlower_data_c::hitCheck(fopAc_ac_c* i_hitActor, int i_roomNo) {
+    dCcMassS_HitInf hitinf;
+
+    cXyz sp14;
+    sp14 = m_pos;
+
+    if (cLib_checkBit<u8>(m_state, 0x40)) {
+        sp14.y += 60.0f;
+    }
+
+    fopAc_ac_c* hit_actor;
+    u32 mass_flags = dComIfG_Ccsp()->ChkMass(&sp14, &hit_actor, &hitinf);
+    bool at_hit = (mass_flags & 1) && (hit_actor != NULL && fopAcM_GetName(hit_actor) != fpcNm_Obj_Carry_e);
+
+    if (!(mass_flags & 2) && !at_hit) {
+        if (field_0x01 >= 8) {
+            dFlower_anm_c* temp_r3 = daGrass_c::getFlower()->getAnm(field_0x01);
+            s16 spA = (temp_r3->m_angY & 0xE000);
+            int spC = (temp_r3->m_angY >> 0xD) & 7;
+
+            if (cLib_addCalcAngleS(&temp_r3->m_angX, daGrass_c::getFlower()->getAnm(spC)->m_angX, 8, 4000, 100) == 0 &&
+                cLib_chaseAngleS(&temp_r3->m_angY, spA, 800) != 0) {
+                deleteAnm();
+            }
+        }
+    } else {
+        if (mass_flags & 2) {
+            WorkCo(hit_actor, mass_flags, i_roomNo);
+        }
+
+        if (!cLib_checkBit<u8>(m_state, 8) && at_hit) {
+            WorkAt(hit_actor, mass_flags, i_roomNo, &hitinf);
+        }
+    }
+}
+
+void dFlower_room_c::newData(dFlower_data_c* i_data) {
+    i_data->mp_next = mp_data;
+    mp_data = i_data;
+}
+
+void dFlower_room_c::deleteData() {
+    while (mp_data != NULL) {
+        mp_data->deleteAnm();
+        mp_data->m_state = 0;
+        mp_data = mp_data->mp_next;
+    }
+}
+
+dFlower_packet_c::dFlower_packet_c() {
+    dFlower_data_c* data_p = m_data;
+    for (int i = 0; i < 1000; i++) {
+        data_p->m_state = 0;
+        data_p++;
+    }
+
+    dFlower_anm_c* anm_p = m_anm;
+    for (int i = 0; i < 72; i++) {
+        anm_p->m_state = 0;
+        anm_p++;
+    }
+
+    s16 unused = 0;
+    for (int i = 0; i < 8; i++) {
+        setAnm(i, unused);
+        unused += 0x2000;
+    }
+
+#if TARGET_LITTLE_ENDIAN
+    static bool initialized = false;
+    if (!initialized) {
+        for (int i = 0; i < (ARRAY_SIZE(l_flowerPos) / sizeof(Vec)); i++) {
+            be_swap(((Vec*)l_flowerPos)[i]);
+        }
+        for (int i = 0; i < (ARRAY_SIZE(l_flowerTexCoord) / sizeof(Vec)); i++) {
+            be_swap(((Vec*)l_flowerTexCoord)[i]);
+        }
+        for (int i = 0; i < (ARRAY_SIZE(l_flowerPos2) / sizeof(Vec)); i++) {
+            be_swap(((Vec*)l_flowerPos2)[i]);
+        }
+        for (int i = 0; i < (ARRAY_SIZE(l_flowerTexCoord2) / sizeof(Vec)); i++) {
+            be_swap(((Vec*)l_flowerTexCoord2)[i]);
+        }
+        for (int i = 0; i < (ARRAY_SIZE(l_flowerNormal) / sizeof(Vec)); i++) {
+            be_swap(((Vec*)l_flowerNormal)[i]);
+        }
+        for (int i = 0; i < (ARRAY_SIZE(l_flowerNormal2) / sizeof(Vec)); i++) {
+            be_swap(((Vec*)l_flowerNormal2)[i]);
+        }
+        
+        initialized = true;
+    }
+#endif
+
+#if TARGET_PC
+    GXInitTexObj(&mTexObj_l_J_Ohana00_64TEX, l_J_Ohana00_64TEX,
+        l_J_Ohana00_64TEX__width + 1, l_J_Ohana00_64TEX__height + 1, GX_TF_CMPR, GX_MIRROR, GX_MIRROR, GX_FALSE
+    );
+
+    GXInitTexObj(&mTexObj_l_J_Ohana01_64128_0419TEX, l_J_Ohana01_64128_0419TEX,
+        l_J_Ohana01_64128_0419TEX__width + 1, l_J_Ohana01_64128_0419TEX__height + 1, GX_TF_CMPR, GX_MIRROR, GX_MIRROR, GX_FALSE
+    );
+
+    batch::decode_leaf_template(l_J_hana00DL, 0x140, mTplHana00);
+    batch::decode_leaf_template(l_J_hana00_cDL, 0xC0, mTplHana00Cut);
+    batch::decode_leaf_template(l_J_hana01DL, 0x120, mTplHana01);
+    batch::decode_leaf_template(l_J_hana01_c_00DL, 0xC0, mTplHana01Cut00);
+    batch::decode_leaf_template(l_J_hana01_c_01DL, 0x120, mTplHana01Cut);
+#endif
+
+    m_deleteRoom = &dFlower_packet_c::deleteRoom;
+
+#if AVOID_UB
+    m_playerSwordTop.set(0, 0, 0);
+#endif
+}
+
+#if TARGET_PC
+static void batch_setup_tev(u32 lightMask) {
+    GXSetCullMode(GX_CULL_NONE);
+
+    GXSetNumChans(2);
+    GXSetChanCtrl(GX_COLOR0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, 0, GX_DF_NONE, GX_AF_NONE);
+    GXSetChanCtrl(GX_COLOR1, GX_TRUE, GX_SRC_VTX, GX_SRC_REG, lightMask, GX_DF_CLAMP, GX_AF_SPOT);
+
+    GXSetNumTevStages(3);
+
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR1A1);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_RASC);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+
+    GXSetTevOrder(GX_TEVSTAGE1, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+    GXSetTevColorIn(GX_TEVSTAGE1, GX_CC_ZERO, GX_CC_CPREV, GX_CC_RASC, GX_CC_ZERO);
+    GXSetTevColorOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE1, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+    GXSetTevAlphaOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+
+    GXSetTevOrder(GX_TEVSTAGE2, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+    GXSetTevColorIn(GX_TEVSTAGE2, GX_CC_ZERO, GX_CC_TEXC, GX_CC_CPREV, GX_CC_C0);
+    GXSetTevColorOp(GX_TEVSTAGE2, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_4, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE2, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_TEXA);
+    GXSetTevAlphaOp(GX_TEVSTAGE2, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+}
+
+static GXColor hana00_amb_color(const dFlower_data_c* flower, const dKy_tevstr_c* tevstr) {
+    GXColor amb = {0, 0, 0, 0xFF};
+    if (DEBUG && g_kankyoHIO.navy.grass_adjust_ON != 0) {
+        amb.r = g_kankyoHIO.navy.grass_ambcol.r * 2;
+        amb.g = g_kankyoHIO.navy.grass_ambcol.g * 2;
+        amb.b = g_kankyoHIO.navy.grass_ambcol.b * 2;
+    } else {
+        amb.r = (flower->field_0x04 & 0x1F) * 2;
+        amb.g = ((flower->field_0x04 >> 5) & 0x1F) * 2;
+        amb.b = ((flower->field_0x04 >> 0xA) & 0x1F) * 2;
+    }
+
+    if (daPy_py_c::checkNowWolfPowerUp()) {
+        f32 ambRate = g_env_light.bg_amb_col[0].r / 255.0f;
+        f32 col = (((flower->field_0x04 & 0x1F) * 2 + 0x10));
+        amb.r = col * (ambRate * 4.0f);
+
+        ambRate = g_env_light.bg_amb_col[0].g / 255.0f;
+        f32 col2 = (((flower->field_0x04 >> 5) & 0x1F) * 2 + 0x10);
+        amb.g = col2 * (4.0f * ambRate);
+
+        ambRate = g_env_light.bg_amb_col[0].b / 255.0f;
+        f32 col3 = (((flower->field_0x04 >> 10) & 0x1F) * 2 + 0x10);
+        amb.b = col3 * (4.0f * ambRate);
+    }
+
+    if (amb.r == 0x3E) {
+        amb.r = tevstr->AmbCol.r;
+    }
+
+    if (amb.g == 0x3E) {
+        amb.g = tevstr->AmbCol.g;
+    }
+
+    if (amb.b == 0x3E) {
+        amb.b = tevstr->AmbCol.b;
+    }
+
+    return amb;
+}
+
+static GXColor hana01_amb_color(int idx, const dKy_tevstr_c* tevstr) {
+    f32 rRate = tevstr->AmbCol.r * 0.03125f;
+    if (rRate > 1.0f) {
+        rRate = 1.0f;
+    }
+
+    f32 gRate = tevstr->AmbCol.g * 0.03125f;
+    if (gRate > 1.0f) {
+        gRate = 1.0f;
+    }
+
+    f32 bRate = tevstr->AmbCol.b * 0.03125f;
+    if (bRate > 1.0f) {
+        bRate = 1.0f;
+    }
+
+    GXColor amb = {1, 1, 1, 1};
+
+    GXColor sub;
+    sub.r = -0.4f * tevstr->AmbCol.r * rRate;
+    sub.g = -0.4f * tevstr->AmbCol.g * gRate;
+    sub.b = -0.4f * tevstr->AmbCol.b * bRate;
+
+    switch (idx & 7) {
+    case 0:
+        amb.r = tevstr->AmbCol.r + sub.r;
+        amb.g = tevstr->AmbCol.g;
+        amb.b = tevstr->AmbCol.b;
+        break;
+    case 1:
+        amb.r = tevstr->AmbCol.r;
+        amb.g = tevstr->AmbCol.g + sub.g;
+        amb.b = tevstr->AmbCol.b;
+        break;
+    case 2:
+        amb.r = tevstr->AmbCol.r;
+        amb.g = tevstr->AmbCol.g;
+        amb.b = tevstr->AmbCol.b + sub.b;
+        break;
+    case 3:
+        amb.r = tevstr->AmbCol.r + sub.r;
+        amb.g = tevstr->AmbCol.g + sub.g;
+        amb.b = tevstr->AmbCol.b;
+        break;
+    case 4:
+        amb.r = tevstr->AmbCol.r;
+        amb.g = tevstr->AmbCol.g + sub.g;
+        amb.b = tevstr->AmbCol.b + sub.b;
+        break;
+    case 5:
+        amb.r = tevstr->AmbCol.r + sub.r;
+        amb.g = tevstr->AmbCol.g;
+        amb.b = tevstr->AmbCol.b + sub.b;
+        break;
+    case 6:
+        amb.r = tevstr->AmbCol.r + sub.r;
+        amb.g = tevstr->AmbCol.g + sub.g;
+        amb.b = tevstr->AmbCol.b + sub.b;
+        break;
+    case 7:
+        break;
+    }
+
+    if (daPy_py_c::checkNowWolfPowerUp()) {
+        f32 ambRate = g_env_light.bg_amb_col[0].r / 255.0f;
+        amb.r = (amb.r + 8) * (6.0f * ambRate);
+
+        ambRate = g_env_light.bg_amb_col[0].g / 255.0f;
+        amb.g = (amb.g + 8) * (6.0f * ambRate);
+
+        ambRate = g_env_light.bg_amb_col[0].b / 255.0f;
+        amb.b = (amb.b + 8) * (6.0f * ambRate);
+    }
+
+    amb.a = 0xFF;
+    return amb;
+}
+
+static void flower_emit(const batch::LeafTemplate& tpl, const Vec* xformedPos, GXColor amb) {
+    for (u32 i = 0; i < tpl.vtxCount; i++) {
+        const batch::LeafTemplate::Vtx& v = tpl.vtx[i];
+        const Vec& p = xformedPos[v.pos];
+        GXPosition3f32(p.x, p.y, p.z);
+        GXNormal1x8(v.nrm);
+        GXColor1x8(v.clr);
+        GXColor4u8(amb.r, amb.g, amb.b, amb.a);
+        GXTexCoord1x8(v.tex);
+    }
+}
+
+void dFlower_packet_c::draw() {
+    ZoneScoped;
+    dScnKy_env_light_c* kankyo = dKy_getEnvlight();
+    j3dSys.reinitGX();
+
+    GXSetNumIndStages(0);
+    dKy_setLight_again();
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_NRM, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_CLR0, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_TEX0, GX_INDEX8);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT1, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT1, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT1, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT1, GX_VA_CLR1, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT1, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+    GXSETARRAY(GX_VA_POS, &l_flowerPos, sizeof(l_flowerPos), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_NRM, &l_flowerNormal, sizeof(l_flowerNormal), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_CLR0, &l_flowerColor, sizeof(l_flowerColor), sizeof(GXColor), true);
+    GXSETARRAY(GX_VA_TEX0, &l_flowerTexCoord, sizeof(l_flowerTexCoord), 8, true);
+
+    static GXVtxDescList vtxDescList[] = {
+        {GX_VA_POS, GX_DIRECT},
+        {GX_VA_NRM, GX_INDEX8},
+        {GX_VA_CLR0, GX_INDEX8},
+        {GX_VA_CLR1, GX_DIRECT},
+        {GX_VA_TEX0, GX_INDEX8},
+        {GX_VA_NULL, GX_NONE},
+    };
+    static Vec xfPos[256];
+    Mtx identity;
+    MTXIdentity(identity);
+
+    // --- hana00 ---
+    for (int i = 0; i < 64; i++) {
+        dFlower_data_c* first = m_room[i].getData();
+        if (first == nullptr || !dComIfGp_roomControl_checkStatusFlag(i, 0x10)) {
+            continue;
+        }
+
+        dKy_tevstr_c* tevstr = dComIfGp_roomControl_getTevStr(i);
+        int lightCount = 6;
+
+        if (dComIfGp_roomControl_getStatusRoomDt(i) != nullptr) {
+            lightCount = dComIfGp_roomControl_getStatusRoomDt(i)->getLightVecInfoNum();
+        }
+
+        if (dKy_SunMoon_Light_Check() && lightCount < 2) {
+            lightCount = 2;
+        }
+
+        for (int j = 0; j < 6; j++) {
+            if (kankyo->field_0x0c18[j].field_0x26 == 1) {
+                lightCount++;
+            }
+        }
+
+        if (lightCount <= 2) {
+            GXCallDisplayList(l_matLight4DL, 0x80);
+        } else {
+            GXCallDisplayList(l_matDL, 0x80);
+        }
+
+        GXSetTevColorS10(GX_TEVREG0, {0, 0, 0, 0});
+        dKy_Global_amb_set(tevstr);
+        dKy_GxFog_tevstr_set(tevstr);
+        dKy_setLight_nowroom_grass(tevstr->room_no, 1.0f);
+
+        GXLoadTexObj(&mTexObj_l_J_Ohana00_64TEX, GX_TEXMAP0);
+        batch_setup_tev(lightCount <= 2 ? (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4) :
+                                          (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4 |
+                                              GX_LIGHT5 | GX_LIGHT6 | GX_LIGHT7));
+        GXSetVtxDescv(vtxDescList);
+        GXLoadPosMtxImm(identity, GX_PNMTX0);
+        GXLoadNrmMtxImm(j3dSys.getViewMtx(), 0);
+
+        for (int bucket = 0; bucket < 2; bucket++) {
+            const bool cut = bucket != 0;
+            const batch::LeafTemplate& tpl = cut ? mTplHana00Cut : mTplHana00;
+
+            bool open = false;
+            u32 emitted = 0;
+            for (dFlower_data_c* flower = first; flower != nullptr; flower = flower->mp_next) {
+                if (cLib_checkBit<u8>(flower->m_state, 4) ||
+                    cLib_checkBit<u8>(flower->m_state, 0x40))
+                {
+                    continue;
+                }
+                if ((cLib_checkBit<u8>(flower->m_state, 8) != 0) != cut) {
+                    continue;
+                }
+
+                if (!open) {
+                    GXBegin(GX_TRIANGLES, GX_VTXFMT1, GX_AUTO);
+                    open = true;
+                }
+                split_batch(emitted, tpl.vtxCount);
+
+                Mtx interpMtx;
+                MtxP mtx = get_model_mtx(flower->m_modelMtx, interpMtx);
+                transform_positions(tpl, reinterpret_cast<Vec*>(l_flowerPos), mtx, xfPos);
+                flower_emit(tpl, xfPos, hana00_amb_color(flower, tevstr));
+            }
+            if (open) {
+                GXEnd();
+            }
+        }
+    }
+
+    // --- hana01 ---
+    GXSETARRAY(GX_VA_POS, mp_pos, sizeof(l_flowerPos2), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_NRM, &l_flowerNormal2, sizeof(l_flowerNormal2), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_CLR0, mp_colors, sizeof(l_flowerColor2), sizeof(GXColor), true);
+    GXSETARRAY(GX_VA_TEX0, mp_texCoords, sizeof(l_flowerTexCoord2), 8, true);
+
+    for (int i = 0; i < 64; i++) {
+        dFlower_data_c* first = m_room[i].getData();
+        if (first == NULL) {
+            continue;
+        }
+
+        dKy_tevstr_c* tevstr = dComIfGp_roomControl_getTevStr(i);
+        int lightCount = 6;
+
+        if (dComIfGp_roomControl_getStatusRoomDt(i) != NULL) {
+            lightCount = dComIfGp_roomControl_getStatusRoomDt(i)->getLightVecInfoNum();
+        }
+
+#if DEBUG
+        if (g_kankyoHIO.light.m_HOSTIO_setting != 0) {
+            lightCount = g_kankyoHIO.dungeonLight.usedLights;
+        }
+#endif
+
+        if (dKy_SunMoon_Light_Check() == TRUE && lightCount < 2) {
+            lightCount = 2;
+        }
+
+        if (lightCount <= 2) {
+            GXCallDisplayList(mp_mat2Light4DL, m_mat2Light4DL_size);
+        } else {
+            GXCallDisplayList(mp_mat2DL, m_mat2DL_size);
+        }
+
+        GXSetTevColorS10(GX_TEVREG0, {0, 0, 0, 0});
+        dKy_Global_amb_set(tevstr);
+        dKy_GxFog_tevstr_set(tevstr);
+        dKy_setLight_nowroom_grass(tevstr->room_no, 1.0f);
+
+        GXLoadTexObj(&mTexObj_l_J_Ohana01_64128_0419TEX, GX_TEXMAP0);
+        batch_setup_tev(lightCount <= 2 ? (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4) :
+                                          (GX_LIGHT1 | GX_LIGHT2 | GX_LIGHT3 | GX_LIGHT4 |
+                                              GX_LIGHT5 | GX_LIGHT6 | GX_LIGHT7));
+        GXSetVtxDescv(vtxDescList);
+        GXLoadPosMtxImm(identity, GX_PNMTX0);
+        GXLoadNrmMtxImm(j3dSys.getViewMtx(), 0);
+
+        const batch::LeafTemplate* const buckets[3] = {
+            &mTplHana01, &mTplHana01Cut00, &mTplHana01Cut};
+        for (int bucket = 0; bucket < 3; bucket++) {
+            const batch::LeafTemplate& tpl = *buckets[bucket];
+
+            bool open = false;
+            u32 emitted = 0;
+            int idx = 0;
+            for (dFlower_data_c* flower = first; flower != NULL; flower = flower->mp_next, idx++) {
+                if (cLib_checkBit<u8>(flower->m_state, 4) ||
+                    !cLib_checkBit<u8>(flower->m_state, 0x40))
+                {
+                    continue;
+                }
+                const int flowerBucket = cLib_checkBit<u8>(flower->m_state, 8)    ? 2 :
+                                         cLib_checkBit<u8>(flower->m_state, 0x10) ? 1 :
+                                                                                    0;
+                if (flowerBucket != bucket) {
+                    continue;
+                }
+
+                if (!open) {
+                    GXBegin(GX_TRIANGLES, GX_VTXFMT1, GX_AUTO);
+                    open = true;
+                }
+                split_batch(emitted, tpl.vtxCount);
+
+                Mtx interpMtx;
+                MtxP mtx = get_model_mtx(flower->m_modelMtx, interpMtx);
+                transform_positions(tpl, mp_pos, mtx, xfPos);
+                flower_emit(tpl, xfPos, hana01_amb_color(idx, tevstr));
+            }
+            if (open) {
+                GXEnd();
+            }
+        }
+    }
+
+    GXSetNumTevStages(1);
+    GXSetNumChans(1);
+    J3DShape::resetVcdVatCache();
+}
+#else
+void dFlower_packet_c::draw() {
+    ZoneScoped;
+    dScnKy_env_light_c* kankyo = dKy_getEnvlight();
+    j3dSys.reinitGX();
+
+    GXSetNumIndStages(0);
+    dKy_setLight_again();
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_NRM, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_CLR0, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_TEX0, GX_INDEX8);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+    GXSETARRAY(GX_VA_POS, &l_flowerPos, sizeof(l_flowerPos), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_NRM, &l_flowerNormal, sizeof(l_flowerNormal), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_CLR0, &l_flowerColor, sizeof(l_flowerColor), sizeof(GXColor), true);
+    GXSETARRAY(GX_VA_TEX0, &l_flowerTexCoord, sizeof(l_flowerTexCoord), 8, true);
+
+    GXColor sp64;
+    dFlower_room_c* sp5C = m_room;
+
+    for (int i = 0; i < 64; i++) {
+        dFlower_data_c* sp54 = sp5C->getData();
+        if (sp54 != NULL && dComIfGp_roomControl_checkStatusFlag(i, 0x10)) {
+            dKy_tevstr_c* sp50 = dComIfGp_roomControl_getTevStr(i);
+            GXColorS10 sp80 = {0, 0, 0, 0};
+            int sp84 = 0;
+            int sp4C = 6;
+
+            if (dComIfGp_roomControl_getStatusRoomDt(i) != NULL) {
+                sp4C = dComIfGp_roomControl_getStatusRoomDt(i)->getLightVecInfoNum();
+            }
+
+            if (dKy_SunMoon_Light_Check() == TRUE && sp4C < 2) {
+                sp4C = 2;
+            }
+
+            for (int j = 0; j < 6; j++) {
+                if (kankyo->field_0x0c18[j].field_0x26 == 1) {
+                    sp4C++;
+                }
+            }
+
+            if (sp4C <= 2) {
+                GXCallDisplayList(l_matLight4DL, 0x80);
+            } else {
+                GXCallDisplayList(l_matDL, 0x80);
+            }
+
+            GXSetTevColorS10(GX_TEVREG0, sp80);
+            dKy_Global_amb_set(sp50);
+            dKy_GxFog_tevstr_set(sp50);
+            dKy_setLight_nowroom_grass(sp50->room_no, 1.0f);
+
+            for (dFlower_data_c* sp44 = sp5C->getData(); sp44 != NULL; sp44 = sp44->mp_next) {
+                if (DEBUG && g_kankyoHIO.navy.grass_adjust_ON != 0) {
+                    sp64.r = g_kankyoHIO.navy.grass_ambcol.r * 2;
+                    sp64.g = g_kankyoHIO.navy.grass_ambcol.g * 2;
+                    sp64.b = g_kankyoHIO.navy.grass_ambcol.b * 2;
+                } else {
+                    sp64.r = (sp44->field_0x04 & 0x1F) * 2;
+                    sp64.g = ((sp44->field_0x04 >> 5) & 0x1F) * 2;
+                    sp64.b = ((sp44->field_0x04 >> 0xA) & 0x1F) * 2;
+                }
+
+                if (daPy_py_c::checkNowWolfPowerUp()) {
+                    f32 var_f31 = g_env_light.bg_amb_col[0].r / 255.0f;
+                    f32 var_f1 = (((sp44->field_0x04 & 0x1F) * 2 + 0x10));
+                    sp64.r = var_f1 * (var_f31 * 4.0f);
+
+                    var_f31 = g_env_light.bg_amb_col[0].g / 255.0f;
+                    f32 var_f1_2 = (((sp44->field_0x04 >> 5) & 0x1F) * 2 + 0x10);
+                    sp64.g = var_f1_2 * (4.0f * var_f31);
+
+                    var_f31 = g_env_light.bg_amb_col[0].b / 255.0f;
+                    f32 var_f1_3 = (((sp44->field_0x04 >> 10) & 0x1F) * 2 + 0x10);
+                    sp64.b = var_f1_3 * (4.0f * var_f31);
+                }
+
+                if (sp64.r == 0x3E) {
+                    sp64.r = sp50->AmbCol.r;
+                }
+
+                if (sp64.g == 0x3E) {
+                    sp64.g = sp50->AmbCol.g;
+                }
+
+                if (sp64.b == 0x3E) {
+                    sp64.b = sp50->AmbCol.b;
+                }
+
+                GXSetChanAmbColor(GX_COLOR0A0, sp64);
+
+                if (!cLib_checkBit<u8>(sp44->m_state, 4) && !cLib_checkBit<u8>(sp44->m_state, 0x40)) {
+#if TARGET_PC
+                    Mtx flowerMtx;
+                    GXLoadPosMtxImm(get_model_mtx(sp44->m_modelMtx, flowerMtx), 0);
+#else
+                    GXLoadPosMtxImm(sp44->m_modelMtx, 0);
+#endif
+                    GXLoadNrmMtxImm(j3dSys.getViewMtx(), 0);
+
+#if TARGET_PC
+                GXLoadTexObj(&mTexObj_l_J_Ohana00_64TEX, GX_TEXMAP0);
+#endif
+
+                    if (!cLib_checkBit<u8>(sp44->m_state, 8)) {
+                        GXCallDisplayList(l_J_hana00DL, 0x140);
+                    } else {
+                        GXCallDisplayList(l_J_hana00_cDL, 0xC0);
+                    }
+                }
+            }
+        }
+        sp5C++;
+    }
+
+    GXSETARRAY(GX_VA_POS, mp_pos, sizeof(l_flowerPos2), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_NRM, &l_flowerNormal2, sizeof(l_flowerNormal2), sizeof(Vec), true);
+    GXSETARRAY(GX_VA_CLR0, mp_colors, sizeof(l_flowerColor2), sizeof(GXColor), true);
+    GXSETARRAY(GX_VA_TEX0, mp_texCoords, sizeof(l_flowerTexCoord2), 8, true);
+
+    sp5C = m_room;
+
+    for (int i = 0; i < 64; i++) {
+        GXColor sp3C = {0xFF, 0xFF, 0xFF, 0xFF};
+        dFlower_data_c* sp38 = sp5C->getData();
+        if (sp38 != NULL) {
+            dFlower_data_c* sp34 = sp5C->getData();
+            int sp30 = 0;
+            int sp2C = 6;
+            dKy_tevstr_c* temp_r29 = dComIfGp_roomControl_getTevStr(i);
+            GXColorS10 sp78 = {0, 0, 0, 0};
+
+            if (dComIfGp_roomControl_getStatusRoomDt(i) != NULL) {
+                sp2C = dComIfGp_roomControl_getStatusRoomDt(i)->getLightVecInfoNum();
+            }
+
+#if DEBUG
+            if (g_kankyoHIO.light.m_HOSTIO_setting != 0) {
+                sp2C = g_kankyoHIO.dungeonLight.usedLights;
+            }
+#endif
+
+            if (dKy_SunMoon_Light_Check() == TRUE && sp2C < 2) {
+                sp2C = 2;
+            }
+
+            if (sp2C <= 2) {
+                GXCallDisplayList(mp_mat2Light4DL, m_mat2Light4DL_size);
+            } else {
+                GXCallDisplayList(mp_mat2DL, m_mat2DL_size);
+            }
+
+            GXSetTevColorS10(GX_TEVREG0, sp78);
+            dKy_Global_amb_set(temp_r29);
+            dKy_GxFog_tevstr_set(temp_r29);
+            dKy_setLight_nowroom_grass(temp_r29->room_no, 1.0f);
+
+            f32 var_f29;
+            f32 var_f28;
+            f32 var_f27;
+
+            f32 temp1 = 0.03125f;
+            while (sp34 != NULL) {
+                f32 var_f29 = temp_r29->AmbCol.r * temp1;
+                if (var_f29 > 1.0f) {
+                    var_f29 = 1.0f;
+                }
+
+                f32 var_f28 = temp_r29->AmbCol.g * temp1;
+                if (var_f28 > 1.0f) {
+                    var_f28 = 1.0f;
+                }
+
+                f32 var_f27 = temp_r29->AmbCol.b * temp1;
+                if (var_f27 > 1.0f) {
+                    var_f27 = 1.0f;
+                }
+
+                GXColor sp28;
+
+                #if AVOID_UB
+                sp28 = {1, 1, 1, 1};
+                #endif
+
+                //u8 sp26, sp25, sp24;
+                GXColor sp24;
+                sp24.r = -0.4f * temp_r29->AmbCol.r * var_f29;
+                sp24.g = -0.4f * temp_r29->AmbCol.g * var_f28;
+                sp24.b = -0.4f * temp_r29->AmbCol.b * var_f27;
+
+                u8 sp8 = sp30 & 7;
+                switch (sp8) {
+                case 0:
+                    sp28.r = temp_r29->AmbCol.r + sp24.r;
+                    sp28.g = temp_r29->AmbCol.g;
+                    sp28.b = temp_r29->AmbCol.b;
+                    break;
+                case 1:
+                    sp28.r = temp_r29->AmbCol.r;
+                    sp28.g = temp_r29->AmbCol.g + sp24.g;
+                    sp28.b = temp_r29->AmbCol.b;
+                    break;
+                case 2:
+                    sp28.r = temp_r29->AmbCol.r;
+                    sp28.g = temp_r29->AmbCol.g;
+                    sp28.b = temp_r29->AmbCol.b + sp24.b;
+                    break;
+                case 3:
+                    sp28.r = temp_r29->AmbCol.r + sp24.r;
+                    sp28.g = temp_r29->AmbCol.g + sp24.g;
+                    sp28.b = temp_r29->AmbCol.b;
+                    break;
+                case 4:
+                    sp28.r = temp_r29->AmbCol.r;
+                    sp28.g = temp_r29->AmbCol.g + sp24.g;
+                    sp28.b = temp_r29->AmbCol.b + sp24.b;
+                    break;
+                case 5:
+                    sp28.r = temp_r29->AmbCol.r + sp24.r;
+                    sp28.g = temp_r29->AmbCol.g;
+                    sp28.b = temp_r29->AmbCol.b + sp24.b;
+                    break;
+                case 6:
+                    sp28.r = temp_r29->AmbCol.r + sp24.r;
+                    sp28.g = temp_r29->AmbCol.g + sp24.g;
+                    sp28.b = temp_r29->AmbCol.b + sp24.b;
+                    break;
+                case 7:
+                    break;
+                }
+
+                if (daPy_py_c::checkNowWolfPowerUp()) {
+                    f32 var_f30 = g_env_light.bg_amb_col[0].r / 255.0f;
+                    sp28.r = (sp28.r + 8) * (6.0f * var_f30);
+
+                    var_f30 = g_env_light.bg_amb_col[0].g / 255.0f;
+                    sp28.g = (sp28.g + 8) * (6.0f * var_f30);
+
+                    var_f30 = g_env_light.bg_amb_col[0].b / 255.0f;
+                    sp28.b = (sp28.b + 8) * (6.0f * var_f30);
+                }
+
+                GXSetChanAmbColor(GX_COLOR0A0, sp28);
+
+                sp30++;
+
+                if (!cLib_checkBit<u8>(sp34->m_state, 4) && cLib_checkBit<u8>(sp34->m_state, 0x40)) {
+#if TARGET_PC
+                    Mtx flowerMtx;
+                    GXLoadPosMtxImm(get_model_mtx(sp34->m_modelMtx, flowerMtx), 0);
+#else
+                    GXLoadPosMtxImm(sp34->m_modelMtx, 0);
+#endif
+                    GXLoadNrmMtxImm(j3dSys.getViewMtx(), 0);
+#if TARGET_PC
+                    GXLoadTexObj(&mTexObj_l_J_Ohana01_64128_0419TEX, GX_TEXMAP0);
+#endif
+                    if (!cLib_checkBit<u8>(sp34->m_state, 8)) {
+                        if (!cLib_checkBit<u8>(sp34->m_state, 0x10)) {
+                            GXCallDisplayList(mp_Jhana01DL, m_Jhana01DL_size);
+                        } else {
+                            GXCallDisplayList(l_J_hana01_c_00DL, 0xC0);
+                        }
+                    } else {
+                        GXCallDisplayList(mp_Jhana01_cDL, m_Jhana01_cDL_size);
+                    }
+                }
+
+                sp34 = sp34->mp_next;
+            }
+        }
+        sp5C++;
+    }
+
+    J3DShape::resetVcdVatCache();
+}
+#endif
+
+void dFlower_packet_c::calc() {
+    dFlower_anm_c* anm_p = getAnm();
+
+    for (int i = 0; i < 8; i++) {
+        anm_p->m_angX = 1000.0f + (100.0f * cM_scos(1000.0f * (g_Counter.mTimer + (i * 250))));
+        anm_p++;
+    }
+
+    int room_no = dComIfGp_roomControl_getStayNo();
+    dFlower_data_c* data_p = m_room[room_no].getData();
+
+    if (data_p != NULL) {
+        daPy_py_c* temp_r26 = (daPy_py_c*)dComIfGp_getPlayer(0);
+        cXyz sp38;
+        cXyz sp2C;
+
+        setPlayerCutFlg(temp_r26->getCutAtFlg());
+
+        sp38 = temp_r26->getSwordTopPos();
+        sp2C = sp38 - temp_r26->current.pos;
+
+        setPlayerSwordAngY(cM_atan2s(sp2C.x, sp2C.z));
+
+        sp2C = getPlayerSwordTop() - sp38;
+        setPlayerSwordMoveAngY(cM_atan2s(sp2C.x, sp2C.z));
+        setPlayerSwordTop(sp38);
+
+        data_805284E8 = 0;
+
+        if (!cLib_checkBit<u8>(data_p->m_state, 0x40)) {
+            dComIfG_Ccsp()->SetMassAttr(30.0f, 50.0f, 11, 2);
+        } else {
+            dComIfG_Ccsp()->SetMassAttr(30.0f, 160.0f, 11, 2);
+        }
+
+        do {
+            if (!cLib_checkBit<u8>(data_p->m_state, 4)) {
+                data_p->hitCheck(temp_r26, room_no);
+            }
+            data_p = data_p->mp_next;
+        } while (data_p != NULL);
+    }
+}
+
+static f32 flowerCheckGroundY(cXyz& param_0) {
+    dBgS_GndChk sp8;
+    param_0.y += 50.0f;
+
+    sp8.SetPos(&param_0);
+
+    f32 temp_f31 = dComIfG_Bgsp().GroundCross(&sp8);
+    param_0.y -= 50.0f;
+
+    if (temp_f31 <= -G_CM3D_F_INF) {
+        return param_0.y;
+    } else {
+        return temp_f31;
+    }
+}
+
+void dFlower_packet_c::update() {
+    dFlower_anm_c* var_r29 = getAnm();
+
+    for (int i = 0; i < 72; i++) {
+        mDoMtx_stack_c::YrotS(var_r29->m_angY);
+        mDoMtx_stack_c::XrotM(var_r29->m_angX);
+        mDoMtx_stack_c::YrotM(-var_r29->m_angY);
+        cMtx_copy(mDoMtx_stack_c::get(), var_r29->m_animMtx);
+        var_r29++;
+    }
+
+    dFlower_data_c* data_p = getData();
+    var_r29 = getAnm();
+
+    cXyz sp28;
+    int sp14 = 0;
+
+    for (int i = 0; i < 1000; i++) {
+        if (cLib_checkBit<u8>(data_p->m_state, 2)) {
+            cLib_calcTimer<u8>(&data_p->field_0x03);
+
+            if (cLib_checkBit<u8>(data_p->m_state, 0x20) && sp14 < 8) {
+                data_p->m_pos.y = flowerCheckGroundY(data_p->m_pos);
+                cLib_offBit<u8>(data_p->m_state, 0x20);
+                sp14++;
+            }
+
+            sp28.set(data_p->m_pos.x, 260.0f + data_p->m_pos.y, data_p->m_pos.z);
+
+            if (mDoLib_clipper::clip(j3dSys.getViewMtx(), sp28, 260.0f)) {
+                cLib_onBit<u8>(data_p->m_state, 4);
+                data_p->deleteAnm();
+            } else {
+                cLib_offBit<u8>(data_p->m_state, 4);
+
+                MtxPtr temp_r28 = var_r29[data_p->field_0x01].m_animMtx;
+                temp_r28[0][3] = data_p->m_pos.x;
+                temp_r28[1][3] = data_p->m_pos.y;
+                temp_r28[2][3] = data_p->m_pos.z;
+
+                f32 temp_f31 = 0.69999999f + (0.3f * ((((s16)data_p->m_pos.x * 3535) & 0xFFF) / 4096.0f));
+                
+                mDoMtx_stack_c::copy(temp_r28);
+                mDoMtx_stack_c::scaleM(temp_f31, temp_f31, temp_f31);
+#if TARGET_PC
+                cMtx_copy(temp_r28, data_p->m_modelMtx);
+#else
+                cMtx_concat(j3dSys.getViewMtx(), temp_r28, data_p->m_modelMtx);
+#endif
+#ifdef TARGET_PC
+                dusk::interp::record_final_mtx(temp_r28, data_p->m_modelMtx);
+#endif
+            }
+        }
+
+        data_p++;
+    }
+
+    dComIfGd_getListPacket()->entryImm(this, 0);
+}
+
+void dFlower_packet_c::setData(dFlower_data_c* i_data, int i_dataNo, s8 param_2, cXyz& i_pos,
+                               int i_roomNo, s8 i_tableNo, s16 i_addCol) {
+    f32 y_pos;
+    if (fopOvlpM_IsPeek()) {
+        y_pos = flowerCheckGroundY(i_pos);
+        i_data->m_state = 6;
+    } else {
+        y_pos = i_pos.y;
+        i_data->m_state = 38;
+    }
+
+    if (param_2 == 2) {
+        cLib_onBit<u8>(i_data->m_state, 0x40);
+    }
+
+    i_data->field_0x01 = cM_rndF(7.0f);
+    i_data->m_pos.set(i_pos.x, y_pos, i_pos.z);
+    i_data->m_tableNo = i_tableNo;
+    i_data->field_0x03 = 0;
+    i_data->field_0x04 = i_addCol;
+
+    if (m_room[i_roomNo].mp_data == NULL) {
+        mp_pos = (Vec*)l_flowerPos2;
+        mp_colors = (GXColor*)l_flowerColor2;
+        mp_texCoords = (Vec*)l_flowerTexCoord2;
+        mp_mat2DL = l_mat2DL;
+        m_mat2DL_size = 0x80;
+        mp_mat2Light4DL = l_mat2Light4DL;
+        m_mat2Light4DL_size = 0x80;
+        mp_Jhana01DL = l_J_hana01DL;
+        m_Jhana01DL_size = 0x120;
+        mp_Jhana01_cDL = l_J_hana01_c_01DL;
+        m_Jhana01_cDL_size = 0x120;
+    }
+
+    m_room[i_roomNo].newData(i_data);
+    m_dataNum = i_dataNo;
+}
+
+dFlower_data_c* dFlower_packet_c::newData(s8 param_0, cXyz& i_pos, int i_roomNo, s8 i_tableNo,
+                                          s16 i_addCol) {
+    dFlower_data_c* data_p = m_data + m_dataNum;
+
+    for (int i = m_dataNum; i < 1000; i++) {
+        if (!cLib_checkBit<u8>(data_p->m_state, 2)) {
+            setData(data_p, i, param_0, i_pos, i_roomNo, i_tableNo, i_addCol);
+            return data_p;
+        }
+        data_p++;
+    }
+
+    data_p = m_data;
+    for (int i = 0; i < m_dataNum; i++) {
+        if (!cLib_checkBit<u8>(data_p->m_state, 2)) {
+            setData(data_p, i, param_0, i_pos, i_roomNo, i_tableNo, i_addCol);
+            return data_p;
+        }
+        data_p++;
+    }
+
+    return NULL;
+}
+
+void dFlower_packet_c::deleteRoom(int i_roomNo) {
+    m_room[i_roomNo].deleteData();
+}
+
+int dFlower_packet_c::newAnm() {
+    dFlower_anm_c* anm_p = m_anm + 8;
+    for (int i = 8; i < 72; i++) {
+        if (anm_p->m_state == 0) {
+            anm_p->m_state = 1;
+            anm_p->m_angY = 0;
+            anm_p->m_angX = 0;
+            return i;
+        }
+
+        anm_p++;
+    }
+
+    return -1;
+}
+
+void dFlower_packet_c::setAnm(int i_idx, s16 i_angY) {
+    dFlower_anm_c* anm_p = m_anm + i_idx;
+
+    anm_p->m_state = 1;
+    anm_p->m_angY = i_angY;
+    anm_p->m_angX = 0;
+}
+
+dFlower_room_c::dFlower_room_c() {
+    mp_data = NULL;
+}
+
+dFlower_anm_c::dFlower_anm_c() {
+    m_state = 0;
+}
+
+dFlower_data_c::~dFlower_data_c() {}
+
+dFlower_data_c::dFlower_data_c() {
+    m_state = 0;
+}

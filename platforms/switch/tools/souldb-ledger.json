@@ -1,0 +1,488 @@
+[
+  {
+    "path": "platforms/switch/source/borealis_io_switch.cpp",
+    "class": "api",
+    "max_lines": 181,
+    "why": "Reescrito desde la interfaz pública (`extern/borealis/include/borealis/io.hpp`, MIT) y su implementación de referencia (`extern/borealis/src`). Lo que coincide son las firmas y los tipos que esa interfaz impone. La implementación upstream no enlaza aquí (usa `pread`, que newlib no tiene, y su `rename` no reemplaza en Horizon).",
+    "refs": [
+      "extern/borealis/include/borealis/io.hpp",
+      "extern/borealis/src/io.cpp",
+      "extern/borealis/src/io_internal.hpp"
+    ]
+  },
+  {
+    "path": "platforms/switch/CMakeLists.txt",
+    "class": "api",
+    "max_lines": 80,
+    "why": "Reescrito sobre los macros de devkitPro y los módulos de CMake. Lo que coincide son comandos de CMake, nombres de opciones y variables que no son nuestros (`CMAKE_*`, `DAWN_*`, `SDL_*`, `BOREALIS_*`, `NX_*`) y nombres de targets y rutas de este repositorio. No hay expresión que se pueda escribir de otra manera."
+  },
+  {
+    "path": "platforms/switch/source/switch_posix_shim.cpp",
+    "class": "api",
+    "max_lines": 77,
+    "why": "Cada función es una firma de POSIX/newlib (`uid_t getuid()`, `int flock(int, int)`, `int dirfd(DIR*)`, ...) con el valor de retorno que da la función real cuando no puede hacer su trabajo. No hay otra forma de escribirlas.",
+    "refs": [
+      "$DEVKITPRO/devkitA64/aarch64-none-elf/include"
+    ]
+  },
+  {
+    "path": "src/dusk/iso_validate.cpp",
+    "class": "independent",
+    "max_lines": 62,
+    "why": "La lectura de la cabecera se reescribió desde el formato público (offsets 0x18/0x1C, números mágicos de Dolphin). Lo que coincide son los tipos del propio archivo (`Platform`, `DiscInfo`, `AcceptedDiscs`) y los puntos de llamada."
+  },
+  {
+    "path": "platforms/switch/source/borealis_data_switch.cpp",
+    "class": "api",
+    "max_lines": 58,
+    "why": "Reescrito desde la interfaz pública (`extern/borealis/include/borealis/data.hpp`, MIT) y su implementación de referencia (`extern/borealis/src`). Lo que coincide son las firmas y los tipos que esa interfaz impone.",
+    "refs": [
+      "extern/borealis/include/borealis/data.hpp",
+      "extern/borealis/src"
+    ]
+  },
+  {
+    "path": "src/dusk/profiler.hpp",
+    "class": "independent",
+    "max_lines": 55,
+    "why": "Reimplementado con otra estructura (`State`, `Smoothed`, `PeakHold`, `FrameTimes`, `Capture`). Lo que coincide son los nombres de la API que consumen el benchmark, el overlay y los marcadores (`beginFrame`, `numZones`, `DUSK_PROFSCOPE`, ...) y las inclusiones estándar."
+  },
+  {
+    "path": "CMakePresets.json",
+    "class": "api",
+    "max_lines": 51,
+    "why": "Esquema de presets de CMake: nombres de claves definidos por CMake y nombres de nuestros presets/targets."
+  },
+  {
+    "path": "CMakeLists.txt",
+    "class": "trivial",
+    "max_lines": 46,
+    "why": "Guardas `if (DUSK_PLATFORM_SWITCH)`, el grupo de enlace de JSystem, directorios de include y la lista de banderas `-Ofast ...` de los archivos DOLZEL: configuración (datos), no código."
+  },
+  {
+    "path": "src/m_Do/m_Do_main.cpp",
+    "class": "trivial",
+    "max_lines": 46,
+    "why": "Llamadas de una línea a `DUSK_PROFSCOPE(\"...\")` (marcadores de fase del bucle principal) y la lectura de `maxTextureAnisotropy`. El arranque de libnx, la comprobación del modo applet y la elección de puerto se retiraron de aquí y se reescribieron (`platforms/switch/source/switch_startup.cpp`, `switch_pad_port.cpp`)."
+  },
+  {
+    "path": "platforms/switch/cmake/DevkitA64Libnx.cmake",
+    "class": "api",
+    "max_lines": 33,
+    "why": "Reescrito sobre los macros de devkitPro y los módulos de CMake. Lo que coincide son comandos de CMake, nombres de opciones y variables que no son nuestros (`CMAKE_*`, `DAWN_*`, `SDL_*`, `BOREALIS_*`, `NX_*`) y nombres de targets y rutas de este repositorio. No hay expresión que se pueda escribir de otra manera."
+  },
+  {
+    "path": "cmake/SwitchOptions.cmake",
+    "class": "api",
+    "max_lines": 32,
+    "why": "Reescrito sobre los macros de devkitPro y los módulos de CMake. Lo que coincide son comandos de CMake, nombres de opciones y variables que no son nuestros (`CMAKE_*`, `DAWN_*`, `SDL_*`, `BOREALIS_*`, `NX_*`) y nombres de targets y rutas de este repositorio. No hay expresión que se pueda escribir de otra manera."
+  },
+  {
+    "path": "src/dusk/ui/prelaunch.cpp",
+    "class": "independent",
+    "max_lines": 32,
+    "why": "`find_switch_disc_image` se reescribió. Queda el nombre de la función y su punto de llamada."
+  },
+  {
+    "path": "extern/aurora/lib/gx/texture.cpp",
+    "class": "trivial",
+    "max_lines": 32,
+    "why": "Guardas `std::lock_guard lock{s_textureCacheMutex};` repetidas: la decisión de proteger la caché con un mutex recursivo es técnica y cada línea es la misma frase de biblioteca estándar. No hay expresión."
+  },
+  {
+    "path": "cmake/SwitchDeps.cmake",
+    "class": "api",
+    "max_lines": 28,
+    "why": "Reescrito sobre los macros de devkitPro y los módulos de CMake. Lo que coincide son comandos de CMake, nombres de opciones y variables que no son nuestros (`CMAKE_*`, `DAWN_*`, `SDL_*`, `BOREALIS_*`, `NX_*`) y nombres de targets y rutas de este repositorio. No hay expresión que se pueda escribir de otra manera."
+  },
+  {
+    "path": "src/dusk/ui/settings.cpp",
+    "class": "trivial",
+    "max_lines": 28,
+    "why": "Ganchos de una línea (guardas `#ifdef __SWITCH__`, una llamada, una declaración de ajuste) sobre APIs que ya existen en el archivo. No hay lógica propia que reescribir. Incluye la fila de calidad de interpolación (ahora un `config_enum_select` genérico) y la de anisotropía (una llamada a `config_int_select`)."
+  },
+  {
+    "path": "platforms/switch/source/borealis_net_switch.cpp",
+    "class": "api",
+    "max_lines": 27,
+    "why": "Reescrito desde la interfaz pública (`extern/borealis/include/borealis/net.hpp`, MIT) y su implementación de referencia (`extern/borealis/src`). Lo que coincide son las firmas y los tipos que esa interfaz impone. Es un stub: devuelve \"no disponible\".",
+    "refs": [
+      "extern/borealis/include/borealis/net.hpp",
+      "extern/borealis/src"
+    ]
+  },
+  {
+    "path": "docs/building-switch.md",
+    "class": "trivial",
+    "max_lines": 23,
+    "why": "Encabezados y bloques de código con órdenes de CMake; el contenido es nuevo."
+  },
+  {
+    "path": "extern/aurora/lib/gx/command_processor.cpp",
+    "class": "independent",
+    "max_lines": 23,
+    "why": "Los tres pasos de `push_gx_draw` y la liquidación del flag sucio de `draw_prim` están reescritos como funciones (`refresh_pipeline`, `refresh_bind_groups`, `refresh_uniform`, `settle_pipeline_dirty`, `count_merge_blocker`); se retiró la caché de `ShaderInfo`. Coincide lo que dicta el modelo de datos de Aurora (nombres de campos de `DrawCache`, `memcmp` de `PipelineConfig`)."
+  },
+  {
+    "path": "platforms/switch/source/borealis_ws_switch.cpp",
+    "class": "api",
+    "max_lines": 19,
+    "why": "Reescrito desde la interfaz pública (`extern/borealis/include/borealis/ws.hpp`, MIT) y su implementación de referencia (`extern/borealis/src`). Lo que coincide son las firmas y los tipos que esa interfaz impone. Es un stub: toda conexión nace cerrada.",
+    "refs": [
+      "extern/borealis/include/borealis/ws.hpp",
+      "extern/borealis/src"
+    ]
+  },
+  {
+    "path": "src/dusk/settings.cpp",
+    "class": "trivial",
+    "max_lines": 19,
+    "why": "Ganchos de una línea (guardas `#ifdef __SWITCH__`, una llamada, una declaración de ajuste) sobre APIs que ya existen en el archivo. No hay lógica propia que reescribir. Valores por defecto y `Register(...)` de tres ajustes."
+  },
+  {
+    "path": "src/dusk/imgui/ImGuiMenuTools.cpp",
+    "class": "trivial",
+    "max_lines": 18,
+    "why": "Ganchos de una línea (guardas `#ifdef __SWITCH__`, una llamada, una declaración de ajuste) sobre APIs que ya existen en el archivo. No hay lógica propia que reescribir. La tabla de zonas del profiler se reescribió (`ShowProfilerZones`)."
+  },
+  {
+    "path": "src/dusk/settings.h",
+    "class": "trivial",
+    "max_lines": 17,
+    "why": "Un `enum class` de dos valores, su especialización `ConfigEnumRange` (patrón obligado por `ConfigVar`) y tres miembros de ajuste."
+  },
+  {
+    "path": "extern/aurora/lib/gfx/encoding.cpp",
+    "class": "independent",
+    "max_lines": 16,
+    "why": "El filtro de binds redundantes se reescribió como `PassBindFilter`. Quedan los puntos de llamada."
+  },
+  {
+    "path": "extern/aurora/lib/gfx/pipeline_cache.cpp",
+    "class": "independent",
+    "max_lines": 14,
+    "why": "El hilo con pila grande pasó a `thread::LargeStackThread` y la apertura de la base a `sqlite::open_cache`. Quedan las guardas `#ifdef __SWITCH__` y la llamada."
+  },
+  {
+    "path": "extern/aurora/lib/thread.cpp",
+    "class": "independent",
+    "max_lines": 14,
+    "why": "La colocación de hilos por núcleo es una tabla (`switch_placement`) y `LargeStackThread` es nuevo. Los números (núcleos 0-2 de Horizon) son hechos de la consola."
+  },
+  {
+    "path": "platforms/switch/source/borealis_file_select_switch.cpp",
+    "class": "api",
+    "max_lines": 13,
+    "why": "Reescrito desde la interfaz pública (`extern/borealis/include/borealis/file_select.hpp`, MIT) y su implementación de referencia (`extern/borealis/src`). Lo que coincide son las firmas y los tipos que esa interfaz impone. Es un stub: todo se responde Canceled.",
+    "refs": [
+      "extern/borealis/include/borealis/file_select.hpp",
+      "extern/borealis/src"
+    ]
+  },
+  {
+    "path": "src/dusk/audio/DuskAudioSystem.cpp",
+    "class": "trivial",
+    "max_lines": 12,
+    "why": "Una llamada `SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, \"4096\")`."
+  },
+  {
+    "path": "extern/aurora/lib/window.cpp",
+    "class": "independent",
+    "max_lines": 12,
+    "why": "La altura exacta se reescribió (`exact_height_frame_buffer`, `std::exchange`)."
+  },
+  {
+    "path": "platforms/switch/README.md",
+    "class": "trivial",
+    "max_lines": 11,
+    "why": "Encabezados y las dos órdenes de CMake (`cmake --preset ...`, `cmake --build --preset ...`)."
+  },
+  {
+    "path": "platforms/switch/source/switch_fs.cpp",
+    "class": "trivial",
+    "max_lines": 11,
+    "why": "Tres `mkdir` sobre rutas constantes."
+  },
+  {
+    "path": "extern/aurora/include/aurora/io.hpp",
+    "class": "api",
+    "max_lines": 10,
+    "why": "Cabecera pública de `aurora::io::write_file_atomic`, que upstream define en `lib/io.cpp`."
+  },
+  {
+    "path": "extern/aurora/lib/dolphin/gx/GXCull.cpp",
+    "class": "api",
+    "max_lines": 10,
+    "why": "`GXSetScissorBoxOffset` y la suma de su desplazamiento en `GXSetScissor`: semántica de la API pública del SDK de GX."
+  },
+  {
+    "path": "extern/aurora/lib/gfx/frame.cpp",
+    "class": "trivial",
+    "max_lines": 10,
+    "why": "Siete asignaciones campo a campo de estadísticas."
+  },
+  {
+    "path": "src/d/d_kankyo_rain.cpp",
+    "class": "trivial",
+    "max_lines": 9,
+    "why": "Un `if (dusk::interp::fancy_recording())` antepuesto a siete llamadas existentes."
+  },
+  {
+    "path": "src/dusk/interp/frame_interpolation.cpp",
+    "class": "trivial",
+    "max_lines": 9,
+    "why": "La función `fancy_recording()` (una condición de dos términos)."
+  },
+  {
+    "path": "src/f_pc/f_pc_manager.cpp",
+    "class": "trivial",
+    "max_lines": 9,
+    "why": "Tres marcadores `DUSK_PROFSCOPE` de una línea."
+  },
+  {
+    "path": "extern/aurora/include/aurora/gfx.h",
+    "class": "api",
+    "max_lines": 9,
+    "why": "Siete campos de contadores en `AuroraStats` (interfaz pública usada por el benchmark y el overlay)."
+  },
+  {
+    "path": "extern/aurora/include/dolphin/vi.h",
+    "class": "api",
+    "max_lines": 9,
+    "why": "Declaración de `VISetFrameBufferHeight` (API del propio puerto)."
+  },
+  {
+    "path": "extern/aurora/lib/dawn/BackendBinding.cpp",
+    "class": "api",
+    "max_lines": 9,
+    "why": "Construcción de `wgpu::SurfaceSourceSwitchNWindow` con `nwindowGetDefault()`: la API de Dawn y de libnx dictan las líneas."
+  },
+  {
+    "path": "extern/aurora/lib/thread.hpp",
+    "class": "trivial",
+    "max_lines": 9,
+    "why": "Valores del `enum class Affinity` y la declaración de `LargeStackThread`."
+  },
+  {
+    "path": "platforms/switch/include/switch/fs.hpp",
+    "class": "trivial",
+    "max_lines": 8,
+    "why": "Una declaración."
+  },
+  {
+    "path": "src/dusk/OSThread.cpp",
+    "class": "api",
+    "max_lines": 8,
+    "why": "Una llamada de libnx (`svcSetThreadCoreMask(threadGetCurHandle(), 1, 0x2)`)."
+  },
+  {
+    "path": "README.md",
+    "class": "trivial",
+    "max_lines": 7,
+    "why": "Encabezado de sección y puntos sueltos del texto nuevo que coinciden en palabras sueltas; el texto heredado se reescribió."
+  },
+  {
+    "path": "extern/aurora/lib/gfx/frame.hpp",
+    "class": "trivial",
+    "max_lines": 7,
+    "why": "Dos constantes de configuración (`FrameSlotCount`, `StagingBufferCount`)."
+  },
+  {
+    "path": "extern/aurora/lib/gfx/recording.cpp",
+    "class": "independent",
+    "max_lines": 7,
+    "why": "Contadores reescritos con un `enum DrawEvent` y una tabla; quedan los nombres de los campos de `AuroraStats`."
+  },
+  {
+    "path": "extern/aurora/lib/gx/shader_info.cpp",
+    "class": "independent",
+    "max_lines": 7,
+    "why": "El repetido de uniform se reescribió como `UniformRepeat`."
+  },
+  {
+    "path": "extern/aurora/lib/sqlite_utils.hpp",
+    "class": "independent",
+    "max_lines": 7,
+    "why": "`open_cache` y `kCachePragmas` son nuevos; quedan las inclusiones."
+  },
+  {
+    "path": "src/dusk/presentation.cpp",
+    "class": "trivial",
+    "max_lines": 6,
+    "why": "Guardas `#ifndef __SWITCH__`; sin líneas sustantivas."
+  },
+  {
+    "path": "src/dusk/ui/controller_config.cpp",
+    "class": "trivial",
+    "max_lines": 6,
+    "why": "Nombres de botones MISC1..4 (L, R, ZL, ZR) en una tabla; no quedan líneas sustantivas."
+  },
+  {
+    "path": "extern/aurora/lib/gx/fifo.cpp",
+    "class": "trivial",
+    "max_lines": 6,
+    "why": "La constante `kDrawBatchSize = 16` y la afinidad del hilo FIFO."
+  },
+  {
+    "path": "extern/aurora/lib/webgpu/gpu_cache.cpp",
+    "class": "independent",
+    "max_lines": 6,
+    "why": "La apertura de la base pasó a `sqlite::open_cache`."
+  },
+  {
+    "path": "libs/JSystem/src/JKernel/JKRHeap.cpp",
+    "class": "trivial",
+    "max_lines": 5,
+    "why": "Un atributo `tls_model(\"initial-exec\")` para Switch."
+  },
+  {
+    "path": "platforms/switch/icon.jpg",
+    "class": "independent",
+    "max_lines": 5,
+    "why": "El icono actual no es el suyo: el sha256 de `icon.jpg` (ed1c07ee...) difiere del de su primera versión (cc5e321c...), que ya no está en el árbol. Git cuenta saltos de línea de un binario como \"líneas\"."
+  },
+  {
+    "path": "src/d/d_event_lib.cpp",
+    "class": "api",
+    "max_lines": 5,
+    "why": "Solución al macro `_C` de `<ctype.h>` de newlib (`#pragma push_macro/pop_macro`); la forma la dicta el compilador."
+  },
+  {
+    "path": "src/dusk/interp/material.cpp",
+    "class": "trivial",
+    "max_lines": 5,
+    "why": "Un `!fancy_recording() ||` antepuesto a condiciones existentes."
+  },
+  {
+    "path": "src/dusk/interp/particle.cpp",
+    "class": "trivial",
+    "max_lines": 5,
+    "why": "Un `!fancy_recording() ||` antepuesto a condiciones existentes."
+  },
+  {
+    "path": "src/dusk/logging.cpp",
+    "class": "trivial",
+    "max_lines": 5,
+    "why": "Un `#if` y una llamada; la elección del nivel se reescribió."
+  },
+  {
+    "path": "src/dusk/ui/graphics_tuner.cpp",
+    "class": "trivial",
+    "max_lines": 5,
+    "why": "Ganchos de una línea (guardas `#ifdef __SWITCH__`, una llamada, una declaración de ajuste) sobre APIs que ya existen en el archivo. No hay lógica propia que reescribir."
+  },
+  {
+    "path": "extern/aurora/lib/dolphin/gx/GXFrameBuffer.cpp",
+    "class": "api",
+    "max_lines": 5,
+    "why": "`GXSetCopyClamp`: guarda el valor, como la API de GX define."
+  },
+  {
+    "path": "extern/aurora/lib/dolphin/gx/__gx.h",
+    "class": "api",
+    "max_lines": 5,
+    "why": "Tres campos de estado de GX que esas dos funciones guardan."
+  },
+  {
+    "path": "extern/aurora/lib/io.hpp",
+    "class": "trivial",
+    "max_lines": 5,
+    "why": "Una declaración."
+  },
+  {
+    "path": "src/dusk/interp/frame_interpolation.h",
+    "class": "trivial",
+    "max_lines": 4,
+    "why": "Su declaración."
+  },
+  {
+    "path": "extern/aurora/lib/gx/fifo.hpp",
+    "class": "trivial",
+    "max_lines": 4,
+    "why": "Líneas en blanco y sin líneas sustantivas."
+  },
+  {
+    "path": "extern/aurora/lib/io.cpp",
+    "class": "trivial",
+    "max_lines": 4,
+    "why": "Dos llamadas SDL (`SDL_RemovePath` antes de `SDL_RenamePath`) porque `rename` no reemplaza en Horizon."
+  },
+  {
+    "path": "extern/aurora/lib/rmlui.cpp",
+    "class": "trivial",
+    "max_lines": 4,
+    "why": "Sin líneas sustantivas."
+  },
+  {
+    "path": "files.cmake",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Una línea: el nombre de `src/dusk/profiler.hpp` en la lista de fuentes."
+  },
+  {
+    "path": "include/d/d_event_lib.h",
+    "class": "api",
+    "max_lines": 3,
+    "why": "Solución al macro `_C` de `<ctype.h>` de newlib; la forma la dicta el compilador."
+  },
+  {
+    "path": "src/dusk/config.cpp",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Una línea: `template class ConfigImpl<InterpQuality>;`, la instanciación explícita que exige cada enum (igual que las demás de la lista)."
+  },
+  {
+    "path": "src/dusk/data.cpp",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Una línea (`return manager().paths();`) que también es la de upstream."
+  },
+  {
+    "path": "src/dusk/interp/vertex.cpp",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Un `!fancy_recording() ||` antepuesto a una condición existente."
+  },
+  {
+    "path": "src/dusk/main.h",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Un `|| defined(__SWITCH__)` en una condición."
+  },
+  {
+    "path": "extern/aurora/include/aurora/gfx.hpp",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Una línea."
+  },
+  {
+    "path": "extern/aurora/lib/dolphin/vi/vi.cpp",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Una línea que reenvía a `window::set_frame_buffer_height`."
+  },
+  {
+    "path": "extern/aurora/lib/gfx/encoding.hpp",
+    "class": "independent",
+    "max_lines": 3,
+    "why": "Declaración de `PassBindFilter`."
+  },
+  {
+    "path": "extern/aurora/lib/gfx/render_worker.cpp",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Una línea: `.affinity = thread::Affinity::Render`."
+  },
+  {
+    "path": "extern/aurora/lib/gx/shader.cpp",
+    "class": "trivial",
+    "max_lines": 3,
+    "why": "Una línea sin contenido sustantivo."
+  },
+  {
+    "path": "extern/aurora/lib/window.hpp",
+    "class": "api",
+    "max_lines": 3,
+    "why": "Una declaración (`set_frame_buffer_height`), la API del propio puerto."
+  }
+]

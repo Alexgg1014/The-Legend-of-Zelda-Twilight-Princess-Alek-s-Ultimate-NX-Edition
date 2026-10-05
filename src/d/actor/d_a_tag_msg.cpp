@@ -1,0 +1,297 @@
+/**
+ * d_a_tag_msg.cpp
+ *
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_player.h"
+#include "d/actor/d_a_tag_msg.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_debug_viewer.h"
+#include <cstring>
+
+#if TARGET_PC
+#include "helpers/string.hpp"
+#endif
+
+static int createHeapCallBack(fopAc_ac_c* i_this) {
+    daTag_Msg_c* msg = (daTag_Msg_c*)i_this;
+    return msg->createHeap();
+}
+
+static DUSK_CONST char* l_resName = "TagMsg";
+
+static DUSK_CONST char* l_evtNameTBL[2] = {
+    NULL,
+    "SPEAK",
+};
+
+#if DEBUG
+daTag_Msg_HIO_c::daTag_Msg_HIO_c() {
+    m = daTag_Msg_Param_c::m;
+}
+#endif
+
+daTag_Msg_c::~daTag_Msg_c() {
+    dComIfG_resDelete(&mPhase, getResName());
+
+#if DEBUG
+    if (mpHIO != NULL) {
+        mDoHIO_deleteChild(mpHIO->mChild);
+    }
+#endif
+}
+
+int daTag_Msg_c::create() {
+    fopAcM_ct(this, daTag_Msg_c);
+
+    int phase_state = dComIfG_resLoad(&mPhase, getResName());
+    if (phase_state == cPhs_COMPLEATE_e) {
+        attention_info.flags = (fopAc_AttnFlag_TALKCHECK_e | fopAc_AttnFlag_SPEAK_e);
+        getParam();
+
+        eventInfo.setArchiveName(getResName());
+        mEventIdx = -1;
+
+        if (!fopAcM_entrySolidHeap(this, createHeapCallBack, 0x10)) {
+            return cPhs_ERROR_e;
+        }
+
+#if DEBUG
+        mpHIO->mChild = mDoHIO_createChild("メッセ－ジタグ", mpHIO);
+#endif
+    }
+
+    return phase_state;
+}
+
+int daTag_Msg_c::createHeap() {
+    mpHIO = JKR_NEW TAG_MSG_HIO_CLASS();
+    if (mpHIO == NULL) {
+        return 0;
+    }
+
+    return 1;
+}
+
+int daTag_Msg_c::destroy() {
+    int id = fopAcM_GetID(this);
+    this->~daTag_Msg_c();
+    return 1;
+}
+
+DUSK_GAME_DATA const daTag_Msg_HIO_Param_c daTag_Msg_Param_c::m = {0};
+
+int daTag_Msg_c::execute() {
+    bool set_event = true;
+
+    fopAcM_SetRoomNo(this, dComIfGp_roomControl_getStayNo());
+    eyePos.set(current.pos.x, current.pos.y + 150.0f, current.pos.z);
+    attention_info.position = eyePos;
+
+    if (dComIfGp_event_runCheck()) {
+        set_event = false;
+
+        if (eventInfo.checkCommandTalk()) {
+            if (cut_speak(-1, field_0x5e4)) {
+                if (field_0x5dc == 1 && mOffSwitch != 0xFF) {
+                    dComIfGs_onSwitch(mOffSwitch, fopAcM_GetRoomNo(this));
+                }
+
+                dComIfGp_event_reset();
+                set_event = true;
+            }
+
+            field_0x5e4 = 0;
+        } else if (mEventIdx != -1) {
+            if (dComIfGp_getEventManager().endCheck(mEventIdx)) {
+                mOrderEvtNum = 0;
+                mEventIdx = -1;
+
+                if (field_0x5dc == 0 && mOffSwitch != 0xFF) {
+                    dComIfGs_onSwitch(mOffSwitch, fopAcM_GetRoomNo(this));
+                }
+
+                dComIfGp_event_reset();
+                set_event = true;
+            } else {
+                int staff_id = dComIfGp_evmng_getMyStaffId(mStaffName, NULL, 0);
+                int act_idx = dComIfGp_getEventManager().getMyActIdx(staff_id, mEvtCutTBL, 2, 0, 0);
+                int is_advance = dComIfGp_getEventManager().getIsAddvance(staff_id);
+
+                BOOL var_r27 = false;
+                switch (act_idx) {
+                case 0:
+                    var_r27 = cut_speak(staff_id, is_advance);
+                    break;
+                }
+
+                if (var_r27) {
+                    dComIfGp_getEventManager().cutEnd(staff_id);
+                }
+            }
+        }
+    }
+
+    if (set_event && rangeCheck() && otherCheck()) {
+        if (field_0x5dd) {
+            mOrderEvtNum = 1;
+            JUT_ASSERT(0, NULL != l_evtNameTBL[mOrderEvtNum]);
+
+            mEventIdx =
+                dComIfGp_getEventManager().getEventIdx(this, l_evtNameTBL[mOrderEvtNum], 0xFF);
+            fopAcM_orderOtherEventId(this, mEventIdx, 0xFF, 0xFFFF, 0, 1);
+        } else {
+            eventInfo.onCondition(1);
+            field_0x5e4 = 1;
+        }
+    }
+
+    return 1;
+}
+
+int daTag_Msg_c::draw() {
+#if DEBUG
+    if (mpHIO->m.mDebugAdjustON) {
+        cXyz sp0C(current.pos);
+        sp0C.y -= scale.y;
+        dDbVw_drawCylinderXlu(sp0C, scale.x, 2.0f * scale.y, (GXColor){0x80, 0x80, 0x80, 0x80}, 1);
+    }
+#endif
+
+    return 1;
+}
+
+BOOL daTag_Msg_c::rangeCheck() {
+    cXyz player_dist = daPy_getPlayerActorClass()->current.pos - current.pos;
+    return player_dist.absXZ() < scale.x && (-scale.y < player_dist.y && player_dist.y < scale.y);
+}
+
+BOOL daTag_Msg_c::otherCheck() {
+    if (field_0x5dc) {
+        if (mOnSaveLabel == 0xFFF ||
+            dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[mOnSaveLabel]))
+        {
+            if (mOffSaveLabel != 0xFFF &&
+                dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[mOffSaveLabel]))
+            {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    } else if (mOnSwitch == 0xFF || dComIfGs_isSwitch(mOnSwitch, fopAcM_GetRoomNo(this))) {
+        if (mOffSwitch != 0xFF && dComIfGs_isSwitch(mOffSwitch, fopAcM_GetRoomNo(this))) {
+            return false;
+        }
+    } else {
+        return false;
+    }
+
+    if (field_0x5dd) {
+        return 1;
+    } else {
+        s16 var_r28 = fopAcM_searchActorAngleY(this, daPy_getPlayerActorClass()) + 0x7FFF;
+        s16 angle_to_player = var_r28 - daPy_getPlayerActorClass()->current.angle.y;
+        if (angle_to_player < 0) {
+            angle_to_player = -angle_to_player;
+        }
+
+        return angle_to_player <= 0x1000;
+    }
+}
+
+DUSK_CONST char* daTag_Msg_c::getResName() {
+    return l_resName;
+}
+
+void daTag_Msg_c::getParam() {
+    mOnSwitch = home.angle.x & 0xFF;
+    mOffSwitch = (home.angle.x & 0xFF00) >> 8;
+    mOnSaveLabel = fopAcM_GetParam(this) & 0xFFF;
+    mOffSaveLabel = (fopAcM_GetParam(this) & 0xFFF000) >> 12;
+    field_0x5dc = (fopAcM_GetParam(this) & 0x1000000) != 0;
+    field_0x5dd = (fopAcM_GetParam(this) & 0x2000000) != 0;
+
+    u16 var_r30 = (u16)home.angle.z;
+    if (var_r30 != 0) {
+        mFlowID = var_r30;
+    } else {
+        mFlowID = -1;
+    }
+
+    scale.x *= 100.0f;
+    scale.y *= 100.0f;
+    SAFE_STRCPY(mStaffName, "Tag_ms");
+}
+
+DUSK_GAME_DATA DUSK_CONST char* daTag_Msg_c::mEvtCutTBL[2] = {
+    "SPEAK",
+    "PAUSE",
+};
+
+BOOL daTag_Msg_c::cut_speak(int i_staffId, BOOL i_isAdvance) {
+    if (i_isAdvance) {
+        mMsgFlow.init(this, mFlowID, 0, NULL);
+        return false;
+    } else {
+        return mMsgFlow.doFlow(this, NULL, 0);
+    }
+}
+
+static int daTag_Msg_Create(void* i_this) {
+    return ((daTag_Msg_c*)i_this)->create();
+}
+
+static int daTag_Msg_Delete(void* i_this) {
+    return ((daTag_Msg_c*)i_this)->destroy();
+}
+
+static int daTag_Msg_Execute(void* i_this) {
+    return ((daTag_Msg_c*)i_this)->execute();
+}
+
+static int daTag_Msg_Draw(void* i_this) {
+    return ((daTag_Msg_c*)i_this)->draw();
+}
+
+static int daTag_Msg_IsDelete(void* i_this) {
+    return 1;
+}
+
+#if DEBUG
+daTag_Msg_HIO_c::~daTag_Msg_HIO_c() {
+}
+
+void daTag_Msg_HIO_c::genMessage(JORMContext* ctx) {
+    ctx->genCheckBox("デバグ描画ＯＮ  ", &m.mDebugAdjustON, 1, 0, NULL, -1, -1, 0x200, 0x18);
+}
+#endif
+
+static void dummyString() {
+    DEAD_STRING("Timer");
+}
+
+static DUSK_CONST actor_method_class daTag_Msg_MethodTable = {
+    (process_method_func)daTag_Msg_Create,  (process_method_func)daTag_Msg_Delete,
+    (process_method_func)daTag_Msg_Execute, (process_method_func)daTag_Msg_IsDelete,
+    (process_method_func)daTag_Msg_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_MSG = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_MSG_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTag_Msg_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_MSG_e,
+    /* Actor SubMtd */ &daTag_Msg_MethodTable,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

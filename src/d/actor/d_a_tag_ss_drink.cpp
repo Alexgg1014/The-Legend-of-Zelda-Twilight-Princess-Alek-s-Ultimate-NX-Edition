@@ -1,0 +1,276 @@
+/**
+ * d_a_tag_ss_drink.cpp
+ *
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_tag_ss_drink.h"
+#include "d/actor/d_a_player.h"
+#include "f_pc/f_pc_name.h"
+#include "d/d_msg_object.h"
+#include "d/actor/d_a_myna.h"
+
+int daTag_SSDrink_c::create() {
+    fopAcM_ct(this, daTag_SSDrink_c);
+    field_0x5D2 = getTypeFromParam();
+    setFlowNodeNumber(getFlowNodeNum());
+    setValueNumber(getValue());
+    field_0x5D4 = 0;
+    initialize();
+    return 4;
+}
+
+int daTag_SSDrink_c::Delete() {
+    return 1;
+}
+
+int daTag_SSDrink_c::Execute() {
+    int eventResult = chkEvent();
+    if (eventResult) {
+        if (mProcessFunc) {
+            (this->*mProcessFunc)(0);
+        }
+        orderEvent();
+    }
+    setAttnPos();
+    return 1;
+}
+
+int daTag_SSDrink_c::Draw() {
+    return 1;
+}
+
+u8 daTag_SSDrink_c::getTypeFromParam() {
+    u8 param = fopAcM_GetParam(this) & 0xF;
+    switch (param) {
+    case 0:
+        field_0x5D3 = 0x69;
+        return 0;
+    case 1:
+        field_0x5D3 = 0x62;
+        return 1;
+    case 2:
+        field_0x5D3 = 0x63;
+        return 2;
+    case 3:
+        field_0x5D3 = 0x64;
+        return 3;
+    case 4:
+        field_0x5D3 = 0x68;
+        return 4;
+    case 5:
+        field_0x5D3 = 0x67;
+        return 5;
+    case 6:
+        field_0x5D3 = 0x6A;
+        return 6;
+    default:
+        field_0x5D3 = 0x60;
+        return 7;
+    }
+}
+
+u8 daTag_SSDrink_c::getSwitchFromParam() {
+    u8 result = (fopAcM_GetParam(this) & 0xFF0) >> 4;
+    return result;
+}
+
+u16 daTag_SSDrink_c::getFlowNodeNum() {
+    u16 angleX = home.angle.x;
+    return angleX == 0xFFFF || angleX == 0 ? 0xFFFF : angleX;
+}
+
+u16 daTag_SSDrink_c::getValue() {
+    u16 result = (fopAcM_GetParam(this) & 0xFFFF000) >> 12;
+    return result;
+}
+
+void daTag_SSDrink_c::restart() {
+    current.angle.set(0, home.angle.y, 0);
+    shape_angle = current.angle;
+    setProcess(&daTag_SSDrink_c::wait);
+}
+
+void daTag_SSDrink_c::initialize() {
+    fopAcM_setCullSizeBox(this, -30.0f, -15.0f, -30.0f, 30.0f, 45.0f, 30.0f);
+    attention_info.flags = 0;
+    attention_info.distances[fopAc_attn_CARRY_e] = 6;
+    fopAcM_OnCarryType(this, fopAcM_CARRY_SIDE);
+    restart();
+    Execute();
+}
+
+int daTag_SSDrink_c::checkProcess(ProcessFunc i_processFunc) {
+    return mProcessFunc == i_processFunc;
+}
+
+int daTag_SSDrink_c::setProcess(ProcessFunc i_processFunc) {
+    int retVal = 0;
+
+    if (checkProcess(i_processFunc)) {
+        return retVal;
+    } else {
+        mEventType = 2;
+        if (mProcessFunc) {
+            retVal = (this->*mProcessFunc)(0);
+        }
+        mEventType = 0;
+        mProcessFunc = i_processFunc;
+        if (mProcessFunc) {
+            retVal = (this->*mProcessFunc)(0);
+        }
+        mEventType = 1;
+    }
+
+    return retVal;
+}
+
+void daTag_SSDrink_c::setAttnPos() {
+    attention_info.position = current.pos;
+    eyePos = current.pos;
+}
+
+int daTag_SSDrink_c::chkEvent() {
+    int retVal = 1;
+    if (!dComIfGp_getEvent()->isOrderOK()) {
+        retVal = 0;
+        if (eventInfo.checkCommandTalk()) {
+            if (checkProcess(&daTag_SSDrink_c::talk) != 0) {
+                retVal = (this->*mProcessFunc)(0);
+            } else {
+                if (dComIfGp_event_chkTalkXY() == 0 || dComIfGp_evmng_ChkPresentEnd() != 0) {
+                    setProcess(&daTag_SSDrink_c::talk);
+                }
+            }
+            return retVal;
+        } else if (eventInfo.checkCommandCatch()) {
+            if (field_0x5D4 == 0) {
+                if (getParentPtr() != NULL) {
+                    ((daMyna_c*)getParentPtr())->onEventFlag(0);
+                }
+                dMsgObject_addTotalPrice(getValueNumber());
+                field_0x5D4 = 1;
+            }
+            return retVal;
+        }
+    }
+    return retVal;
+}
+
+int daTag_SSDrink_c::orderEvent() {
+    if (!daPy_py_c::checkNowWolf() && fopAcM_isSwitch(this, getSwitchFromParam()) &&
+        field_0x5D3 != 0x60 && getFlowNodeNum() != 0xFFFF)
+    {
+        attention_info.flags = (fopAc_AttnFlag_TALKREAD_e | fopAc_AttnFlag_SPEAK_e);
+    } else {
+        attention_info.flags = 0;
+    }
+
+    if (attention_info.flags == (fopAc_AttnFlag_TALKREAD_e | fopAc_AttnFlag_SPEAK_e)) {
+        if (fopAcM_searchPlayerDistanceXZ(this) <= 160.0f && fopAcM_seenPlayerAngleY(this) <= 0x2000) {
+            attention_info.distances[fopAc_attn_TALK_e] = 0x9D;
+            attention_info.distances[fopAc_attn_SPEAK_e] = 0x9D;
+            eventInfo.onCondition(1);
+        }
+    }
+
+    return 1;
+}
+
+int daTag_SSDrink_c::wait(void* param_0) {
+    switch (mEventType) {
+    case 1:
+        if (!eventInfo.checkCommandCatch()) {
+            if (fopAcM_isSwitch(this, getSwitchFromParam())) {
+                if (fopAcM_searchPlayerDistanceXZ(this) <= 160.0f &&
+                    fopAcM_seenPlayerAngleY(this) <= 0x2000)
+                {
+                    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+                    cXyz local_28 = attention_info.position - player->attention_info.position;
+                    dComIfGp_att_CatchRequest(this, field_0x5D3, 200.0f, local_28.y + 100.0f,
+                                              local_28.y - 100.0f, 0x4000, 1);
+                    eventInfo.onCondition(dEvtCnd_40_e);
+                }
+                if (field_0x5D4 != 0) {
+                    field_0x5D4 = 0;
+                }
+            }
+        }
+    case 0:
+    case 2:
+    default:
+        return 1;
+    }
+}
+
+int daTag_SSDrink_c::talk(void* param_0) {
+    int retVal = 0;
+    switch (mEventType) {
+    case 0:
+        field_0x578.init(this, getFlowNodeNum(), 0, NULL);
+        break;
+    case 1:
+        if (field_0x578.doFlow(this, NULL, 0) != 0) {
+            dComIfGp_event_reset();
+            setProcess(&daTag_SSDrink_c::wait);
+            retVal = 1;
+        }
+        break;
+    case 2:
+    default:
+        break;
+    }
+    return retVal;
+}
+
+static int daTag_SSDrink_Create(void* i_this) {
+    return static_cast<daTag_SSDrink_c*>(i_this)->create();
+}
+
+static int daTag_SSDrink_Delete(void* i_this) {
+    return static_cast<daTag_SSDrink_c*>(i_this)->Delete();
+}
+
+static int daTag_SSDrink_Execute(void* i_this) {
+    return static_cast<daTag_SSDrink_c*>(i_this)->Execute();
+}
+
+static int daTag_SSDrink_Draw(void* i_this) {
+    return static_cast<daTag_SSDrink_c*>(i_this)->Draw();
+}
+
+static int daTag_SSDrink_IsDelete(void* i_this) {
+    return 1;
+}
+
+daTag_SSDrink_c::~daTag_SSDrink_c() {}
+
+#ifdef __MWERKS__
+void daObj_SSBase_c::setSoldOut() {
+    /* empty function */
+}
+#endif
+
+static DUSK_CONST actor_method_class daTag_SSDrink_MethodTable = {
+    (process_method_func)daTag_SSDrink_Create,  (process_method_func)daTag_SSDrink_Delete,
+    (process_method_func)daTag_SSDrink_Execute, (process_method_func)daTag_SSDrink_IsDelete,
+    (process_method_func)daTag_SSDrink_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_SSDRINK = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_SSDRINK_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTag_SSDrink_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_SSDRINK_e,
+    /* Actor SubMtd */ &daTag_SSDrink_MethodTable,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_NOPAUSE_e | fopAcStts_UNK_0x4000_e | fopAcStts_CULL_e,
+    /* Group        */ fopAc_UNK_GROUP_5_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

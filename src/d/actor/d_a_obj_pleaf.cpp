@@ -1,0 +1,196 @@
+/**
+ * d_a_obj_pleaf.cpp
+ * Object - Pumpkin Leaf
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_obj_pleaf.h"
+
+static DUSK_CONSTEXPR char DUSK_CONST* l_resName = "J_Hatake";
+
+DUSK_GAME_DATA daObj_Pleaf_HIOParam const daObj_Pleaf_Param_c::m = {0, -3.0f, 1.0f, 900.0f};
+
+static OBJ_PLEAF_HIO_CLASS l_HIO;
+
+#if DEBUG
+daObj_Pleaf_HIO_c::daObj_Pleaf_HIO_c() {
+    m = daObj_Pleaf_Param_c::m;
+}
+
+void daObj_Pleaf_HIO_c::listenPropertyEvent(const JORPropertyEvent* event) {
+    // NONMATCHING
+}
+
+void daObj_Pleaf_HIO_c::genMessage(JORMContext* ctx) {
+    // NONMATCHING
+}
+#endif
+
+daObj_Pleaf_c::~daObj_Pleaf_c() {
+#if DEBUG
+    if (mpHIO != NULL) {
+        mpHIO->removeHIO();
+    }
+#endif
+
+    dComIfG_resDelete(&mPhaseReq, getResName());
+}
+
+int daObj_Pleaf_c::create() {
+    fopAcM_ct(this, daObj_Pleaf_c);
+    mType = getType();
+    int phase = dComIfG_resLoad(&mPhaseReq, getResName());
+    if (phase == cPhs_COMPLEATE_e) {
+        if (isDelete()) {
+            return cPhs_ERROR_e;
+        }
+        if (!fopAcM_entrySolidHeap(this, createHeapCallBack, 0x810)) {
+            return cPhs_ERROR_e;
+        }
+        fopAcM_SetMtx(this, mpModel->getBaseTRMtx());
+        fopAcM_setCullSizeBox(this, -300.0f, -50.0f, -300.0f, 300.0f, 50.0f, 300.0f);
+
+#if DEBUG
+        mpHIO = &l_HIO;
+        mpHIO->entryHIO("かぼちゃ畑の葉っぱ");
+#endif
+
+        mObjAcch.Set(fopAcM_GetPosition_p(this), fopAcM_GetOldPosition_p(this), this, 1, &mAcchCir,
+                     fopAcM_GetSpeed_p(this), fopAcM_GetAngle_p(this),
+                     fopAcM_GetShapeAngle_p(this));
+        mStts.Init(0xFF, 0, this);
+        cXyz new_pos = current.pos;
+        new_pos.y += 50.0f;
+        mGndChk.SetPos(&new_pos);
+        mGroundDist = dComIfG_Bgsp().GroundCross(&mGndChk);
+        if (mGroundDist != -G_CM3D_F_INF) {
+            setEnvTevColor();
+            setRoomNo();
+        }
+        Execute();
+    }
+    return phase;
+}
+
+int daObj_Pleaf_c::CreateHeap() {
+    J3DModelData* modelData = (J3DModelData*)dComIfG_getObjectRes(getResName(), 3);
+    if (modelData == NULL) {
+        return 0;
+    }
+    mpModel = mDoExt_J3DModel__create(modelData, 0x80000, 0x11000084);
+    if (mpModel != NULL) {
+        return 1;
+    }
+    return 0;
+}
+
+int daObj_Pleaf_c::Delete() {
+    this->~daObj_Pleaf_c();
+    return 1;
+}
+
+int daObj_Pleaf_c::Execute() {
+    cXyz new_pos = current.pos;
+    new_pos.y += 50.0f;
+    mGndChk.SetPos(&new_pos);
+    mGroundDist = dComIfG_Bgsp().GroundCross(&mGndChk);
+    if (mGroundDist != -G_CM3D_F_INF) {
+        setEnvTevColor();
+        setRoomNo();
+    }
+    setMtx();
+    attention_info.position = current.pos;
+    eyePos = attention_info.position;
+    attention_info.flags = 0;
+    return 1;
+}
+
+int daObj_Pleaf_c::Draw() {
+    g_env_light.settingTevStruct(0, &current.pos, &tevStr);
+    g_env_light.setLightTevColorType_MAJI(mpModel, &tevStr);
+    mDoExt_modelUpdateDL(mpModel);
+    if (mGroundDist != -G_CM3D_F_INF) {
+        mShadowKey =
+            dComIfGd_setShadow(mShadowKey, 1, mpModel, &current.pos,
+                               mpHIO->m.field_0xc, 20.0f, current.pos.y, mGroundDist,
+                               mGndChk, &tevStr, 0, 1.0f, dDlst_shadowControl_c::getSimpleTex());
+    }
+    return 1;
+}
+
+int daObj_Pleaf_c::createHeapCallBack(fopAc_ac_c* i_this) {
+    return static_cast<daObj_Pleaf_c*>(i_this)->CreateHeap();
+}
+
+char DUSK_CONST* daObj_Pleaf_c::getResName() {
+    return l_resName;
+}
+
+int daObj_Pleaf_c::isDelete() {
+    switch (mType) {
+    case 0:
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+void daObj_Pleaf_c::setEnvTevColor() {
+    tevStr.YukaCol = dComIfG_Bgsp().GetPolyColor(mGndChk);
+    tevStr.room_no = dComIfG_Bgsp().GetRoomId(mGndChk);
+}
+
+void daObj_Pleaf_c::setRoomNo() {
+    fopAcM_SetRoomNo(this, dComIfG_Bgsp().GetRoomId(mGndChk));
+}
+
+void daObj_Pleaf_c::setMtx() {
+    mDoMtx_stack_c::transS(current.pos.x, current.pos.y, current.pos.z);
+    mDoMtx_stack_c::ZXYrotM(shape_angle);
+    mDoMtx_stack_c::scaleM(scale);
+    mpModel->setBaseTRMtx(mDoMtx_stack_c::get());
+}
+
+static int daObj_Pleaf_Create(void* i_this) {
+    return static_cast<daObj_Pleaf_c*>(i_this)->create();
+}
+
+static int daObj_Pleaf_Delete(void* i_this) {
+    return static_cast<daObj_Pleaf_c*>(i_this)->Delete();
+}
+
+static int daObj_Pleaf_Execute(void* i_this) {
+    return static_cast<daObj_Pleaf_c*>(i_this)->Execute();
+}
+
+static int daObj_Pleaf_Draw(void* i_this) {
+    return static_cast<daObj_Pleaf_c*>(i_this)->Draw();
+}
+
+static int daObj_Pleaf_IsDelete(void* i_this) {
+    return 1;
+}
+
+static DUSK_CONST actor_method_class daObj_Pleaf_MethodTable = {
+    (process_method_func)daObj_Pleaf_Create,  (process_method_func)daObj_Pleaf_Delete,
+    (process_method_func)daObj_Pleaf_Execute, (process_method_func)daObj_Pleaf_IsDelete,
+    (process_method_func)daObj_Pleaf_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_OBJ_PLEAF = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 8,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_OBJ_PLEAF_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daObj_Pleaf_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_OBJ_PLEAF_e,
+    /* Actor SubMtd */ &daObj_Pleaf_MethodTable,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e | fopAcStts_CULL_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

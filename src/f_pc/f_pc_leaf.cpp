@@ -1,0 +1,79 @@
+/**
+ * f_pc_leaf.cpp
+ * Framework - Process Leaf
+ */
+
+#include "f_pc/f_pc_leaf.h"
+#include "f_pc/f_pc_debug_sv.h"
+
+#if TARGET_PC
+#include "dusk/game_clock.h"
+#endif
+
+s16 fpcLf_GetPriority(const leafdraw_class* i_leaf) {
+    return fpcDwPi_Get(&i_leaf->draw_priority);
+}
+
+int fpcLf_DrawMethod(leafdraw_method_class DUSK_CONST* i_methods, void* i_process) {
+    return fpcMtd_Method(i_methods->draw_method, i_process);
+}
+
+int fpcLf_Draw(leafdraw_class* i_leaf) {
+    int ret = 0;
+#if TARGET_PC
+    if (!i_leaf->draw_interp_frame && !dusk::game_clock::is_sim_frame()) {
+        return ret;
+    }
+#endif
+    if (i_leaf->unk_0xBC == 0) {
+        ret = fpcLf_DrawMethod(i_leaf->leaf_methods, i_leaf);
+    }
+    return ret;
+}
+
+int fpcLf_Execute(leafdraw_class* i_leaf) {
+#if DEBUG
+    if (fpcBs_Is_JustOfType(g_fpcLf_type, i_leaf->base.subtype) == 0) {
+        if (g_fpcDbSv_service[12] != NULL) {
+            g_fpcDbSv_service[12](i_leaf);
+        }
+        return 0;
+    }
+#endif
+    return fpcMtd_Execute(&i_leaf->leaf_methods->base, i_leaf);
+}
+
+int fpcLf_IsDelete(leafdraw_class* i_leaf) {
+    return fpcMtd_IsDelete(&i_leaf->leaf_methods->base, i_leaf);
+}
+
+int fpcLf_Delete(leafdraw_class* i_leaf) {
+    int ret = fpcMtd_Delete(&i_leaf->leaf_methods->base, i_leaf);
+    UNUSED(ret); // possible fakematch? this line fixes debug regalloc
+    if (ret == 1) {
+        LEAFDRAW_BASE(i_leaf).subtype = 0;
+    }
+    return ret;
+}
+
+DUSK_GAME_DATA int g_fpcLf_type;
+
+int fpcLf_Create(leafdraw_class* i_leaf) {
+    if (LEAFDRAW_BASE(i_leaf).state.init_state == 0) {
+        leaf_process_profile_definition* pprofile = (leaf_process_profile_definition*)LEAFDRAW_BASE(i_leaf).profile;
+        i_leaf->leaf_methods = pprofile->sub_method;
+        LEAFDRAW_BASE(i_leaf).subtype = fpcBs_MakeOfType(&g_fpcLf_type);
+        fpcDwPi_Init(&i_leaf->draw_priority, pprofile->priority);
+        i_leaf->unk_0xBC = 0;
+        IF_DUSK(i_leaf->draw_interp_frame = false);
+    }
+
+    int ret = fpcMtd_Create(&i_leaf->leaf_methods->base, i_leaf);
+    return ret;
+}
+
+DUSK_GAME_DATA leafdraw_method_class DUSK_CONST g_fpcLf_Method = {
+    (process_method_func)fpcLf_Create,  (process_method_func)fpcLf_Delete,
+    (process_method_func)fpcLf_Execute, (process_method_func)fpcLf_IsDelete,
+    (process_method_func)fpcLf_Draw,
+};

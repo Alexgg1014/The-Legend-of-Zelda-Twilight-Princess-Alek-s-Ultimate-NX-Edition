@@ -1,0 +1,644 @@
+/**
+ * d_map_path.cpp
+ *
+ */
+
+#include "d/dolzel.h" // IWYU pragma: keep
+
+#include "JSystem/JHostIO/JORFile.h"
+#include "JSystem/J2DGraph/J2DGrafContext.h"
+#include "JSystem/JHostIO/JORFile.h"
+#include "JSystem/JUtility/JUTTexture.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_map_path.h"
+#include "d/d_meter2_info.h"
+#include "m_Do/m_Do_lib.h"
+#include <cstring>
+
+#ifdef TARGET_PC
+#include "dusk/settings.h"
+#include "dusk/hq_minimap.hpp"
+#include "dusk/dualscreen.h"
+#include "m_Do/m_Do_graphic.h"
+#include <dolphin/gx/GXAurora.h>
+#include <aurora/math.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+u16 scaled_map_axis(u16 value, f32 scale) {
+    const auto scaledValue =
+        static_cast<u32>(std::max(1.0f, std::round(static_cast<f32>(value) * scale)));
+    return static_cast<u16>(std::min<u32>(scaledValue, std::numeric_limits<u16>::max()));
+}
+
+aurora::Vec2<u16> map_render_size_for(u16 width, u16 height) {
+    if (width == 0 || height == 0) {
+        return {width, height};
+    }
+
+    u32 renderWidth = 0;
+    u32 renderHeight = 0;
+    AuroraGetRenderSize(&renderWidth, &renderHeight);
+
+    const f32 logicalWidth = std::max(mDoGph_gInf_c::getWidthF(), 1.0f);
+    const f32 logicalHeight = std::max(mDoGph_gInf_c::getHeightF(), 1.0f);
+    const f32 irScaleX = renderWidth > 0 ? static_cast<f32>(renderWidth) / logicalWidth : 1.0f;
+    const f32 irScaleY = renderHeight > 0 ? static_cast<f32>(renderHeight) / logicalHeight : 1.0f;
+    const f32 hudScale = std::clamp(dusk::getSettings().game.hudScale.getValue(), 0.5f, 2.0f);
+    // Dual-screen: the companion enlarges the map ~2.4x onto its native-res
+    // panel — render the map texture at 2.4x so it stays sharp there (the
+    // main-screen minimap downsamples, i.e. also gets sharper).
+    //
+    // NOT while one of the game's own map screens is up. Those render several
+    // targets at once and are displayed at normal size on the main screen, so
+    // the boost buys nothing while costing 5.76x the pixels — enough to fail
+    // vkAllocateMemory outright on a handheld GPU ("Device lost" on opening
+    // the dungeon map). The companion skips its own render for that duration
+    // anyway, so nothing that is actually enlarged loses sharpness.
+    const int windowStatus = dMeter2Info_getWindowStatus();
+    const bool gameMapScreenOpen = windowStatus == 4 || windowStatus == 5;
+    const f32 dualBoost =
+        dusk::dualscreen::hudOnCompanion() && !gameMapScreenOpen ? 2.4f : 1.0f;
+    return {
+        scaled_map_axis(width, irScaleX * hudScale * dualBoost),
+        scaled_map_axis(height, irScaleY * hudScale * dualBoost),
+    };
+}
+#endif
+
+void dMpath_n::dTexObjAggregate_c::create() {
+    static int const data[7] = {
+        79, // 0: im_map_icon_square_4i.bti
+        80, // 1: im_map_icon_tresurebox_4i.bti
+        77, // 2: im_map_icon_enter_4i.bti
+        78, // 3: im_map_icon_nijumaru_4i.bti
+        76, // 4: im_map_icon_circle_4i.bti
+        81, // 5: im_map_icon_try_force_4i.bti
+        82, // 6: map_icon_circle16x16_4i.bti
+    };
+
+    for (int lp1 = 0; lp1 < 7; lp1++) {
+        mp_texObj[lp1] = JKR_NEW TGXTexObj();
+        JUT_ASSERT(70, mp_texObj[lp1] != NULL);
+        ResTIMG* image = (ResTIMG*)dComIfG_getObjectRes("Always", data[lp1]);
+        JUT_ASSERT(72, image != NULL);
+        JUT_ASSERT(73, image->minFilter == GX_NEAR);
+        JUT_ASSERT(74, image->magFilter == GX_NEAR);
+        IF_DUSK(dusk::hq_minimap::register_pointer(data[lp1], reinterpret_cast<u8*>(image) + image->imageOffset));
+        mDoLib_setResTimgObj(image, mp_texObj[lp1], 0, NULL);
+    }
+
+    IF_DUSK(dusk::hq_minimap::initialize_if_needed());
+}
+
+void dMpath_n::dTexObjAggregate_c::remove() {
+    for (int i = 0; i < 7; i++) {
+        JKR_DELETE(mp_texObj[i]);
+        mp_texObj[i] = NULL;
+    }
+}
+
+void dMpath_ColorCnv_n::convertRGB5A3_To_GXColor(GXColor& color32, const dMpath_RGB5A3_s& color16) {
+    int r, g, b, a;
+    u16 color = color16.color;
+    if (color & 0x8000) {
+        r = color16.color >> 7 & 0xf8;
+        r |= r >> 5;
+        g = color16.color >> 2 & 0xf8;
+        g |= g >> 5;
+        b = color16.color << 3 & 0xf8;
+        b |= b >> 5;
+        a = 255;
+    } else {
+        r = color16.color >> 4 & 0xf0;
+        r |= r >> 4;
+        g = color16.color & 0xf0;
+        g |= g >> 4;
+        b = color16.color << 4 & 0xf0;
+        b |= b >> 4;
+        a = color16.color >> 7 & 0xe0;
+        a |= a >> 3 | a >> 6;
+    }
+    color32.r = r;
+    color32.g = g;
+    color32.b = b;
+    color32.a = a;
+}
+
+void dMpath_RGBA_c::setGXColor(const GXColor& color) {
+    mColor = color;
+}
+
+void dMpath_RGBA_c::setRGB5A3_palDt(const dMpath_RGB5A3_palDt_s& pal_data) {
+    GXColor color;
+    dMpath_ColorCnv_n::convertRGB5A3_To_GXColor(color, pal_data.field_0x0);
+    setGXColor(color);
+}
+
+#if DEBUG
+void dMpath_HIO_n::hioList_c::gen(JORMContext* mctx) {
+    static const char* number[] = {
+        "00", "01", "02", "03", "04", "05", "06", "07",
+        "08", "09", "10", "11", "12", "13", "14", "15",
+        "16", "17", "18", "19", "20", "21", "22", "23",
+        "24", "25", "26", "27", "28", "29", "30", "31",
+        "32", "33", "34", "35", "36", "37", "38", "39",
+        "40", "41", "42", "43", "44", "45", "46", "47",
+        "48", "49", "50", "51", "52", "53", "54", "55",
+        "56", "57", "58", "59", "60", "61", "62", "63",
+    };
+    // DEBUG NONMATCHING
+}
+
+void dMpath_HIO_n::hioList_c::update(JORMContext* mctx) {
+    // DEBUG NONMATCHING
+}
+
+u32 dMpath_HIO_n::hioList_c::addString(char* param_1, u32 param_2, u32 param_3) const {
+    // DEBUG NONMATCHING
+    return param_2;
+}
+
+u32 dMpath_HIO_n::hioList_c::addStringBinary(char* param_1, u32 param_2, u32 param_3) const {
+    // DEBUG NONMATCHING
+    return param_2;
+}
+
+BOOL dMpath_HIO_file_base_c::writeHostioTextFile(const char* param_1) {
+    JORFile file;
+    BOOL result = 0;
+    const char* r27 = "すべてのファイル(*.*)\0*.*\0";
+    if (param_1) {
+        r27 = param_1;
+    }
+    if (file.open(JORFile::EFlags_WRITE | JORFile::EFlags_UNK_0x4, r27, NULL, NULL, NULL)) {
+        const u32 bufSize = 4000;
+        u32 size = 0;
+        char buffer[bufSize];
+        memset(buffer, 0, bufSize);
+        size = addString(buffer, size, bufSize);
+        JUT_ASSERT(732, size < bufSize);
+        file.writeData(buffer, s16(size));
+        file.close();
+        OSReport("write append success!::%6d\n", size);
+        result = 1;
+    } else {
+        OSReport("write append failure!\n");
+        result = 0;
+    }
+    return result;
+}
+
+BOOL dMpath_HIO_file_base_c::writeBinaryTextFile(const char* param_1) {
+    JORFile file;
+    BOOL result = 0;
+    const char* r27 = "すべてのファイル(*.*)\0*.*\0";
+    if (param_1) {
+        r27 = param_1;
+    }
+    if (file.open(JORFile::EFlags_WRITE | JORFile::EFlags_UNK_0x4, r27, NULL, NULL, NULL)) {
+        const u32 bufSize = 10000;
+        u32 size = 0;
+        char buffer[bufSize];
+        memset(buffer, 0, bufSize);
+        size = addStringBinary(buffer, size, bufSize);
+        JUT_ASSERT(762, size < bufSize);
+        file.writeData(buffer, s16(size));
+        file.close();
+        OSReport("write append success!::%6d\n", size);
+        result = 1;
+    } else {
+        OSReport("write append failure!\n");
+        result = 0;
+    }
+    return result;
+}
+
+BOOL dMpath_HIO_file_base_c::writeBinaryFile(const char* param_1) {
+    JORFile file;
+    BOOL result = 0;
+    const char* r27 = "すべてのファイル(*.*)\0*.*\0";
+    if (param_1) {
+        r27 = param_1;
+    }
+    if (file.open(JORFile::EFlags_WRITE | JORFile::EFlags_UNK_0x4, r27, NULL, NULL, NULL)) {
+        const u32 bufSize = 2000;
+        u32 size = 0;
+        char buffer[bufSize];
+        memset(buffer, 0, bufSize);
+        size = addData(buffer, size, bufSize);
+        JUT_ASSERT(794, size < bufSize);
+        file.writeData(buffer, s16(size));
+        file.close();
+        OSReport("write append success!::%6d\n", size);
+        result = 1;
+    } else {
+        OSReport("write append failure!\n");
+        result = 0;
+    }
+    return result;
+}
+
+void dMpath_HIO_file_base_c::binaryDump(const void* param_1, u32 param_2) {
+    int r26 = 0;
+    u8* r30 = (u8*)param_1;
+    u8* r25 = r30;
+    int r28;
+    for (int i = 0; i < param_2; i++, r30++) {
+        r28 = i % 8;
+        if (r28 == 0) {
+            OSReport("%04x : ",i);
+        }
+        OSReport("%02x", u8(*r30));
+        if (r28 == 3) {
+            OSReport(" - ");
+        } else if (r28 == 7) {
+            OSReport("\n");
+        } else {
+            OSReport(" ");
+        }
+    }
+    if (r28 != 7) {
+        OSReport("\n");
+    }
+    OSReport("startAdr<%08x>dataSize<%d><0x%04x>\n", param_1, param_2, param_2);
+}
+
+bool dMpath_HIO_file_base_c::readBinaryFile(const char* param_1)  {
+    JORFile file;
+    bool result = false;
+    const char* r26 = "すべてのファイル(*.*)\0*.*\0";
+    if (param_1) {
+        r26 = param_1;
+    }
+    if (file.open(JORFile::EFlags_READ, r26, NULL, NULL, NULL)) {
+        s32 r28 = file.getFileSize();
+        char* buf = JKR_NEW_ARRAY(char, r28);
+        JUT_ASSERT(855, buf != NULL);
+        file.readData(buf, r28);
+        copyReadBufToData(buf, r28);
+        OSReport("write read success!::%6d\n", r28);
+        result = true;
+        JKR_DELETE_ARRAY(buf);
+        buf = NULL;
+        file.close();
+    } else {
+        OSReport("write append failure!\n");
+        result = false;
+    }
+    return result;
+}
+#endif
+
+void dDrawPath_c::rendering(dDrawPath_c::line_class const* p_line) {
+    if (isDrawType(p_line->field_0x0)) {
+        int width = getLineWidth(p_line->field_0x1);
+
+        #if TARGET_PC
+        f32 height = JUTVideo::getManager()->getRenderHeight() / 448.0f;
+        if (height > 1.0f) {
+            width /= 2;
+        }
+        #endif
+
+        if (width > 0 && p_line->mDataNum >= 2) {
+            GXSetLineWidth(width, GX_TO_ZERO);
+            GXSetTevColor(GX_TEVREG0, *getLineColor(p_line->field_0x0 & 0x3F, p_line->field_0x1));
+            GXBegin(GX_LINESTRIP, GX_VTXFMT0, p_line->mDataNum);
+
+            BE(u16)* tmp = p_line->mpData;
+            for (int i = 0; i < p_line->mDataNum; i++) {
+                GXPosition1x16(*tmp);
+                tmp++;
+            }
+            GXEnd();
+        }
+    }
+}
+
+void dDrawPath_c::rendering(dDrawPath_c::poly_class const* p_poly) {
+    if (isDrawType(p_poly->field_0x0)) {
+        GXSetTevColor(GX_TEVREG0, *getColor(p_poly->field_0x0 & 0x3F));
+
+        if (p_poly->mDataNum >= 3) {
+            GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, p_poly->mDataNum);
+
+            BE(u16)* tmp = p_poly->mpData;
+            for (int i = 0; i < p_poly->mDataNum; i++) {
+                GXPosition1x16(*tmp);
+                tmp++;
+            }
+            GXEnd();
+        }
+    }
+}
+
+void dDrawPath_c::rendering(dDrawPath_c::group_class const* p_group) {
+    if (isSwitch(p_group)) {
+        poly_class* poly = p_group->mpPoly;
+        for (int i = 0; i < p_group->mPolyNum; i++) {
+            rendering(poly);
+            poly++;
+        }
+
+        line_class* line = p_group->mpLine;
+        for (int i = 0; i < p_group->mLineNum; i++) {
+            rendering(line);
+            line++;
+        }
+    }
+}
+
+void dDrawPath_c::rendering(dDrawPath_c::floor_class const* p_floor) {
+    if (p_floor->mpGroup != NULL) {
+        group_class* group = p_floor->mpGroup;
+
+        for (int i = 0; i < p_floor->mGroupNum; i++) {
+            rendering(group);
+            group++;
+        }
+    }
+}
+
+#ifdef TARGET_PC
+static u32 getRoomPosArraySize(const dDrawPath_c::room_class* room) {
+    if (room->mpFloor == NULL || room->mpFloatData == NULL || room->mFloorNum == 0) {
+        return 0;
+    }
+    const dDrawPath_c::group_class* firstGroup = room->mpFloor[0].mpGroup;
+    JUT_ASSERT(0, firstGroup != NULL);
+    JUT_ASSERT(0, (const u8*)firstGroup >= (const u8*)room->mpFloatData);
+    return (const u8*)firstGroup - (const u8*)room->mpFloatData;
+}
+#endif
+
+void dDrawPath_c::rendering(dDrawPath_c::room_class const* room) {
+    JUT_ASSERT(1043, room != NULL);
+    if (room != NULL) {
+        GXSetArray(GX_VA_POS, room->mpFloatData, getRoomPosArraySize(room), 8, false);
+        floor_class* floor = room->mpFloor;
+
+        if (floor != NULL) {
+            for (int i = 0; i < room->mFloorNum; i++) {
+                if (isRenderingFloor(floor->mFloorNo)) {
+                    rendering(floor);
+                }
+                floor++;
+            }
+        }
+    }
+}
+
+void dDrawPath_c::drawPath() {
+    room_class* room = getFirstRoomPointer();
+    while (room != NULL) {
+        rendering(room);
+        room = getNextRoomPointer();
+    }
+}
+
+void dRenderingMap_c::makeResTIMG(ResTIMG* p_image, u16 width, u16 height, u8* p_data,
+                                  u8* p_palette, u16 param_5) const {
+    p_image->format = GX_TF_C8;
+    p_image->alphaEnabled = 2;
+#ifdef TARGET_PC
+    const auto [rw, rh] = map_render_size_for(width, height);
+    p_image->width = rw;
+    p_image->height = rh;
+#else
+    p_image->width = width;
+    p_image->height = height;
+#endif
+    p_image->wrapS = GX_CLAMP;
+    p_image->wrapT = GX_CLAMP;
+    p_image->indexTexture = true;
+    p_image->colorFormat = 2;
+    p_image->numColors = param_5 * 4;
+    p_image->paletteOffset = p_palette - (u8*)p_image;
+    p_image->mipmapEnabled = false;
+    p_image->doEdgeLOD = false;
+    p_image->biasClamp = false;
+    p_image->maxAnisotropy = 0;
+    p_image->minFilter = GX_LINEAR;
+    p_image->magFilter = GX_LINEAR;
+    p_image->minLOD = 0;
+    p_image->maxLOD = 0;
+    p_image->mipmapCount = 1;
+    p_image->LODBias = 0;
+    p_image->imageOffset = p_data - (u8*)p_image;
+}
+
+void dRenderingMap_c::renderingMap() {
+    preRenderingMap();
+    if (isDrawPath()) {
+        preDrawPath();
+        beforeDrawPath();
+        drawPath();
+        afterDrawPath();
+        postDrawPath();
+    }
+    postRenderingMap();
+}
+
+void dRenderingFDAmap_c::setTevSettingNonTextureDirectColor() const {
+    GXSetNumTevStages(1);
+    GXSetNumChans(1);
+    GXSetNumTexGens(0);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
+}
+
+void dRenderingFDAmap_c::setTevSettingIntensityTextureToCI() const {
+    GXSetNumTevStages(2);
+    GXSetNumChans(1);
+    GXSetNumTexGens(1);
+    GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, 60);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+    GXSetTevOrder(GX_TEVSTAGE1, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_KONST, GX_CC_TEXC, GX_CC_C1);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevColorIn(GX_TEVSTAGE1, GX_CC_CPREV, GX_CC_C2, GX_CC_CPREV, GX_CC_ZERO);
+    GXSetTevColorOp(GX_TEVSTAGE1, GX_TEV_COMP_R8_GT, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                    GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE1, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_TEXA);
+    GXSetTevAlphaOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetAlphaCompare(GX_GREATER, 0, GX_AOP_AND, GX_ALWAYS, 0);
+    GXSetTevKColorSel(GX_TEVSTAGE0, GX_TEV_KCSEL_1_4);
+}
+
+void dRenderingFDAmap_c::drawBack() const {
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_CLR_RGBA, GX_F32, 0);
+    GXSetTevColor(GX_TEVREG0, *getBackColor());
+    GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+    GXPosition3f32(-field_0x8, -field_0xc, 0);
+    GXPosition3f32(field_0x8, -field_0xc, 0);
+    GXPosition3f32(field_0x8, field_0xc, 0);
+    GXPosition3f32(-field_0x8, field_0xc, 0);
+    GXEnd();
+}
+
+void dRenderingFDAmap_c::preRenderingMap() {
+#ifdef TARGET_PC
+    const auto [rw, rh] = map_render_size_for(mTexWidth, mTexHeight);
+    GXCreateFrameBuffer(rw, rh);
+    // Set logical viewport dimensions
+    GXSetViewport(0.0f, 0.0f, mTexWidth, mTexHeight, 0.0f, 1.0f);
+    GXSetScissor(0, 0, mTexWidth, mTexHeight);
+    // Set render viewport dimensions
+    GXSetViewportRender(0.0f, 0.0f, rw, rh, 0.0f, 1.0f);
+    GXSetScissorRender(0, 0, rw, rh);
+#else
+    GXSetViewport(0.0f, 0.0f, mTexWidth, mTexHeight, 0.0f, 1.0f);
+    GXSetScissor(0, 0, mTexWidth, mTexHeight);
+#endif
+    GXSetNumChans(1);
+    GXSetNumTevStages(1);
+    GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT_NULL, GX_DF_NONE,
+                  GX_AF_NONE);
+    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_OR, GX_ALWAYS, 0);
+    GXSetZCompLoc(GX_TRUE);
+    GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
+    GXSetBlendMode(GX_BM_NONE, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+    GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, g_clearColor);
+    GXSetCullMode(GX_CULL_NONE);
+    GXSetDither(GX_FALSE);
+    GXSetNumIndStages(0);
+    GXSetClipMode(GX_CLIP_ENABLE);
+    setTevSettingNonTextureDirectColor();
+    f32 right = field_0x8 * 0.5f;
+#if TARGET_PC
+    if (dusk::getSettings().game.enableMirrorMode) {
+        right = field_0x8 * -0.5f;
+    }
+#endif
+
+    f32 top = field_0xc * 0.5f;
+    Mtx44 matrix;
+    C_MTXOrtho(matrix, top, -top, -right, right, 0.0f, 10000.0f);
+    GXSetProjection(matrix, GX_ORTHOGRAPHIC);
+    GXLoadPosMtxImm(cMtx_getIdentity(), GX_PNMTX0);
+    GXSetCurrentMtx(0);
+    drawBack();
+}
+
+void dRenderingFDAmap_c::postRenderingMap() {
+    GXSetCopyFilter(GX_FALSE, NULL, GX_FALSE, NULL);
+#ifdef TARGET_PC
+    const auto [rw, rh] = map_render_size_for(mTexWidth, mTexHeight);
+    GXSetTexCopySrc(0, 0, rw, rh);
+    GXSetTexCopyDst(rw, rh, GX_CTF_R8, GX_FALSE);
+    GXCopyTex(field_0x4, GX_TRUE);
+    GXRestoreFrameBuffer();
+#else
+    GXSetTexCopySrc(0, 0, mTexWidth, mTexHeight);
+    GXSetTexCopyDst(mTexWidth, mTexHeight, GX_CTF_R8, GX_FALSE);
+    GXCopyTex(field_0x4, GX_TRUE);
+#endif
+    GXPixModeSync();
+    GXSetClipMode(GX_CLIP_ENABLE);
+    GXSetDither(GX_TRUE);
+    dComIfGp_getCurrentGrafPort()->setup2D();
+}
+
+DUSK_GAME_DATA dMpath_n::dTexObjAggregate_c dMpath_n::m_texObjAgg;
+
+void dRenderingFDAmap_c::renderingDecoration(dDrawPath_c::line_class const* p_line) {
+    s32 width = getDecorationLineWidth(p_line->field_0x1);
+    if (width <= 0) {
+        return;
+    }
+
+    setTevSettingIntensityTextureToCI();
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
+    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_POS_XYZ, GX_F32, 0);
+    GXSetNumTevStages(1);
+    GXLoadTexObj(dMpath_n::m_texObjAgg.getTexObjPointer(6), GX_TEXMAP0);
+
+    BE(u16)* data_p = p_line->mpData;
+    s32 data_num = p_line->mDataNum;
+    GXSetLineWidth(width, GX_TO_ONE);
+    GXSetPointSize(width, GX_TO_ONE);
+    GXColor lineColor = *getDecoLineColor(p_line->field_0x0 & 0x3f, p_line->field_0x1);
+    GXSetTevColor(GX_TEVREG0, lineColor);
+    lineColor.r = lineColor.r - 4;
+    GXSetTevColor(GX_TEVREG1, lineColor);
+
+#if TARGET_PC
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_KONST);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXBegin(GX_LINESTRIP, GX_VTXFMT0, 2 * (data_num - 1));
+    for (int i = 0; i < data_num - 1; i++) {
+        GXPosition1x16(data_p[i]);
+        GXTexCoord2f32(0, 0);
+        GXPosition1x16(data_p[i + 1]);
+        GXTexCoord2f32(0, 0);
+    }
+    GXEnd();
+
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_KONST, GX_CC_TEXC, GX_CC_C1);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_TEXA);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXBegin(GX_POINTS, GX_VTXFMT0, data_num);
+    for (int i = 0; i < data_num; i++) {
+        GXPosition1x16(data_p[i]);
+        GXTexCoord2f32(0, 0);
+    }
+    GXEnd();
+#else
+    for (int i = 0; i < data_num; i++) {
+        if (i < data_num - 1) {
+            GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
+            GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_KONST);
+            GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE,
+                            GX_TEVPREV);
+            GXBegin(GX_LINESTRIP, GX_VTXFMT0, 2);
+            GXPosition1x16(data_p[0]);
+            GXTexCoord2f32(0, 0);
+            GXPosition1x16(data_p[1]);
+            GXTexCoord2f32(0, 0);
+            GXEnd();
+        }
+        GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_KONST, GX_CC_TEXC, GX_CC_C1);
+        GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+        GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_TEXA);
+        GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+
+        GXBegin(GX_POINTS, GX_VTXFMT0, 1);
+        GXPosition1x16(data_p[0]);
+        GXTexCoord2f32(0, 0);
+        GXEnd();
+        data_p++;
+    }
+#endif
+
+    setTevSettingNonTextureDirectColor();
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_CLR_RGB, GX_F32, 0);
+}
+
+const GXColor* dRenderingFDAmap_c::getDecoLineColor(int param_0, int param_1) {
+    return getLineColor(param_0, param_1);
+}
+
+s32 dRenderingFDAmap_c::getDecorationLineWidth(int param_0) {
+    return getLineWidth(param_0);
+}

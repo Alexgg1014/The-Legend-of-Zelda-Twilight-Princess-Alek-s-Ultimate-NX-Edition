@@ -1,0 +1,118 @@
+/**
+ * d_a_obj_lv3waterEff.cpp
+ * Lakebed Temple Pre-Deku Toad Room Water Bubbles
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_obj_lv3waterEff.h"
+#include "d/d_com_inf_game.h"
+#include "f_pc/f_pc_name.h"
+#include "f_op/f_op_actor_mng.h"
+
+static u16 const l_eff_id[] = {
+    0x86D2,
+    0x86D3,
+    0x86D4,
+    0x86D5,
+};
+
+int daObjWaterEff_c::Create() {
+    for (int i = 0; i < 4; i++) {
+        mParticles[i] = dComIfGp_particle_set(l_eff_id[i], &current.pos, NULL, NULL, 0xFF, NULL, -1,
+                                              NULL, NULL, NULL);
+
+        if(mParticles[i] == NULL) {
+            // "LV3R09 Water flow effect: Effect <%d> could not be set"
+            OS_REPORT_ERROR("Ｌｖ３Ｒ０９水流エフェクト：エフェクト<%d>セットできませんでした\n");
+        }
+    }
+
+    mSePositions[0].set(14420.0f, -1100.0f, -4950.0f);
+    mSePositions[1].set(12585.0f, -550.0f, -2390.0f);
+    return 1;
+}
+
+int daObjWaterEff_c::create() {
+    fopAcM_ct(this, daObjWaterEff_c);
+
+    if (!Create()) {
+        return cPhs_ERROR_e;
+    }
+
+    return cPhs_COMPLEATE_e;
+}
+
+int daObjWaterEff_c::execute() {
+    if (dKy_camera_water_in_status_check()) {
+        for (int i = 0; i < 4; i++) {
+            if (mParticles[i] != NULL) {
+                mParticles[i]->setGlobalAlpha(255);
+            }
+        }
+    } else {
+        for (int i = 0; i < 4; i++) {
+            if (mParticles[i] != NULL) {
+                mParticles[i]->setGlobalAlpha(128);
+            }
+        }
+    }
+
+    for (int i = 0; i < 2; i++) {
+        mDoAud_seStartLevel(Z2SE_OBJ_WTR_STREAM, &mSePositions[i], 0, 0);
+    }
+
+    return 1;
+}
+
+int daObjWaterEff_c::_delete() {
+    for (int i = 0; i < 4; i++) {
+        if (mParticles[i] != NULL) {
+            mParticles[i]->becomeInvalidEmitter();
+            mParticles[i]->quitImmortalEmitter();
+            mParticles[i] = NULL;
+        }
+    }
+
+    return 1;
+}
+
+static int daObjWaterEff_Execute(daObjWaterEff_c* i_this) {
+    return i_this->execute();
+}
+
+static int daObjWaterEff_Delete(daObjWaterEff_c* i_this) {
+    const fpc_ProcID id = fopAcM_GetID(i_this);
+    return i_this->_delete();
+}
+
+static int daObjWaterEff_Create(fopAc_ac_c* i_this) {
+    daObjWaterEff_c* const actor = static_cast<daObjWaterEff_c*>(i_this);
+    const fpc_ProcID id = fopAcM_GetID(i_this);
+    return actor->create();
+}
+
+static DUSK_CONST actor_method_class l_daObjWaterEff_Method = {
+    (process_method_func)daObjWaterEff_Create,
+    (process_method_func)daObjWaterEff_Delete,
+    (process_method_func)daObjWaterEff_Execute,
+    (process_method_func)NULL,
+    (process_method_func)NULL,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_Obj_WaterEff = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_Obj_WaterEff_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daObjWaterEff_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_Obj_WaterEff_e,
+    /* Actor SubMtd */ &l_daObjWaterEff_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e | fopAcStts_CULL_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

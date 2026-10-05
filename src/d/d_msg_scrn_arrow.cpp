@@ -1,0 +1,160 @@
+#include "d/dolzel.h" // IWYU pragma: keep
+
+#include "d/d_msg_scrn_arrow.h"
+#include "JSystem/J2DGraph/J2DAnmLoader.h"
+#include "JSystem/J2DGraph/J2DScreen.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_pane_class.h"
+
+#if TARGET_PC
+#include "dusk/interp/user_interface.h"
+#include "dusk/settings.h"
+#endif
+
+dMsgScrnArrow_c::dMsgScrnArrow_c() {
+    mpScreen = JKR_NEW J2DScreen();
+    JUT_ASSERT(0, mpScreen != NULL);
+    bool fg =
+        mpScreen->setPriority("zelda_window_yajirushi.blo", 0x20000, dComIfGp_getMsgArchive(0));
+    JUT_ASSERT(0, fg != false);
+    dPaneClass_showNullPane(mpScreen);
+
+    OSInitFastCast();
+
+    mpBck = (J2DAnmTransform*)J2DAnmLoaderDataBase::load(
+        JKRGetNameResource("zelda_window_yajirushi.bck", dComIfGp_getMsgArchive(0)));
+    mBckFrame = 0.0f;
+
+    mpBpk = (J2DAnmColor*)J2DAnmLoaderDataBase::load(
+        JKRGetNameResource("zelda_window_yajirushi.bpk", dComIfGp_getMsgArchive(0)));
+    mpBpk->searchUpdateMaterialID(mpScreen);
+    mBpkFrame = 0.0f;
+
+    mpParent_c = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('set_ya_n'), 0, NULL);
+    JUT_ASSERT(0, mpParent_c != NULL);
+
+    mpArw_c = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('ya_next'), 0, NULL);
+    JUT_ASSERT(0, mpArw_c != NULL);
+
+    mpArw_c->hide();
+    mpArw_c->mPane->setAnimation(mpBck);
+    mpScreen->search(MULTI_CHAR('yajnext'))->setAnimation(mpBpk);
+    mpScreen->search(MULTI_CHAR('yajinexl'))->setAnimation(mpBpk);
+
+    mpDot_c = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('ya_end'), 0, NULL);
+    JUT_ASSERT(0, mpDot_c != NULL);
+
+    mpDot_c->hide();
+    mpScreen->search(MULTI_CHAR('yaj_end'))->setAnimation(mpBpk);
+    mpScreen->search(MULTI_CHAR('yajiendl'))->setAnimation(mpBpk);
+}
+
+dMsgScrnArrow_c::~dMsgScrnArrow_c() {
+    JKR_DELETE(mpScreen);
+    mpScreen = NULL;
+
+    JKR_DELETE(mpBck);
+    mpBck = NULL;
+
+    JKR_DELETE(mpBpk);
+    mpBpk = NULL;
+
+    JKR_DELETE(mpParent_c);
+    mpParent_c = NULL;
+
+    JKR_DELETE(mpArw_c);
+    mpArw_c = NULL;
+
+    JKR_DELETE(mpDot_c);
+    mpDot_c = NULL;
+}
+
+void dMsgScrnArrow_c::draw() {
+#if TARGET_PC
+    if (dusk::getSettings().game.recordingMode) {
+        return;
+    }
+    if (mpArw_c->isVisible()) {
+        dusk::vdt::present_looping(mBckFrame, mpBck, 1.0f);
+        dusk::vdt::present_looping(mBpkFrame, mpBpk, 1.0f);
+        mpScreen->animation();
+    } else if (mpDot_c->isVisible()) {
+        dusk::vdt::present_looping(mBpkFrame, mpBpk, 1.0f);
+        mpScreen->animation();
+    }
+#endif
+    J2DGrafContext* graf_ctx = dComIfGp_getCurrentGrafPort();
+    mpScreen->draw(0.0f, 0.0f, graf_ctx);
+}
+
+void dMsgScrnArrow_c::setPos(f32 i_posX, f32 i_posY) {
+    mpParent_c->translate(i_posX, i_posY);
+}
+
+void dMsgScrnArrow_c::arwAnimeInit() {
+    mpArw_c->hide();
+
+    mBckFrame = 0.0f;
+    mpBck->setFrame(mBckFrame);
+
+    mBpkFrame = 0.0f;
+    mpBpk->setFrame(mBpkFrame);
+
+    mpScreen->animation();
+}
+
+void dMsgScrnArrow_c::arwAnimeMove() {
+    if (!mpArw_c->isVisible()) {
+        mpArw_c->show();
+    }
+
+    if (mpDot_c->isVisible() == true) {
+        mpDot_c->hide();
+    }
+
+#if !TARGET_PC
+    mBckFrame += 1.0f;
+    if (mBckFrame >= (f32)mpBck->getFrameMax()) {
+        mBckFrame -= (f32)mpBck->getFrameMax();
+    }
+    mpBck->setFrame(mBckFrame);
+
+    mBpkFrame += 1.0f;
+    if (mBpkFrame >= (f32)mpBpk->getFrameMax()) {
+        mBpkFrame -= (f32)mpBpk->getFrameMax();
+    }
+    mpBpk->setFrame(mBpkFrame);
+#endif
+
+    mpScreen->animation();
+}
+
+void dMsgScrnArrow_c::dotAnimeInit() {
+    mpDot_c->hide();
+
+    mBpkFrame = 0.0f;
+    mpBpk->setFrame(mBpkFrame);
+
+    mpScreen->animation();
+}
+
+void dMsgScrnArrow_c::dotAnimeMove() {
+    if (mpArw_c->isVisible() == true) {
+        mpArw_c->hide();
+    }
+
+    if (!mpDot_c->isVisible()) {
+        mpDot_c->show();
+    }
+
+#if !TARGET_PC
+    mBpkFrame += 1.0f;
+    if (mBpkFrame >= (f32)mpBpk->getFrameMax()) {
+        mBpkFrame -= (f32)mpBpk->getFrameMax();
+    }
+
+    mpBpk->setFrame(mBpkFrame);
+#endif
+
+    mpScreen->animation();
+}

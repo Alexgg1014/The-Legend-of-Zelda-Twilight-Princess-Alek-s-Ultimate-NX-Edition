@@ -1,0 +1,14 @@
+# aleks2 (H36): link names for hooks that mods compiled into the Switch NRO
+# declare by qualified name (DEFINE_HOOK_SYMBOL with a display name).
+#
+# The Switch build has no symbol manifest, so platforms/switch/tools/static_mod_link.py
+# resolves these names at link time instead, and a display name is not something a
+# linker knows. Each line maps one to its Itanium-mangled name and names the game
+# header that declares it. The host test (platforms/switch/tools/test-static-mods.sh)
+# compiles a reference to every entry through that header and compares the symbol the
+# compiler emits, so a wrong line fails there.
+#
+# <display name>                          <mangled name>                                <header>
+
+# Cosmetics (mods/cosmetics, dev.twilitrealm.cosmetics)
+dMenu_DmapBg_c::buttonIconScreenInit      _ZN14dMenu_DmapBg_c20buttonIconScreenInitEv     d/d_menu_dmap.h

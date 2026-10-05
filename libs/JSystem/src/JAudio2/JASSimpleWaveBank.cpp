@@ -1,0 +1,60 @@
+#include "JSystem/JSystem.h" // IWYU pragma: keep
+
+#include "JSystem/JAudio2/JASSimpleWaveBank.h"
+#include <stdint.h>
+
+JASSimpleWaveBank::JASSimpleWaveBank(IF_DUSK(u32 bankId)) IF_DUSK(: JASWaveBank(bankId)) {
+    mWaveTable = NULL;
+    mWaveTableSize = 0;
+}
+
+JASSimpleWaveBank::~JASSimpleWaveBank() {
+    JKR_DELETE_ARRAY(mWaveTable);
+}
+
+void JASSimpleWaveBank::setWaveTableSize(u32 size, JKRHeap* heap) {
+    JKR_DELETE_ARRAY(mWaveTable);
+    mWaveTable = JKR_NEW_ARRAY_ARGS(TWaveHandle, size, heap, 0);
+    JUT_ASSERT(29, mWaveTable != NULL);
+    mWaveTableSize = size;
+}
+
+JASWaveHandle* JASSimpleWaveBank::getWaveHandle(u32 no) const {
+    if (no >= mWaveTableSize) {
+        return NULL;
+    }
+    return &mWaveTable[no];
+}
+
+void JASSimpleWaveBank::setWaveInfo(u32 no, JASWaveInfo const& waveInfo) {
+    mWaveTable[no].mWaveInfo = waveInfo;
+    mWaveTable[no].mWaveInfo.mpLoaded = &mCurrentlyLoaded;
+    mWaveTable[no].mHeap = &mHeap;
+}
+
+JASWaveArc* JASSimpleWaveBank::getWaveArc(u32 no) {
+    if (no != 0) {
+        return NULL;
+    }
+    return this;
+}
+
+intptr_t JASSimpleWaveBank::TWaveHandle::getWavePtr() const {
+    void* base = mHeap->getBase();
+    if (base == NULL) {
+        return 0;
+    }
+    return (intptr_t)base + mWaveInfo.mOffsetStart;
+}
+
+JASSimpleWaveBank::TWaveHandle::TWaveHandle() {
+    mHeap = NULL;
+}
+
+const JASWaveInfo* JASSimpleWaveBank::TWaveHandle::getWaveInfo() const {
+    return &mWaveInfo;
+}
+
+u32 JASSimpleWaveBank::getArcCount() const {
+    return 1;
+}

@@ -1,0 +1,30 @@
+# H37-c6: one verdict for a Linux-built module's import, read by elf_runtime_policy_test.cpp (the loader) and
+# abi_policy_test.py (elf_audit.py), so the two readers cannot drift apart.
+# <refused|allowed> <name>
+refused _ZNSt8ios_baseC2Ev
+refused _ZNSt8ios_baseD2Ev
+refused _ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E
+refused _ZNSt14basic_ofstreamIcSt11char_traitsIcEEC1Ev
+refused _ZTVSt14basic_ofstreamIcSt11char_traitsIcEE
+refused _ZTTSt14basic_ofstreamIcSt11char_traitsIcEE
+refused _ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev
+refused _ZNSt13basic_fstreamIcSt11char_traitsIcEEC1Ev
+refused _ZNSt7__cxx1119basic_stringstreamIcSt11char_traitsIcESaIcEEC1Ev
+refused _ZNSt7__cxx1118basic_ostringstreamIcSt11char_traitsIcESaIcEEC1Ev
+refused _ZNSt7__cxx1118basic_istringstreamIcSt11char_traitsIcESaIcEED1Ev
+allowed _ZNKSt6locale2id5_M_idEv
+allowed _ZNSt6locale5facetD2Ev
+allowed _ZNSt6localeC1ERKS_
+allowed _ZNSt6localeC1Ev
+allowed _ZNSt6localeD1Ev
+allowed _ZTINSt6locale5facetE
+allowed _ZNSt6localeaSERKS_
+allowed _ZNSt6locale7classicEv
+allowed _ZNSt8ios_base4InitC1Ev
+allowed _ZNSt8ios_base4InitD1Ev
+allowed _ZNSolsEi
+allowed _ZSt4cout
+allowed _Znwm
+allowed memcpy
+allowed printf
+allowed localeconv

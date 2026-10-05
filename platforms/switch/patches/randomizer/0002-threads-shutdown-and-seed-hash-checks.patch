@@ -1,0 +1,234 @@
+From: aleks2 (H37)
+Subject: [PATCH 2/3] threads, shutdown and the seed_hash blob
+
+- seed generation and data preload threads are kept and joined at shutdown instead of
+  detached, so neither writes into state the mod has torn down; generation time is logged;
+- the progress bar is updated from ui::update() on the game thread, not from a thread of its
+  own calling the game's UI service every 16 ms;
+- the seed_hash blob read from a save is bounded and must not contain path separators, '..'
+  or control characters before it names a folder under the seeds directory; a bad one is
+  reported and the save loads as a normal one.
+---
+diff --git a/src/session.cpp b/src/session.cpp
+index 7968799..6e07cd0 100644
+--- a/src/session.cpp
++++ b/src/session.cpp
+@@ -33,6 +33,7 @@ std::string g_pending_seed_hash{};
+ bool g_seedActivated = false;
+ 
+ SaveObserverHandle s_save_observer{};
++static std::thread s_preloadThread;
+ ItemCheckHandle s_check_resolver{};
+ ItemGiveHandle s_check_observer{};
+ std::vector<StageActorHandle> s_stage_edits{};
+@@ -401,6 +402,24 @@ ModResult onNewSave(void*, ModError*) {
+     return MOD_OK;
+ }
+ 
++// aleks2 (H37): the seed_hash blob comes from a save file, so it is checked before it names a
++// folder under the seeds directory (activateSeed loads <seeds>/<hash>/): bounded, no path
++// separators, no "..", no control characters. A bad one is reported and the save loads as a
++// normal one; nothing is written back over it.
++constexpr size_t kMaxSeedHashSize = 128;
++
++static bool valid_seed_hash(std::string_view hash) {
++    if (hash.empty() || hash.size() > kMaxSeedHashSize || hash.find("..") != std::string_view::npos) {
++        return false;
++    }
++    for (const char c : hash) {
++        if (c == '/' || c == '\\' || c == ':' || static_cast<unsigned char>(c) < 0x20) {
++            return false;
++        }
++    }
++    return true;
++}
++
+ ModResult onSaveLoaded(void*, ModError*) {
+     size_t size = 0;
+     if (svc_mng.save->get_blob(mod_ctx, kSeedHashBlobName, nullptr, &size) != MOD_OK || size == 0) {
+@@ -408,6 +427,11 @@ ModResult onSaveLoaded(void*, ModError*) {
+         deactivateSeed();
+         return MOD_ERROR;
+     }
++    if (size > kMaxSeedHashSize) {
++        mods::log::error("seed_hash is {} bytes, more than a seed hash can be; ignoring it", size);
++        deactivateSeed();
++        return MOD_ERROR;
++    }
+ 
+     std::string hash(size, '\0');
+     if (svc_mng.save->get_blob(mod_ctx, kSeedHashBlobName, hash.data(), &size) != MOD_OK) {
+@@ -415,6 +439,12 @@ ModResult onSaveLoaded(void*, ModError*) {
+         deactivateSeed();
+         return MOD_ERROR;
+     }
++    hash.resize(size);
++    if (!valid_seed_hash(hash)) {
++        mods::log::error("seed_hash in this save is not a valid seed name; ignoring it");
++        deactivateSeed();
++        return MOD_ERROR;
++    }
+ 
+     if (randomizer_GetContext().mHash != hash) {
+         deactivateSeed();
+@@ -471,15 +501,22 @@ ModResult onGameModeActivated(void*, ModError* error) {
+         return mods::set_error(error, result, "failed to initialize ui");
+     }
+ 
+-    // Preload certain data to prevent hitching that would happen if loading the data as necessary
+-    std::thread preLoadDataThread{preLoadRandomizerData};
+-    preLoadDataThread.detach();
++    // Preload certain data to prevent hitching that would happen if loading the data as necessary.
++    // aleks2 (H37): kept, and joined in shutdown(), instead of detached: a preload still running
++    // after the mod shut down would write into state that is gone.
++    if (s_preloadThread.joinable()) {
++        s_preloadThread.join();
++    }
++    s_preloadThread = std::thread{preLoadRandomizerData};
+ 
+     mods::log::info("randomizer game mode activated");
+     return MOD_OK;
+ }
+ 
+ void shutdown() {
++    if (s_preloadThread.joinable()) {
++        s_preloadThread.join();
++    }
+     deactivateSeed();
+     hooks::uninstall();
+     ui::shutdown();
+diff --git a/src/ui/rando_seed_generation.cpp b/src/ui/rando_seed_generation.cpp
+index fbfef16..c9e64a0 100644
+--- a/src/ui/rando_seed_generation.cpp
++++ b/src/ui/rando_seed_generation.cpp
+@@ -8,6 +8,7 @@
+ #include "m_Do/m_Do_audio.h"
+ 
+ #include <atomic>
++#include <chrono>
+ #include <mutex>
+ #include <string>
+ #include <thread>
+@@ -28,6 +29,7 @@ static std::atomic seedGenProgressValueTarget = 0.0f;
+ static float seedGenProgressValueCurrent = 0.0f;
+ static std::string generationStatusMsg{};
+ static std::mutex generationStatusMutex;
++static std::thread seedGenThread;
+ 
+ void OnDialogActionOK(ModContext* ctx, UiDialogHandle dialogHandle, void*) {
+     mDoAud_seStartMenu(Z2SE_SY_MENU_BACK);
+@@ -40,7 +42,14 @@ void OnDialogActionOK(ModContext* ctx, UiDialogHandle dialogHandle, void*) {
+ }
+ 
+ static void StartSeedGeneration() {
+-    if (GenerateAndWriteSeed()) {
++    // aleks2 (H37): how long a seed takes, for the hardware protocol (generation must stay off the
++    // game thread and finish in reasonable time on the console).
++    const auto started = std::chrono::steady_clock::now();
++    const bool ok = GenerateAndWriteSeed();
++    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
++        std::chrono::steady_clock::now() - started);
++    mods::log::info("seed generation {} in {} ms", ok ? "succeeded" : "failed", elapsed.count());
++    if (ok) {
+         seedGenStatus.store(SeedGenerateStatus::Success);
+     } else {
+         seedGenStatus.store(SeedGenerateStatus::Error);
+@@ -100,11 +109,29 @@ void GenerateRandomizerSeed() {
+         return;
+     }
+ 
+-    // Start generation thread
++    // Start generation thread. aleks2 (H37): kept, not detached, so shutdown can wait for it
++    // (JoinSeedGeneration): a detached thread could still be writing the seed after the mod's
++    // state was torn down. The previous one has finished by now (status is Ready only then).
++    JoinSeedGeneration();
+     seedGenStatus.store(SeedGenerateStatus::Generating);
+-    std::thread rando_gen_thread(StartSeedGeneration);
+-    rando_gen_thread.detach();
+     seedGenProgressValueTarget.store(0.f);
++    seedGenThread = std::thread(StartSeedGeneration);
++}
++
++void JoinSeedGeneration() {
++    if (!seedGenThread.joinable()) {
++        return;
++    }
++    if (seedGenStatus.load() == SeedGenerateStatus::Generating) {
++        mods::log::info("waiting for seed generation to finish before shutting down");
++    }
++    const auto started = std::chrono::steady_clock::now();
++    seedGenThread.join();
++    const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
++        std::chrono::steady_clock::now() - started);
++    if (waited.count() > 0) {
++        mods::log::info("seed generation thread joined after {} ms", waited.count());
++    }
+ }
+ 
+ void UpdateProgressBar() {
+diff --git a/src/ui/rando_seed_generation.hpp b/src/ui/rando_seed_generation.hpp
+index 5094bbe..0d8febd 100644
+--- a/src/ui/rando_seed_generation.hpp
++++ b/src/ui/rando_seed_generation.hpp
+@@ -7,6 +7,8 @@
+ namespace randomizer::ui {
+ 
+ void GenerateRandomizerSeed();
++// Waits for a seed being generated to finish (aleks2, H37); called before the mod shuts down.
++void JoinSeedGeneration();
+ void UpdateProgressBar();
+ void UpdateSeedGenerationDialog();
+ void UpdateSeedGenProgressValue(float progress);
+diff --git a/src/ui/ui.cpp b/src/ui/ui.cpp
+index 31f99c3..2aeb303 100644
+--- a/src/ui/ui.cpp
++++ b/src/ui/ui.cpp
+@@ -7,21 +7,13 @@
+ #include "rando_seed_generation.hpp"
+ #include "rando_config.hpp"
+ 
+-#include <thread>
+ 
+ namespace randomizer::ui {
+ UiStyleHandle styleHandle{};
+-static std::atomic uiRunning = false;
+-static std::thread progressBarUpdateThread;
+ 
+-// Put updating the progress bar on its own thread so it can run more than 30 times a second.
+-// Otherwise, it looks choppy at higher frame rates
+-void update_seed_gen_progress_bar() {
+-    while (uiRunning.load(std::memory_order_relaxed)) {
+-        UpdateProgressBar();
+-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+-    }
+-}
++// aleks2 (H37): the progress bar is updated from update(), on the game thread, once a frame.
++// It used to have a thread of its own calling the UI service every 16 ms, and the UI service is
++// the game's: nothing says it may be called from another thread while the game thread uses it.
+ 
+ ModResult initialize() {
+     ModResult res;
+@@ -42,20 +34,17 @@ ModResult initialize() {
+         return res;
+     }
+ 
+-    uiRunning = true;
+-    progressBarUpdateThread = std::thread(update_seed_gen_progress_bar);
+     return MOD_OK;
+ }
+ 
+ void update() {
++    UpdateProgressBar();
+     UpdateSeedGenerationDialog();
+ }
+ 
+ ModResult shutdown() {
+-    uiRunning = false;
+-    if (progressBarUpdateThread.joinable()) {
+-        progressBarUpdateThread.join();
+-    }
++    // A seed still generating must finish before the state it writes goes away.
++    JoinSeedGeneration();
+     removeMenuTab();
+     session::svc_mng.ui->unregister_styles(mod_ctx, styleHandle);
+     return MOD_OK;

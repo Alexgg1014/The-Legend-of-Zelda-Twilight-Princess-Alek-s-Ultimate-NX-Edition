@@ -1,0 +1,2975 @@
+//
+// Option Menu
+//
+
+#include "d/dolzel.h" // IWYU pragma: keep
+
+#include <os.h>
+#include "JSystem/J2DGraph/J2DAnmLoader.h"
+#include "JSystem/JKernel/JKRMemArchive.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_file_sel_warning.h"
+#include "d/d_lib.h"
+#include "d/d_menu_calibration.h"
+#include "d/d_menu_option.h"
+#include "d/d_menu_window.h"
+#include "d/d_meter2_info.h"
+#include "d/d_meter_HIO.h"
+#include "d/d_meter_haihai.h"
+#include "d/d_msg_string.h"
+#include "d/d_select_cursor.h"
+#include <types.h>
+#include "f_op/f_op_msg_mng.h"
+#include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_graphic.h"
+#include <cstring>
+
+#include "JSystem/JAudio2/JASDriverIF.h"
+
+#if TARGET_PC
+#include "dusk/game_clock.h"
+#include "dusk/interp/user_interface.h"
+#include "dusk/menu_pointer.h"
+#include "dusk/ui/touch_controls.hpp"
+#include "dusk/version.hpp"
+#endif
+
+typedef void (dMenu_Option_c::*initFunc)();
+static initFunc init[] = {
+    &dMenu_Option_c::atten_init,
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    &dMenu_Option_c::ruby_init,
+#endif
+    &dMenu_Option_c::vib_init,
+    &dMenu_Option_c::sound_init,          &dMenu_Option_c::change_init,
+    &dMenu_Option_c::confirm_open_init,   &dMenu_Option_c::confirm_move_init,
+    &dMenu_Option_c::confirm_select_init, &dMenu_Option_c::confirm_close_init,
+};
+
+typedef void (dMenu_Option_c::*processFunc)();
+static processFunc process[] = {
+    &dMenu_Option_c::atten_move,
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    &dMenu_Option_c::ruby_move,
+#endif
+    &dMenu_Option_c::vib_move,
+    &dMenu_Option_c::sound_move,          &dMenu_Option_c::change_move,
+    &dMenu_Option_c::confirm_open_move,   &dMenu_Option_c::confirm_move_move,
+    &dMenu_Option_c::confirm_select_move, &dMenu_Option_c::confirm_close_move,
+};
+
+typedef void (dMenu_Option_c::*tvProcessFunc)();
+static tvProcessFunc tv_process[] = {
+    &dMenu_Option_c::tv_open1_move,  &dMenu_Option_c::tv_open2_move,  &dMenu_Option_c::tv_move_move,
+    &dMenu_Option_c::tv_close1_move, &dMenu_Option_c::tv_close2_move,
+};
+
+typedef void (dMenu_Option_c::*calibrationFunc)();
+static calibrationFunc calibration_process[] = {
+    &dMenu_Option_c::calibration_open1_move,  &dMenu_Option_c::calibration_open2_move,
+    &dMenu_Option_c::calibration_move_move,   &dMenu_Option_c::calibration_close1_move,
+    &dMenu_Option_c::calibration_close2_move,
+};
+
+#if TARGET_PC
+static dusk::menu_pointer::TargetId option_yes_no_target(u8 index) noexcept {
+    return static_cast<dusk::menu_pointer::TargetId>(0x100 + index);
+}
+
+static u8 option_to_proc(u8 select) noexcept {
+    if (!dusk::version::isRegionJpn() && select >= 1) {
+        return static_cast<u8>(select + 1);
+    }
+    return select;
+}
+
+static u8 option_to_select(u8 proc) noexcept {
+    if (!dusk::version::isRegionJpn() && proc >= 2) {
+        return static_cast<u8>(proc - 1);
+    }
+    return proc;
+}
+
+#define OPTION_SELECT(proc_e) (option_to_select(proc_e))
+#define OPTION_PROC(select) (option_to_proc(select))
+#else
+#define OPTION_SELECT(proc_e) (proc_e)
+#define OPTION_PROC(select) (select)
+#endif
+
+dMenu_Option_c::dMenu_Option_c(JKRArchive* i_archive, STControl* i_stick) {
+    mUseFlag = 0;
+    mBarScale[0] = g_drawHIO.mOptionScreen.mBarScale[0];
+    mBarScale[1] = g_drawHIO.mOptionScreen.mBarScale[1];
+    mpArchive = NULL;
+    mpStick = i_stick;
+    mpMount = NULL;
+    mQuitStatus = 1;
+    mpCalibration = NULL;
+}
+
+dMenu_Option_c::~dMenu_Option_c() {}
+
+static const u32 dMo_soundMode[3] = {JAS_OUTPUT_MONO, JAS_OUTPUT_STEREO, JAS_OUTPUT_SURROUND};
+
+void dMenu_Option_c::_create() {
+    static const u64 text_a_tag[5] = {MULTI_CHAR('atext1_1'), MULTI_CHAR('atext1_2'), MULTI_CHAR('atext1_3'), MULTI_CHAR('atext1_4'), MULTI_CHAR('atext1_5')};
+    static const u64 text_b_tag[5] = {MULTI_CHAR('btext1_1'), MULTI_CHAR('btext1_2'), MULTI_CHAR('btext1_3'), MULTI_CHAR('btext1_4'), MULTI_CHAR('btext1_5')};
+    static const u64 l_tagName012[2] = {MULTI_CHAR('w_no_n'), MULTI_CHAR('w_yes_n')};
+    static const u64 l_tagName013[2] = {MULTI_CHAR('w_no_t'), MULTI_CHAR('w_yes_t')};
+    static const u64 l_tagName9[2] = {MULTI_CHAR('w_no_m'), MULTI_CHAR('w_yes_m')};
+    static const u64 l_tagName10[2] = {MULTI_CHAR('w_no_g'), MULTI_CHAR('w_yes_g')};
+    static const u64 l_tagName11[2] = {MULTI_CHAR('w_no_gr'), MULTI_CHAR('w_yes_gr')};
+    static const u8 l_msgNum2[2] = {8, 7};
+
+    mpFont = mDoExt_getMesgFont();
+    mpString = JKR_NEW dMsgString_c();
+    JUT_ASSERT(197, mpString != NULL);
+
+
+    mpMeterHaihai = JKR_NEW dMeterHaihai_c(3);
+    JUT_ASSERT(201, mpMeterHaihai);
+
+    field_0x3f6 = 0;
+    mpScreen = JKR_NEW J2DScreen();
+    JUT_ASSERT(205, mpScreen != NULL);
+
+    bool fg = mpScreen->setPriority("zelda_option_select_menu.blo", 0x20000, mpArchive);
+    JUT_ASSERT(210, fg != false);
+
+    mpScreen->search(MULTI_CHAR('base_a_n'))->hide();
+    mpScreen->search(MULTI_CHAR('y_set_p4'))->hide();
+    mpScreen->search(MULTI_CHAR('y_set_p3'))->hide();
+    mpScreen->search(MULTI_CHAR('y_set_p2'))->hide();
+    mpScreen->search(MULTI_CHAR('y_set_p1'))->hide();
+    mpScreen->search(MULTI_CHAR('y_set_p0'))->hide();
+    field_0x254[0] = (J2DTextBox*)mpScreen->search(MULTI_CHAR('cont_ts'));
+    field_0x254[1] = (J2DTextBox*)mpScreen->search(MULTI_CHAR('cont_t'));
+    for (int i = 0; i < 2; i++) {
+        field_0x254[i]->setFont(mDoExt_getMesgFont());
+        field_0x254[i]->setString(0x20, "");
+    }
+    mpBackScreen = JKR_NEW J2DScreen();
+    JUT_ASSERT(246, mpBackScreen != NULL);
+    fg = mpBackScreen->setPriority("zelda_option_base.blo", 0x20000, mpArchive);
+    JUT_ASSERT(251, fg != false);
+    mpBackScreen->search(MULTI_CHAR('wi_btn_n'))->hide();
+    field_0x27c = mpBackScreen->search(MULTI_CHAR('let_area'));
+
+    mpClipScreen = JKR_NEW J2DScreen();
+    JUT_ASSERT(265, mpClipScreen != NULL);
+    fg = mpClipScreen->setPriority("zelda_option_menu_text.blo", 0x20000, mpArchive);
+    JUT_ASSERT(269, fg != false);
+    dPaneClass_showNullPane(mpClipScreen);
+
+    mpClipScreen->setScissor(true);
+    mpShadowScreen = JKR_NEW J2DScreen();
+    JUT_ASSERT(274, mpShadowScreen != NULL);
+    fg = mpShadowScreen->setPriority("zelda_option_menu_shadow.blo", 0x20000, mpArchive);
+    JUT_ASSERT(278, fg != false);
+    dPaneClass_showNullPane(mpShadowScreen);
+    mpShadowScreen->search(MULTI_CHAR('mw_n_5'))->hide();
+
+    mpTVScreen = JKR_NEW J2DScreen();
+    JUT_ASSERT(287, mpTVScreen != NULL);
+    fg = mpTVScreen->setPriority("zelda_option_check.blo", 0x20000, mpArchive);
+    JUT_ASSERT(291, fg != false);
+    dPaneClass_showNullPane(mpTVScreen);
+
+    mpTVButtonAB = JKR_NEW CPaneMgr(mpTVScreen, MULTI_CHAR('g_abtn_n'), 0, NULL);
+    JUT_ASSERT(295, mpTVButtonAB != NULL);
+    
+    mpTVButtonText = JKR_NEW CPaneMgr(mpTVScreen, MULTI_CHAR('a_text_n'), 0, NULL);
+    JUT_ASSERT(298, mpTVButtonText != NULL);
+    IF_DUSK_BLOCK(dusk::version::getGameVersion() >= dusk::version::GameVersion::WiiJpn)
+    mpTVScreen->search(MULTI_CHAR('g_abtn_n'))->hide();
+    IF_DUSK_BLOCK_END
+
+    mpScreenIcon = JKR_NEW J2DScreen();
+    JUT_ASSERT(325, mpScreenIcon != NULL);
+    mpScreenIcon->setPriority("zelda_collect_soubi_do_icon_parts.blo", 0x20000, mpArchive);
+    for (int i = 0; i < 2; i++) {
+        mpButtonAB[i] = NULL;
+        mpButtonText[i] = NULL;
+    }
+    dPaneClass_showNullPane(mpScreenIcon);
+    field_0x3dc = 0;
+    field_0x3de = 0;
+    for (int i = 0; i < 5; i++) {
+        ((J2DTextBox*)(mpScreenIcon->search(text_a_tag[i])))->setFont(mDoExt_getMesgFont());
+        ((J2DTextBox*)(mpScreenIcon->search(text_b_tag[i])))->setFont(mDoExt_getMesgFont());
+
+        ((J2DTextBox*)(mpScreenIcon->search(text_a_tag[i])))->setString(0x20, "");
+        ((J2DTextBox*)(mpScreenIcon->search(text_b_tag[i])))->setString(0x20, "");
+    }
+    setAButtonString(0x40C);
+    setBButtonString(0x3F9);
+    ResTIMG* timg = (ResTIMG*)dComIfGp_getMain2DArchive()->getResource('TIMG', "tt_block8x8.bti");
+    mpBlackTex = JKR_NEW J2DPicture(timg);
+    JUT_ASSERT(402, mpBlackTex != NULL);
+    mpBlackTex->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(0, 0, 0, 0xff));
+    mpBlackTex->setAlpha(0);
+    field_0x374 = 0.0f;
+    mpWarning = JKR_NEW dFile_warning_c(mpArchive, 1);
+    JUT_ASSERT(408, mpWarning != NULL);
+    mpWarning->setFontColor(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(0xc8, 0xc8, 0xc8, 0xff));
+    mpSelectScreen = JKR_NEW J2DScreen();
+    JUT_ASSERT(412, mpSelectScreen != NULL);
+    fg = mpSelectScreen->setPriority("zelda_file_select_yes_no_window.blo", 0x1100000, mpArchive);
+    JUT_ASSERT(416, fg != false);
+    dPaneClass_showNullPane(mpSelectScreen);
+
+    void* bck = JKRGetNameResource("zelda_file_select_yes_no_window.bck", mpArchive);
+    field_0x24 = (J2DAnmTransform*)J2DAnmLoaderDataBase::load(bck);
+    field_0x28 = (J2DAnmTransform*)J2DAnmLoaderDataBase::load(bck);
+    field_0x20 = (J2DAnmTransform*)J2DAnmLoaderDataBase::load(bck);
+    field_0x24->searchUpdateMaterialID(mpSelectScreen);
+    field_0x28->searchUpdateMaterialID(mpSelectScreen);
+    field_0x20->searchUpdateMaterialID(mpSelectScreen);
+    for (int i = 0; i < 2; i++) {
+        mpYesNoSelBase_c[i] = JKR_NEW CPaneMgr(mpSelectScreen, l_tagName012[i], 0, NULL);
+        JUT_ASSERT(439, mpYesNoSelBase_c[i] != NULL);
+        mpYesNoTxt_c[i] = JKR_NEW CPaneMgr(mpSelectScreen, l_tagName013[i], 0, NULL);
+        JUT_ASSERT(441, mpYesNoTxt_c[i] != NULL);
+        J2DTextBox* yesNoTxt = (J2DTextBox*)mpYesNoTxt_c[i]->getPanePtr();
+        yesNoTxt->setFont(mDoExt_getMesgFont());
+        char message[24];
+        fopMsgM_messageGet(message, l_msgNum2[i]);
+        J2DTextBox* yesNoTxt2 = (J2DTextBox*)mpYesNoTxt_c[i]->getPanePtr();
+        yesNoTxt2->setString(0x20, message);
+    }
+    
+    void* bpk = JKRGetNameResource("zelda_file_select_yes_no_window.bpk", mpArchive);
+    JUT_ASSERT(449, bpk != NULL);
+    field_0x2c = (J2DAnmColor*)J2DAnmLoaderDataBase::load(bpk);
+    field_0x2c->searchUpdateMaterialID(mpSelectScreen);
+    field_0x3c0 = 0;
+
+    void* btk = JKRGetNameResource("zelda_file_select_yes_no_window.btk", mpArchive);
+    JUT_ASSERT(459, btk != NULL);
+    field_0x30 = (J2DAnmTextureSRTKey*)J2DAnmLoaderDataBase::load(btk);
+    field_0x30->searchUpdateMaterialID(mpSelectScreen);
+    field_0x3c4 = 0;
+
+    for (int i = 0; i < 2; i++) {
+        mpYesNoCurWaku_c[i] = JKR_NEW CPaneMgr(mpSelectScreen, l_tagName9[i], 0, NULL);
+        JUT_ASSERT(482, mpYesNoCurWaku_c[i] != NULL);
+        mpYesNoCurWakuG0_c[i] = JKR_NEW CPaneMgr(mpSelectScreen, l_tagName10[i], 0, NULL);
+        JUT_ASSERT(484, mpYesNoCurWakuG0_c[i] != NULL);
+        mpYesNoCurWakuG1_c[i] = JKR_NEW CPaneMgr(mpSelectScreen, l_tagName11[i], 0, NULL);
+        JUT_ASSERT(486, mpYesNoCurWakuG1_c[i] != NULL);
+        mpYesNoCurWaku_c[i]->getPanePtr()->setAnimation(field_0x2c);
+        mpYesNoCurWakuG0_c[i]->getPanePtr()->setAnimation(field_0x2c);
+        mpYesNoCurWakuG1_c[i]->getPanePtr()->setAnimation(field_0x2c);
+        mpYesNoCurWakuG0_c[i]->getPanePtr()->setAnimation(field_0x30);
+        mpYesNoCurWakuG1_c[i]->getPanePtr()->setAnimation(field_0x30);
+    }
+
+    field_0x3f9 = 0;
+    field_0x3fa = 0;
+    field_0x401 = 0xff;
+    field_0x402 = 0xff;
+    for (int i = 0; i < 2; i++) {
+        field_0x3fb[i] = 0;
+        field_0x3fd[i] = 0;
+        field_0x3ff[i] = 0;
+    }
+
+    field_0x403 = 0;
+    screenSet();
+    field_0x3e0 = 0;
+    field_0x3e1 = 10;
+    field_0x3e2 = 0xff;
+    field_0x3e3 = 0xc0;
+    field_0x3ef = OPTION_SELECT(PROC_ATTEN_e);
+    field_0x3f0 = 0xff;
+    field_0x3f1 = 0xff;
+    field_0x3f2 = 0;
+    field_0x3f5 = OPTION_SELECT(PROC_ATTEN_e);
+    field_0x3f3 = 5;
+    field_0x3f4 = 5;
+    field_0x334 = 0.0f;
+    field_0x330 = 0.0f;
+    field_0x338 = 1.0f;
+    field_0x3f7 = 0;
+    setZButtonString(1);
+    field_0x378 = 0.0f;
+    field_0x37c = 0.0f;
+    field_0x380 = 1.0f;
+    for (int i = 0; i < 6; i++) {
+        field_0x384[i] = 0.0f;
+        field_0x39c[i] = 0.0f;
+    }
+
+    field_0x3b8.r = 0xff;
+    field_0x3b8.g = 0xff;
+    field_0x3b8.b = 0xff;
+    field_0x3b8.a = 0xff;
+    field_0x3bc.r = 0xff;
+    field_0x3bc.g = 0xff;
+    field_0x3bc.b = 0xff;
+    field_0x3bc.a = 0xff;
+    initialize();
+    setHIO(true);
+}
+
+void dMenu_Option_c::_delete() {
+#if TARGET_PC
+    dusk::ui::set_control_override(dusk::ui::Control::Z, dusk::ui::ControlOverride::Default);
+#endif
+
+    JKR_DELETE(mpString);
+    mpString = NULL;
+
+    JKR_DELETE(mpScreen);
+    mpScreen = NULL;
+
+    JKR_DELETE(mpMeterHaihai);
+    mpMeterHaihai = NULL;
+
+    JKR_DELETE(mpBackScreen);
+    mpBackScreen = NULL;
+
+    JKR_DELETE(mpClipScreen);
+    mpClipScreen = NULL;
+
+    JKR_DELETE(mpShadowScreen);
+    mpShadowScreen = NULL;
+
+    JKR_DELETE(mpTVScreen);
+    mpTVScreen = NULL;
+
+    if (mpTVButtonAB != NULL) {
+        JKR_DELETE(mpTVButtonAB);
+        mpTVButtonAB = NULL;
+    }
+
+    if (mpTVButtonText != NULL) {
+        JKR_DELETE(mpTVButtonText);
+        mpTVButtonText = NULL;
+    }
+
+    JKR_DELETE(mpScreenIcon);
+    mpScreenIcon = NULL;
+
+    for (int i = 0; i < 2; i++) {
+        if (mpButtonAB[i] != NULL) {
+            JKR_DELETE(mpButtonAB[i]);
+            mpButtonAB[i] = NULL;
+        }
+
+        if (mpButtonText[i] != NULL) {
+            JKR_DELETE(mpButtonText[i]);
+            mpButtonText[i] = NULL;
+        }
+    }
+
+    JKR_DELETE(mpBlackTex);
+    mpBlackTex = NULL;
+
+    JKR_DELETE(mpWarning);
+    mpWarning = NULL;
+
+    JKR_DELETE(mpSelectScreen);
+    mpSelectScreen = NULL;
+
+    JKR_DELETE(field_0x24);
+    field_0x24 = NULL;
+
+    JKR_DELETE(field_0x28);
+    field_0x28 = NULL;
+
+    JKR_DELETE(field_0x20);
+    field_0x20 = NULL;
+
+    for (int i = 0; i < 2; i++) {
+        JKR_DELETE(mpYesNoSelBase_c[i]);
+        mpYesNoSelBase_c[i] = NULL;
+
+        JKR_DELETE(mpYesNoTxt_c[i]);
+        mpYesNoTxt_c[i] = NULL;
+
+        JKR_DELETE(mpYesNoCurWaku_c[i]);
+        mpYesNoCurWaku_c[i] = NULL;
+
+        JKR_DELETE(mpYesNoCurWakuG0_c[i]);
+        mpYesNoCurWakuG0_c[i] = NULL;
+
+        JKR_DELETE(mpYesNoCurWakuG1_c[i]);
+        mpYesNoCurWakuG1_c[i] = NULL;
+    }
+
+    JKR_DELETE(field_0x2c);
+    field_0x2c = NULL;
+
+    JKR_DELETE(field_0x30);
+    field_0x30 = NULL;
+
+    if (
+        isUseFlag(
+            #if DEBUG
+            0
+            #else
+            1
+            #endif
+        )
+    ) {
+        JKR_DELETE(mpStick);
+        mpStick = NULL;
+    }
+
+    JKR_DELETE(mpTitle);
+    mpTitle = NULL;
+
+    JKR_DELETE(mpDrawCursor);
+    mpDrawCursor = NULL;
+
+    for (int i = 0; i < 5; i++) {
+        JKR_DELETE(mpParent[i]);
+        mpParent[i] = NULL;
+    }
+
+    for (int i = 0; i < 5; i++) {
+        JKR_DELETE(mpHaihaiPosL[i]);
+        mpHaihaiPosL[i] = NULL;
+
+        JKR_DELETE(mpHaihaiPosR[i]);
+        mpHaihaiPosR[i] = NULL;
+    }
+
+    for (int i = 0; i < 6; i++) {
+        JKR_DELETE(mpMenuNull[i]);
+        mpMenuNull[i] = NULL;
+
+        JKR_DELETE(mpMenuPane[i]);
+        mpMenuPane[i] = NULL;
+
+        if (mpMenuPaneC[i] != NULL) {
+            JKR_DELETE(mpMenuPaneC[i]);
+            mpMenuPaneC[i] = NULL;
+        }
+
+        if (mpMenuPane2[i] != NULL) {
+            JKR_DELETE(mpMenuPane2[i]);
+            mpMenuPane2[i] = NULL;
+        }
+
+        if (mpMenuPane3[i] != NULL) {
+            JKR_DELETE(mpMenuPane3[i]);
+            mpMenuPane3[i] = NULL;
+        }
+
+        if (mpMenuPane32[i] != NULL) {
+            JKR_DELETE(mpMenuPane32[i]);
+            mpMenuPane32[i] = NULL;
+        }
+    }
+
+    for (int i = 0; i < 6; i++) {
+        for (int j = 0; j < 6; j++) {
+            if (mpMenuText[i][j] != NULL) {
+                JKR_DELETE(mpMenuText[i][j]);
+                mpMenuText[i][j] = NULL;
+            }
+        }
+    }
+
+    for (int i = 0; i < 4; i++) {
+        if (field_0x1c0[i] != NULL) {
+            JKR_DELETE(field_0x1c0[i]);
+            field_0x1c0[i] = NULL;
+        }
+    }
+
+    for (int i = 0; i < 3; i++) {
+        if (mpZButtonText[i] != NULL) {
+            JKR_DELETE(mpZButtonText[i]);
+            mpZButtonText[i] = NULL;
+        }
+    }
+
+    if (mpMount != NULL) {
+        JKRUnmountArchive(mpMount->getArchive());
+        mpMount->destroy();
+        mpMount = NULL;
+    }
+
+    if (mpArchive != NULL) {
+        JKRUnmountArchive(mpArchive);
+        mpArchive = NULL;
+    }
+
+    dComIfGp_setOptionResArchive(NULL);
+}
+
+void dMenu_Option_c::_move() {
+    mpStick->checkTrigger();
+    if (field_0x3ea != 0 && !isRumbleSupported()) {
+        field_0x3ea = 0;
+    }
+
+    if (mDoGph_gInf_c::getFader()->getStatus() == 1) {
+        if (mDoCPd_c::getTrigA(PAD_1) != 0 && field_0x3ef != OPTION_SELECT(PROC_CHANGE_MOVE_e) && field_0x3f3 == 5) {
+            if (field_0x3f4 == 5 && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_MOVE_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e) &&
+                field_0x3ef != OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e))
+            {
+                if (mDoCPd_c::getTrigStart(PAD_1) == 0 && mDoCPd_c::getTrigB(PAD_1) == 0) {
+                    if (mDoCPd_c::getTrigUp(PAD_1) == 0 && mDoCPd_c::getTrigDown(PAD_1) == 0 &&
+                        mDoCPd_c::getTrigLeft(PAD_1) == 0 && mDoCPd_c::getTrigRight(PAD_1) == 0)
+                    {
+                        field_0x3f7 = 1;
+                        field_0x3f5 = field_0x3ef;
+                        field_0x3ef = OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e);
+                        dMeter2Info_set2DVibration();
+                        (this->*init[OPTION_PROC(field_0x3ef)])();
+                        goto skip;
+                    }
+                }
+            }
+        }
+
+        if (mDoCPd_c::getTrigB(PAD_1) != 0 && field_0x3ef != OPTION_SELECT(PROC_CHANGE_MOVE_e) && field_0x3f3 == 5 &&
+            field_0x3ef != OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_MOVE_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e))
+        {
+            if (field_0x3f4 == 5 && mDoCPd_c::getTrigStart(PAD_1) == 0 &&
+                mDoCPd_c::getTrigA(PAD_1) == 0 && mDoCPd_c::getTrigUp(PAD_1) == 0 &&
+                mDoCPd_c::getTrigDown(PAD_1) == 0 && mDoCPd_c::getTrigLeft(PAD_1) == 0 &&
+                mDoCPd_c::getTrigRight(PAD_1) == 0)
+            {
+                field_0x3f7 = 0;
+                field_0x3f5 = field_0x3ef;
+                field_0x3ef = OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e);
+                dMeter2Info_set2DVibration();
+                (this->*init[OPTION_PROC(field_0x3ef)])();
+            }
+        }
+
+#if TARGET_PC
+        if (field_0x3f4 == 5 && field_0x3ef != OPTION_SELECT(PROC_CHANGE_MOVE_e) && field_0x3f3 == 5 &&
+            field_0x3ef != OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_MOVE_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e) &&
+            field_0x3ef != OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e) && pointerConfirmSelect())
+        {
+            goto skip;
+        }
+#endif
+    }
+skip:
+    u8 oldValue = field_0x3ef;
+    if (field_0x3f3 == 5 && oldValue != OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e) && oldValue != OPTION_SELECT(PROC_CONFIRM_MOVE_MOVE_e) && oldValue != OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e) && oldValue != OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e)) {
+        dpdMenuMove();
+    }
+
+    field_0x3f2 = 0;
+    if (field_0x3f1 != 0xff) {
+        if (field_0x3f0 != field_0x3f1 && field_0x3ef != field_0x3f1) {
+            field_0x3f0 = field_0x3f1;
+            field_0x3f2 = 1;
+        }
+    } else {
+        field_0x3f0 = 0xff;
+    }
+
+    (this->*process[OPTION_PROC(field_0x3ef)])();
+    IF_NOT_DUSK(mpSelectScreen->animation());
+    if (oldValue != field_0x3ef) {
+        (this->*init[OPTION_PROC(field_0x3ef)])();
+    }
+    
+    setHIO(false);
+}
+
+void dMenu_Option_c::_draw() {
+    if (mpArchive != NULL) {
+#if TARGET_PC
+        if (dusk::game_clock::is_presentation_frame()) {
+            presentAnims();
+        }
+#endif
+        J2DGrafContext* ctx = dComIfGp_getCurrentGrafPort();
+        #if (PLATFORM_WII || PLATFORM_SHIELD)
+        if (mpCalibration != NULL && field_0x3f4 != 5 && field_0x3f4 != 0 && field_0x3f4 != 4) {
+            mpCalibration->draw();
+            return;
+        }
+        #endif
+
+        mpBlackTex->setAlpha(0xff);
+
+#if TARGET_PC
+        mpBlackTex->draw(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(), mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(), 0, 0, 0);
+#else
+        mpBlackTex->draw(0.0f, 0.0f, FB_WIDTH, FB_HEIGHT, 0, 0, 0);
+#endif
+
+        mpBackScreen->draw(0.0f, 0.0f, ctx);
+        f32 alpha = (f32)g_drawHIO.mOptionScreen.mBackgroundAlpha * (f32)field_0x374;
+        mpBlackTex->setAlpha(alpha);
+
+#if TARGET_PC
+        mpBlackTex->draw(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(), mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(), 0, 0, 0);
+#else
+        mpBlackTex->draw(0.0f, 0.0f, FB_WIDTH, FB_HEIGHT, 0, 0, 0);
+#endif
+
+        mpScreen->draw(0.0f, 0.0f, ctx);
+        mpClipScreen->draw(0.0f, 0.0f, ctx);
+#if TARGET_PC
+        ctx->scissor(0.0f, 0.0f, mDoGph_gInf_c::getWidth(), mDoGph_gInf_c::getHeight());
+        ctx->setScissor();
+#endif
+        mpShadowScreen->draw(0.0f, 0.0f, ctx);
+        if (field_0x3f3 == 1 || field_0x3f3 == 2 || field_0x3f3 == 3) {
+            mpTVScreen->draw(0.0f, 0.0f, ctx);
+        }
+        if (field_0x3f3 == 5) {
+            mpDrawCursor->draw();
+        }
+        drawHaihai();
+        mpWarning->drawSelf();
+        mpSelectScreen->draw(0.0f, 0.0f, ctx);
+        if (field_0x3f3 != 1 && field_0x3f3 != 2 && field_0x3f3 != 3) {
+            mpScreenIcon->draw(0.0f, 0.0f, ctx);
+        }
+    }
+}
+
+void dMenu_Option_c::drawHaihai() {
+    CPaneMgr pane;
+    u8 selectType = getSelectType();
+    field_0x3f6 = 0;
+    field_0x3f6 |= 1;
+    field_0x3f6 |= 4;
+    if (selectType < OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e) && field_0x3f6 != 0 && field_0x3f3 == 5 && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e) &&
+        field_0x3ef != OPTION_SELECT(PROC_CONFIRM_MOVE_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e) && field_0x3ef != OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e))
+    {
+        mpMeterHaihai->_execute(0);
+        Vec haihaiPosL =
+            mpHaihaiPosL[selectType]->getGlobalVtxCenter(mpHaihaiPosL[selectType]->mPane, false, 0);
+        Vec haihaiPosR =
+            mpHaihaiPosR[selectType]->getGlobalVtxCenter(mpHaihaiPosR[selectType]->mPane, false, 0);
+        haihaiPosL.x += g_drawHIO.mOptionScreen.mArrowOffsetX_4x3;
+        haihaiPosR.x -= g_drawHIO.mOptionScreen.mArrowOffsetX_4x3;
+
+        f32 haihaiX = haihaiPosR.x - haihaiPosL.x;
+        f32 haihaiY = haihaiPosR.y - haihaiPosL.y;
+        mpMeterHaihai->drawHaihai(field_0x3f6, haihaiPosL.x + haihaiX / 2 + -5.0f + 4.3f,
+                                  haihaiPosL.y + haihaiY / 2 + -1.0f, haihaiX, haihaiY);
+        field_0x3f6 = 0;
+    }
+}
+
+bool dMenu_Option_c::isSync() {
+    if (mpMount != NULL && mpMount->sync() == false) {
+        return 0;
+    }
+    return 1;
+}
+
+bool dMenu_Option_c::checkLeftTrigger() {
+    return mpStick->checkLeftTrigger();
+}
+
+bool dMenu_Option_c::checkRightTrigger() {
+    return mpStick->checkRightTrigger();
+}
+
+void dMenu_Option_c::setAnimation() {
+#if TARGET_PC
+    dusk::vdt::present_looping(field_0x3c0, field_0x2c, 2.0f);
+    dusk::vdt::present_looping(field_0x3c4, field_0x30, 2.0f);
+#else
+    s16 frameMax;
+
+    field_0x3c0 += 2;
+    frameMax = field_0x2c->getFrameMax();
+    if (field_0x3c0 >= frameMax) {
+        field_0x3c0 = field_0x3c0 - frameMax;
+    }
+    field_0x2c->setFrame(field_0x3c0);
+
+    field_0x3c4 += 2;
+    frameMax = field_0x30->getFrameMax();
+    if (field_0x3c4 >= frameMax) {
+        field_0x3c4 = field_0x3c4 - frameMax;
+    }
+    field_0x30->setFrame(field_0x3c4);
+#endif
+}
+
+bool dMenu_Option_c::_open() {
+    if (!mpMount) {
+        mpMount = mDoDvdThd_mountArchive_c::create("/res/Layout/optres.arc", 0, NULL);
+    }
+    if (mpMount->sync() != 0) {
+        if (!dComIfGp_getOptionResArchive()) {
+            dComIfGp_setOptionResArchive(mpMount->getArchive());
+            mpArchive = dComIfGp_getOptionResArchive();
+            JKR_DELETE(mpMount);
+            mpMount = NULL;
+            _create();
+        }
+    } else {
+        return 0;
+    }
+
+    s16 openFrame = g_drawHIO.mOptionScreen.mOpenFrames;
+    s16 closeFrame = g_drawHIO.mOptionScreen.mCloseFrames;
+    mFrame = openFrame;
+    setHIO(false);
+    if (mFrame >= openFrame) {
+        mFrame = closeFrame;
+        mQuitStatus = 2;
+        field_0x3ef = 0;
+        atten_init();
+        for (int i = 0; i < 5; i++) {
+            f32 scale = field_0x380;
+            mpParent[i]->scale(scale, scale);
+            mpParent[i]->setAlphaRate(1.0f);
+        }
+        setCursorPos(getSelectType());
+        cursorAnime(1.0f);
+        mpDrawCursor->onPlayAnime(0);
+        return 1;
+    } else {
+        f32 div = (f32)mFrame / (f32)openFrame;
+        for (int i = 0; i < 5; i++) {
+            f32 scale = div * field_0x380;
+            mpParent[i]->scale(scale, scale);
+            mpParent[i]->setAlphaRate(div);
+        }
+        setCursorPos(getSelectType());
+        cursorAnime(div);
+        return 0;
+    }
+}
+
+bool dMenu_Option_c::_close() {
+    s16 closeFrame = g_drawHIO.mOptionScreen.mCloseFrames;
+    mFrame = 0;
+    setHIO(false);
+    if (mFrame <= 0) {
+        mFrame = 0;
+        mQuitStatus = 0;
+        f32 scale = 0.0f;
+        for (int i = 0; i < 5; i++) {
+            mpParent[i]->scale(scale, scale);
+            mpParent[i]->setAlphaRate(0.0f);
+        }
+        setCursorPos(getSelectType());
+        cursorAnime(0.0f);
+        return 1;
+    } else {
+        f32 div = (f32)mFrame / (f32)closeFrame;
+        for (int i = 0; i < 5; i++) {
+            f32 scale = div * field_0x380;
+            mpParent[i]->scale(scale, scale);
+            mpParent[i]->setAlphaRate(div);
+        }
+        setCursorPos(getSelectType());
+        cursorAnime(div);
+        return 0;
+    }
+}
+
+void dMenu_Option_c::atten_init() {
+    mpDrawCursor->setAlphaRate(1.0f);
+    setCursorPos(0);
+    setAButtonString(0x40C);
+    setBButtonString(0x3F9);
+}
+
+void dMenu_Option_c::atten_move() {
+    bool downTrigger = mpStick->checkDownTrigger();
+    bool leftTrigger = checkLeftTrigger();
+    bool rightTrigger = checkRightTrigger();
+
+    if (field_0x3f3 != 5) {
+        (this->*tv_process[field_0x3f3])();
+    } else if (downTrigger) {
+        field_0x3ef = 1;
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else if (leftTrigger) {
+        if (field_0x3e4 == 0) {
+            field_0x3e4 = 1;
+            field_0x3da = -5;
+        } else if (field_0x3e4 == 1) {
+            field_0x3e4 = 0;
+            field_0x3da = -5;
+        }
+        field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+        field_0x3f5 = OPTION_SELECT(PROC_ATTEN_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else if (rightTrigger) {
+        if (field_0x3e4 == 0) {
+            field_0x3e4 = 1;
+            field_0x3da = 5;
+        } else if (field_0x3e4 == 1) {
+            field_0x3e4 = 0;
+            field_0x3da = 5;
+        }
+        field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+        field_0x3f5 = OPTION_SELECT(PROC_ATTEN_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else {
+        changeTVCheck();
+    }
+}
+
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+void dMenu_Option_c::ruby_init() {
+#if TARGET_PC
+    if (!dusk::version::isRegionJpn()) {
+        vib_init();
+        return;
+    }
+#endif
+
+    mpDrawCursor->setAlphaRate(1.0f);
+    setCursorPos(1);
+    setAButtonString(0x40c);
+    setBButtonString(0x3f9);
+}
+
+void dMenu_Option_c::ruby_move() {
+#if TARGET_PC
+    if (!dusk::version::isRegionJpn()) {
+        vib_move();
+        return;
+    }
+#endif
+
+    bool upTrigger = mpStick->checkUpTrigger();
+    bool downTrigger= mpStick->checkDownTrigger();
+    bool leftTrigger = checkLeftTrigger();
+    bool rightTrigger = checkRightTrigger();
+
+    if (field_0x3f3 != 5) {
+        (this->*tv_process[field_0x3f3])();
+    } else if (upTrigger) {
+        field_0x3ef = OPTION_SELECT(PROC_ATTEN_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else if (downTrigger) {
+        field_0x3ef = OPTION_SELECT(PROC_VIB_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else if (leftTrigger) {
+        if (field_0x3e5_JPN == 0) {
+            field_0x3e5_JPN = 1;
+            field_0x3da = -5;
+        } else if (field_0x3e5_JPN == 1) {
+            field_0x3e5_JPN = 0;
+            field_0x3da = -5;
+        }
+        field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+        field_0x3f5 = OPTION_SELECT(PROC_RUBY_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else if (rightTrigger) {
+        if (field_0x3e5_JPN == 0) {
+            field_0x3e5_JPN = 1;
+            field_0x3da = 5;
+        } else if (field_0x3e5_JPN == 1) {
+            field_0x3e5_JPN = 0;
+            field_0x3da = 5;
+        }
+        field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+        field_0x3f5 = OPTION_SELECT(PROC_RUBY_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else {
+        changeTVCheck();
+    }
+}
+#endif
+
+void dMenu_Option_c::vib_init() {
+    mpDrawCursor->setAlphaRate(1.0f);
+    setCursorPos(OPTION_SELECT(PROC_VIB_e));
+    setAButtonString(0x40C);
+    setBButtonString(0x3F9);
+}
+
+void dMenu_Option_c::vib_move() {
+    bool upTrigger = mpStick->checkUpTrigger();
+    IF_NOT_DUSK(bool downTrigger =) mpStick->checkDownTrigger();
+    bool leftTrigger = checkLeftTrigger();
+    bool rightTrigger = checkRightTrigger();
+
+    if (field_0x3f3 != 5) {
+        (this->*tv_process[field_0x3f3])();
+    } else if (upTrigger) {
+#if TARGET_PC
+        field_0x3ef = OPTION_SELECT(dusk::version::isRegionJpn() ? PROC_RUBY_e : PROC_ATTEN_e);
+#elif VERSION == VERSION_GCN_JPN
+        field_0x3ef = PROC_RUBY_e;
+#else
+        field_0x3ef = PROC_ATTEN_e;
+#endif
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    }
+#ifndef TARGET_PC
+    else if (downTrigger) {
+        field_0x3ef = OPTION_SELECT(PROC_SOUND_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } 
+#endif
+    else if (leftTrigger) {
+        if (isRumbleSupported()) {
+            if (field_0x3ea == 0) {
+                field_0x3ea = 1;
+                mDoCPd_c::startMotorWave(0, &field_0x3e0, JUTGamePad::CRumble::VAL_0, 0x3c);
+                field_0x3da = -5;
+            } else if (field_0x3ea == 1) {
+                field_0x3ea = 0;
+                field_0x3da = -5;
+            }
+            field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+            field_0x3f5 = OPTION_SELECT(PROC_VIB_e);
+            Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f,
+                                     0);
+        }
+    } else if (rightTrigger) {
+        if (isRumbleSupported()) {
+            if (field_0x3ea == 0) {
+                field_0x3ea = 1;
+                mDoCPd_c::startMotorWave(0, &field_0x3e0, JUTGamePad::CRumble::VAL_0, 0x3c);
+                field_0x3da = 5;
+            } else if (field_0x3ea == 1) {
+                field_0x3ea = 0;
+                field_0x3da = 5;
+            }
+            field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+            field_0x3f5 = OPTION_SELECT(PROC_VIB_e);
+            Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f,
+                                     0);
+        }
+    } else {
+        changeTVCheck();
+    }
+}
+
+void dMenu_Option_c::sound_init() {
+    mpDrawCursor->setAlphaRate(1.0f);
+    setCursorPos(OPTION_SELECT(PROC_SOUND_e));
+    setAButtonString(0x40C);
+    setBButtonString(0x3F9);
+}
+
+void dMenu_Option_c::sound_move() {
+    bool upTrigger = mpStick->checkUpTrigger();
+    mpStick->checkDownTrigger();
+    bool leftTrigger = checkLeftTrigger();
+    bool rightTrigger = checkRightTrigger();
+
+    if (field_0x3f3 != 5) {
+        (this->*tv_process[field_0x3f3])();
+    } else if (upTrigger) {
+        field_0x3ef = OPTION_SELECT(PROC_VIB_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else if (leftTrigger) {
+        if (field_0x3e9 == 2) {
+            field_0x3e9 = 0;
+        } else {
+            field_0x3e9++;
+        }
+        field_0x3da = -5;
+        switch (field_0x3e9) {
+        case 0:
+            Z2GetAudioMgr()->seStart(Z2SE_SY_SOUND_MODE_MONO, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f,
+                                     0);
+            break;
+        case 1:
+            Z2GetAudioMgr()->seStart(Z2SE_SY_SOUND_MODE_STEREO, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            break;
+        case 2:
+            Z2GetAudioMgr()->seStart(Z2SE_SY_SOUND_MODE_SURROUND, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            break;
+        }
+        mDoAud_setOutputMode(dMo_soundMode[field_0x3e9]);
+        setSoundMode(dMo_soundMode[field_0x3e9]);
+        field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+        field_0x3f5 = OPTION_SELECT(PROC_SOUND_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else if (rightTrigger) {
+        if (field_0x3e9 == 0) {
+            field_0x3e9 = 2;
+        } else {
+            field_0x3e9--;
+        }
+        field_0x3da = 5;
+        switch (field_0x3e9) {
+        case 0:
+            Z2GetAudioMgr()->seStart(Z2SE_SY_SOUND_MODE_MONO, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f,
+                                     0);
+            break;
+        case 1:
+            Z2GetAudioMgr()->seStart(Z2SE_SY_SOUND_MODE_STEREO, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            break;
+        case 2:
+            Z2GetAudioMgr()->seStart(Z2SE_SY_SOUND_MODE_SURROUND, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            break;
+        }
+        mDoAud_setOutputMode(dMo_soundMode[field_0x3e9]);
+        setSoundMode(dMo_soundMode[field_0x3e9]);
+        field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+        field_0x3f5 = OPTION_SELECT(PROC_SOUND_e);
+        Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else {
+        changeTVCheck();
+    }
+}
+
+void dMenu_Option_c::change_init() {
+    setAButtonString(0x40C);
+    setBButtonString(0x3F9);
+}
+
+void dMenu_Option_c::change_move() {
+#if !TARGET_PC
+    f32 x = 0.0f;
+
+    if (field_0x3da > 0) {
+        field_0x3da--;
+    } else if (field_0x3da < 0) {
+        field_0x3da++;
+    }
+    u8 index;
+#endif
+    switch (OPTION_PROC(field_0x3f5)) {
+    case PROC_ATTEN_e:
+        IF_NOT_DUSK(index = field_0x3f5);
+        if (field_0x3da == 0) {
+            setAttenString();
+        }
+        break;
+    case PROC_RUBY_e:
+        IF_NOT_DUSK(index = field_0x3f5);
+        if (field_0x3da == 0) {
+            IF_DUSK_BLOCK(dusk::version::isRegionJpn())
+            setRubyString();
+            IF_DUSK_BLOCK_END
+        }
+        break;
+    case PROC_VIB_e:
+        IF_NOT_DUSK(index = field_0x3f5);
+        if (field_0x3da == 0) {
+            setVibString();
+        }
+        break;
+    case PROC_SOUND_e:
+        IF_NOT_DUSK(index = field_0x3f5);
+        if (field_0x3da == 0) {
+            setSoundString();
+        }
+        break;
+    }
+#if !TARGET_PC
+    if (field_0x3da > 0) {
+        f32 initPosX = (5 - field_0x3da) / 5.0f;
+        if (mpMenuText[index][3] != NULL) {
+            x = mpMenuText[index][3]->getInitPosX() - mpMenuText[index][0]->getInitPosX();
+        }
+        x *= initPosX;
+    } else if (field_0x3da < 0) {
+        f32 initPosX = (field_0x3da + 5) / 5.0f;
+        if (mpMenuText[index][5] != NULL) {
+            x = mpMenuText[index][5]->getInitPosX() - mpMenuText[index][0]->getInitPosX();
+        }
+        x *= initPosX;
+    }
+    for (int i = 0; i < 6; i++) {
+        if (mpMenuText[index][i] != NULL) {
+            mpMenuText[index][i]->show();
+            mpMenuText[index][i]->paneTrans(x + field_0x3b4, 0.0f);
+        }
+    }
+#endif
+    if (field_0x3da == 0) {
+        for (int i = 0; i < 6; i++) {
+            for (int j = 2; j < 6; j++) {
+                CPaneMgr* menuText = mpMenuText[i][j];
+                if (menuText != NULL) {
+                    menuText->hide();
+                }
+            }
+        }
+        field_0x3ef = field_0x3f5;
+    }
+}
+
+void dMenu_Option_c::confirm_open_init() {
+    if (field_0x3f7 == 1) {
+        mpWarning->setText(0x55F);
+    } else {
+        mpWarning->setText(0x560);
+    }
+    mpWarning->openInit();
+    yesnoMenuMoveAnmInitSet(0x473, 0x47D);
+    field_0x403 = getSelectType();
+    setSelectColor(field_0x403, true);
+    changeBarColor(true);
+    setAButtonString(0);
+    setBButtonString(0);
+    Z2GetAudioMgr()->seStart(Z2SE_SY_EXP_WIN_OPEN, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+}
+
+void dMenu_Option_c::confirm_open_move() {
+    u32 status = mpWarning->getStatus();
+    bool yesNoMenuMove = yesnoMenuMoveAnm();
+
+#if !TARGET_PC
+    if (field_0x374 != 1.0f) {
+        cLib_addCalc2(&field_0x374, 1.0f, 0.4f, 0.5f);
+        if (fabsf(field_0x374 - 1.0f) < 0.1f) {
+            field_0x374 = 1.0f;
+        }
+    }
+#endif
+    if (status == 1 && yesNoMenuMove == 1 && field_0x374 == 1.0f) {
+        yesnoCursorShow();
+        field_0x3ef = OPTION_SELECT(PROC_CONFIRM_MOVE_MOVE_e);
+    }
+    mpWarning->_move();
+    IF_NOT_DUSK(setAnimation());
+}
+
+void dMenu_Option_c::confirm_move_init() {
+    setAButtonString(0x40C);
+    setBButtonString(0x3F9);
+}
+
+void dMenu_Option_c::confirm_move_move() {
+    bool leftTrigger = checkLeftTrigger();
+    bool rightTrigger = checkRightTrigger();
+
+#if TARGET_PC
+    dusk::menu_pointer::begin_context(dusk::menu_pointer::Context::Options);
+    for (u8 i = 0; i < 2; ++i) {
+        if (!dusk::menu_pointer::hit_pane(mpYesNoSelBase_c[i], 8.0f)) {
+            continue;
+        }
+        dusk::menu_pointer::set_hover_target(option_yes_no_target(i));
+        const bool clicked = dusk::menu_pointer::consume_click();
+        if (field_0x3f9 != i) {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CURSOR_COMMON, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            field_0x3fa = field_0x3f9;
+            field_0x3f9 = i;
+            if (clicked) {
+                yesNoSelectStart();
+                field_0x3ef = OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e);
+                dMeter2Info_set2DVibrationM();
+                mpWarning->_move();
+                return;
+            }
+            yesnoSelectAnmSet();
+            field_0x3ef = OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e);
+            mpWarning->_move();
+            return;
+        }
+        if (clicked) {
+            yesNoSelectStart();
+            field_0x3ef = OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e);
+            dMeter2Info_set2DVibrationM();
+            mpWarning->_move();
+            return;
+        }
+    }
+#endif
+
+    if (mDoCPd_c::getTrigA(PAD_1) != 0) {
+        yesNoSelectStart();
+        field_0x3ef = OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e);
+        dMeter2Info_set2DVibrationM();
+    } else if (mDoCPd_c::getTrigB(PAD_1) != 0) {
+        field_0x3f9 = 0;
+        yesnoCancelAnmSet();
+        field_0x3ef = OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e);
+        dMeter2Info_set2DVibrationM();
+    } else if (rightTrigger != 0) {
+        if (field_0x3f9 != 0) {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CURSOR_COMMON, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            field_0x3fa = field_0x3f9;
+            field_0x3f9 = 0;
+            yesnoSelectAnmSet();
+            field_0x3ef = OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e);
+        }
+    } else if (leftTrigger != 0) {
+        if (field_0x3f9 != 1) {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CURSOR_COMMON, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            field_0x3fa = field_0x3f9;
+            field_0x3f9 = 1;
+            yesnoSelectAnmSet();
+            field_0x3ef = OPTION_SELECT(PROC_CONFIRM_SELECT_MOVE_e);
+        }
+    }
+    mpWarning->_move();
+    IF_NOT_DUSK(setAnimation());
+}
+
+void dMenu_Option_c::confirm_select_init() {
+}
+
+void dMenu_Option_c::confirm_select_move() {
+#if TARGET_PC
+    dusk::menu_pointer::begin_context(dusk::menu_pointer::Context::Options);
+    if (field_0x3f9 != 0xff &&
+        dusk::menu_pointer::hit_pane(mpYesNoSelBase_c[field_0x3f9], 8.0f))
+    {
+        const dusk::menu_pointer::TargetId target = option_yes_no_target(field_0x3f9);
+        dusk::menu_pointer::set_hover_target(target);
+        if (dusk::menu_pointer::consume_click()) {
+            dusk::menu_pointer::defer_activation(dusk::menu_pointer::Context::Options, target);
+        }
+    }
+#endif
+    u8 selectMoveAnm = yesnoSelectMoveAnm();
+    u8 wakuAlphaAnm = yesnoWakuAlpahAnm(field_0x3fa);
+
+    if (selectMoveAnm == 1 && wakuAlphaAnm == 1) {
+        yesnoCursorShow();
+#if TARGET_PC
+        if (field_0x3f9 != 0xff &&
+            dusk::menu_pointer::consume_deferred_activation(
+                dusk::menu_pointer::Context::Options, option_yes_no_target(field_0x3f9)))
+        {
+            yesNoSelectStart();
+            field_0x3ef = OPTION_SELECT(PROC_CONFIRM_CLOSE_MOVE_e);
+            dMeter2Info_set2DVibrationM();
+            mpWarning->_move();
+            return;
+        }
+#endif
+        field_0x3ef = OPTION_SELECT(PROC_CONFIRM_MOVE_MOVE_e);
+    }
+    mpWarning->_move();
+    IF_NOT_DUSK(setAnimation());
+}
+
+void dMenu_Option_c::confirm_close_init() {
+    mpWarning->closeInit();
+    setSelectColor(field_0x403, false);
+    changeBarColor(false);
+    setAButtonString(0);
+    setBButtonString(0);
+    Z2GetAudioMgr()->seStart(Z2SE_SY_EXP_WIN_CLOSE, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+}
+
+void dMenu_Option_c::confirm_close_move() {
+    u32 status = mpWarning->getStatus();
+    yesnoMenuMoveAnm();
+#if !TARGET_PC
+    if (field_0x374 != 0.0f) {
+        cLib_addCalc2(&field_0x374, 0.0f, 0.4f, 0.5);
+        if (fabsf(field_0x374) < 0.1f) {
+            field_0x374 = 0.0f;
+        }
+    }
+#endif
+    if (status == 1 && status == 1 && field_0x374 == 0.0f) {
+        if (field_0x3f7 == 1) {
+            if (field_0x3f9 == 1) {
+                mQuitStatus = 3;
+                dComIfGs_setOptAttentionType(field_0x3e4);
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+                if (IF_DUSK(dusk::version::isRegionJpn() &&) field_0x3e5_JPN == 0) {
+                    dComIfGs_setOptRuby(1);
+                } else {
+                    dComIfGs_setOptRuby(0);
+                }
+#endif
+                if (isRumbleSupported()) {
+                    dComIfGs_setOptVibration(field_0x3ea);
+                }
+                dComIfGs_setOptSound(field_0x3e9);
+                dComIfGp_setNowVibration(field_0x3ea);
+                dComIfGs_setOptCameraControl(field_0x3e5);
+                mpDrawCursor->offPlayAnime(0);
+            } else {
+                mpDrawCursor->setParam(1.01f, 0.85f, 0.02f, 0.5f, 0.5f);
+                field_0x3ef = field_0x3f5;
+            }
+        } else if (field_0x3f9 == 1) {
+            mQuitStatus = 3;
+            if (field_0x3e9 != dComIfGs_getOptSound()) {
+                field_0x3e9 = dComIfGs_getOptSound();
+                Z2GetAudioMgr()->setOutputMode(dMo_soundMode[field_0x3e9]);
+                setSoundMode(dMo_soundMode[field_0x3e9]);
+            }
+            mpDrawCursor->offPlayAnime(0);
+        } else {
+            mpDrawCursor->setParam(1.01f, 0.85f, 0.02f, 0.5f, 0.5f);
+            field_0x3ef = field_0x3f5;
+        }
+    }
+    mpWarning->_move();
+    IF_NOT_DUSK(setAnimation());
+}
+
+void dMenu_Option_c::tv_open1_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 0) {
+        dMw_c::dMw_fade_in();
+        field_0x330 = 0.0f;
+        field_0x3f3 = 1;
+        setAButtonString(0);
+        setBButtonString(0x3F9);
+        setCursorPos(getSelectType());
+    }
+}
+
+void dMenu_Option_c::tv_open2_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 1) {
+        field_0x3f3 = 2;
+    }
+}
+
+void dMenu_Option_c::tv_move_move() {
+    if (mDoCPd_c::getTrigZ(PAD_1) != 0 || mDoCPd_c::getTrigA(PAD_1) != 0) {
+        Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_BACK, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        field_0x3f3 = 3;
+        setAButtonString(0x40C);
+        setBButtonString(0x3F9);
+        dMw_c::dMw_fade_out();
+        dMeter2Info_set2DVibration();
+    }
+}
+
+void dMenu_Option_c::tv_close1_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 0) {
+        dMw_c::dMw_fade_in();
+        field_0x3f3 = 4;
+        setZButtonString(1);
+        setCursorPos(getSelectType());
+    }
+}
+
+void dMenu_Option_c::tv_close2_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 1) {
+        field_0x3f3 = 5;
+    }
+}
+
+void dMenu_Option_c::calibration_open1_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 0) {
+        dMw_c::dMw_fade_in();
+        field_0x3f4 = 1;
+    }
+}
+
+void dMenu_Option_c::calibration_open2_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 1) {
+        field_0x3f4 = 2;
+    }
+}
+
+void dMenu_Option_c::calibration_move_move() {
+    if (mpCalibration->mStatus == 0) {
+        dMw_c::dMw_fade_out();
+        field_0x3f4 = 3;
+    } else if (mpCalibration->mStatus == 1) {
+        mpCalibration->_move();
+    }
+}
+
+void dMenu_Option_c::calibration_close1_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 0) {
+        dMw_c::dMw_fade_in();
+        field_0x3f4 = 4;
+    }
+}
+
+void dMenu_Option_c::calibration_close2_move() {
+    if (mDoGph_gInf_c::getFader()->getStatus() == 1) {
+        field_0x3f4 = 5;
+    }
+}
+
+void dMenu_Option_c::menuVisible() {
+    for (int i = 0; i < 6; i++) {
+        if (i < OPTION_SELECT(DUSK_IF_ELSE(PROC_SOUND_e, PROC_CHANGE_MOVE_e))) {
+            menuShow(i);
+        } else {
+            menuHide(i);
+        }
+    }
+}
+
+void dMenu_Option_c::menuShow(int index) {
+    mpMenuNull[index]->show();
+    mpMenuPane[index]->show();
+    if (mpMenuPaneC[index] != NULL) {
+        mpMenuPaneC[index]->show();
+    }
+    if (mpMenuPane2[index] != NULL) {
+        mpMenuPane2[index]->show();
+    }
+    if (mpMenuPane3[index] != NULL) {
+        mpMenuPane3[index]->show();
+    }
+    for (int i = 0; i < 2; i++) {
+        if (mpMenuText[index][i] != NULL) {
+            mpMenuText[index][i]->show();
+        }
+    }
+}
+
+void dMenu_Option_c::menuHide(int index) {
+    mpMenuNull[index]->hide();
+    mpMenuPane[index]->hide();
+    if (mpMenuPaneC[index] != NULL) {
+        mpMenuPaneC[index]->hide();
+    }
+    if (mpMenuPane2[index] != NULL) {
+        mpMenuPane2[index]->hide();
+    }
+    if (mpMenuPane3[index] != NULL) {
+        mpMenuPane3[index]->hide();
+    }
+    for (int i = 0; i < 2; i++) {
+        if (mpMenuText[index][i] != NULL) {
+            mpMenuText[index][i]->hide();
+        }
+    }
+}
+
+void dMenu_Option_c::screenSet() {
+    static const u64 tag_frame[6] = {
+        MULTI_CHAR('flame_00'), MULTI_CHAR('flame_01'), MULTI_CHAR('flame_02'), MULTI_CHAR('flame_03'), MULTI_CHAR('flame_04'), MULTI_CHAR('flame_05'),
+    };
+
+#if TARGET_PC
+    static const u64 tag_menu0_jpn[6] = {
+        MULTI_CHAR('menu_t0'), MULTI_CHAR('menu_t1'), MULTI_CHAR('menu_t2'), MULTI_CHAR('menu_t3'), MULTI_CHAR('menu_t4'), MULTI_CHAR('menu_t5'),
+    };
+
+    static const u64 tag_menu0[6] = {
+        MULTI_CHAR('fenu_t0'), MULTI_CHAR('fenu_t1'), MULTI_CHAR('fenu_t2'), MULTI_CHAR('fenu_t3'), MULTI_CHAR('fenu_t4'), MULTI_CHAR('fenu_t5'),
+    };
+#elif VERSION == VERSION_GCN_JPN
+    static const u64 tag_menu0[6] = {
+        MULTI_CHAR('menu_t0'), MULTI_CHAR('menu_t1'), MULTI_CHAR('menu_t2'), MULTI_CHAR('menu_t3'), MULTI_CHAR('menu_t4'), MULTI_CHAR('menu_t5'),
+    };
+#else
+    static const u64 tag_menu0[6] = {
+        MULTI_CHAR('fenu_t0'), MULTI_CHAR('fenu_t1'), MULTI_CHAR('fenu_t2'), MULTI_CHAR('fenu_t3'), MULTI_CHAR('fenu_t4'), MULTI_CHAR('fenu_t5'),
+    };
+#endif
+
+    static const u64 let_n[6] = {
+        MULTI_CHAR('let_00_n'), MULTI_CHAR('let_01_n'), MULTI_CHAR('let_02_n'), MULTI_CHAR('let_03_n'), MULTI_CHAR('let_04_n'), MULTI_CHAR('let_05_n'),
+    };
+    static const u64 let2_n[6] = {
+        MULTI_CHAR('let_00_n'), MULTI_CHAR('let_01_n'), MULTI_CHAR('let_02_n'), MULTI_CHAR('let_03_n'), MULTI_CHAR('let_04_n'),
+    };
+    static const u64 menu_n[6] = {
+        MULTI_CHAR('menu_n0'), MULTI_CHAR('menu_n1'), MULTI_CHAR('menu_n2'), MULTI_CHAR('menu_n3'), MULTI_CHAR('menu_n4'), MULTI_CHAR('menu_n5'),
+    };
+    static const u64 menu2_n[6] = {
+        MULTI_CHAR('mw_n_0'), MULTI_CHAR('mw_n_1'), MULTI_CHAR('mw_n_2'), MULTI_CHAR('mw_n_3'), MULTI_CHAR('mw_n_4'),
+    };
+    static const u64 al0_n[6] = {
+        MULTI_CHAR('s_grr_00'), MULTI_CHAR('s_grr_01'), MULTI_CHAR('s_grr_02'), MULTI_CHAR('s_grr_03'), MULTI_CHAR('s_grr_04'), MULTI_CHAR('s_grr_05'),
+    };
+    static const u64 al1_n[6] = {
+        MULTI_CHAR('c_grr_00'), MULTI_CHAR('c_grr_01'), MULTI_CHAR('c_grr_02'), MULTI_CHAR('c_grr_03'), MULTI_CHAR('c_grr_04'), MULTI_CHAR('c_grr_05'),
+    };
+    static const u64 al2_n[6] = {
+        MULTI_CHAR('s_grl_00'), MULTI_CHAR('s_grl_01'), MULTI_CHAR('s_grl_02'), MULTI_CHAR('s_grl_03'), MULTI_CHAR('s_grl_04'), MULTI_CHAR('s_grl_05'),
+    };
+    static const u64 al3_n[6] = {
+        MULTI_CHAR('c_grl_00'), MULTI_CHAR('c_grl_01'), MULTI_CHAR('c_grl_02'), MULTI_CHAR('c_grl_03'), MULTI_CHAR('c_grl_04'), MULTI_CHAR('c_grl_05'),
+    };
+    static const u64 haihail_n[5] = {
+        MULTI_CHAR('y_set_l0'), MULTI_CHAR('y_set_l1'), MULTI_CHAR('y_set_l2'), MULTI_CHAR('y_set_l3'), MULTI_CHAR('y_set_l4'),
+    };
+    static const u64 haihair_n[5] = {
+        MULTI_CHAR('y_set_r0'), MULTI_CHAR('y_set_r1'), MULTI_CHAR('y_set_r2'), MULTI_CHAR('y_set_r3'), MULTI_CHAR('y_set_r4'),
+    };
+    static const u64 menu3_n[6] = {
+        MULTI_CHAR('menuapn0'), MULTI_CHAR('menuapn1'), MULTI_CHAR('menuapn2'), MULTI_CHAR('menuapn3'), MULTI_CHAR('menuapn4'),
+    };
+    static const u64 tv_btnA[5] = {
+        MULTI_CHAR('cont_at1'), MULTI_CHAR('cont_at2'), MULTI_CHAR('cont_at3'), MULTI_CHAR('cont_at4'), MULTI_CHAR('cont_at'),
+    };
+    static const u64 ftv_btnA[5] = {
+        MULTI_CHAR('font_a1'), MULTI_CHAR('font_at2'), MULTI_CHAR('font_at3'), MULTI_CHAR('font_at4'), MULTI_CHAR('font_at'),
+    };
+
+#if TARGET_PC
+    static const u64 fenu_t0_jpn[2] = {MULTI_CHAR('fenu_t0s'), MULTI_CHAR('fenu_t0')};
+    static const u64 menu_t0_jpn[2] = {MULTI_CHAR('menu_t0s'), MULTI_CHAR('menu_t0')};
+    static const u64 fenu_t1_jpn[2] = {MULTI_CHAR('fenu_t1s'), MULTI_CHAR('fenu_t1')};
+    static const u64 menu_t1_jpn[2] = {MULTI_CHAR('menu_t1s'), MULTI_CHAR('menu_t1')};
+    static const u64 fenu_t2_jpn[2] = {MULTI_CHAR('fenu_t2s'), MULTI_CHAR('fenu_t2')};
+    static const u64 menu_t2_jpn[2] = {MULTI_CHAR('menu_t2s'), MULTI_CHAR('menu_t2')};
+    static const u64 fenu_t3_jpn[2] = {MULTI_CHAR('fenu_t3s'), MULTI_CHAR('fenu_t3')};
+    static const u64 menu_t3_jpn[2] = {MULTI_CHAR('menu_t3s'), MULTI_CHAR('menu_t3')};
+    static const u64 fenu_t4_jpn[2] = {MULTI_CHAR('fenu_t4s'), MULTI_CHAR('fenu_t4')};
+    static const u64 menu_t4_jpn[2] = {MULTI_CHAR('menu_t4s'), MULTI_CHAR('menu_t4')};
+    static const u64 fenu_t5_jpn[2] = {MULTI_CHAR('fenu_t5s'), MULTI_CHAR('fenu_t5')};
+    static const u64 menu_t5_jpn[2] = {MULTI_CHAR('menu_t5s'), MULTI_CHAR('menu_t5')};
+
+    static const u64 fenu_t0[2] = {MULTI_CHAR('fenu_t0s'), MULTI_CHAR('fenu_t0')};
+    static const u64 menu_t0[2] = {MULTI_CHAR('menu_t0s'), MULTI_CHAR('menu_t0')};
+    static const u64 fenu_t2[2] = {MULTI_CHAR('fenu_t1s'), MULTI_CHAR('fenu_t1')};
+    static const u64 menu_t2[2] = {MULTI_CHAR('menu_t1s'), MULTI_CHAR('menu_t1')};
+    static const u64 fenu_t3[2] = {MULTI_CHAR('fenu_t2s'), MULTI_CHAR('fenu_t2')};
+    static const u64 menu_t3[2] = {MULTI_CHAR('menu_t2s'), MULTI_CHAR('menu_t2')};
+    static const u64 fenu_t4[2] = {MULTI_CHAR('fenu_t3s'), MULTI_CHAR('fenu_t3')};
+    static const u64 menu_t4[2] = {MULTI_CHAR('menu_t3s'), MULTI_CHAR('menu_t3')};
+    static const u64 fenu_t1[2] = {MULTI_CHAR('fenu_t4s'), MULTI_CHAR('fenu_t4')};
+    static const u64 menu_t1[2] = {MULTI_CHAR('menu_t4s'), MULTI_CHAR('menu_t4')};
+    static const u64 fenu_t5[2] = {MULTI_CHAR('fenu_t5s'), MULTI_CHAR('fenu_t5')};
+    static const u64 menu_t5[2] = {MULTI_CHAR('menu_t5s'), MULTI_CHAR('menu_t5')};
+#elif VERSION == VERSION_GCN_JPN
+    static const u64 fenu_t0[2] = {MULTI_CHAR('fenu_t0s'), MULTI_CHAR('fenu_t0')};
+    static const u64 menu_t0[2] = {MULTI_CHAR('menu_t0s'), MULTI_CHAR('menu_t0')};
+    static const u64 fenu_t1[2] = {MULTI_CHAR('fenu_t1s'), MULTI_CHAR('fenu_t1')};
+    static const u64 menu_t1[2] = {MULTI_CHAR('menu_t1s'), MULTI_CHAR('menu_t1')};
+    static const u64 fenu_t2[2] = {MULTI_CHAR('fenu_t2s'), MULTI_CHAR('fenu_t2')};
+    static const u64 menu_t2[2] = {MULTI_CHAR('menu_t2s'), MULTI_CHAR('menu_t2')};
+    static const u64 fenu_t3[2] = {MULTI_CHAR('fenu_t3s'), MULTI_CHAR('fenu_t3')};
+    static const u64 menu_t3[2] = {MULTI_CHAR('menu_t3s'), MULTI_CHAR('menu_t3')};
+    static const u64 fenu_t4[2] = {MULTI_CHAR('fenu_t4s'), MULTI_CHAR('fenu_t4')};
+    static const u64 menu_t4[2] = {MULTI_CHAR('menu_t4s'), MULTI_CHAR('menu_t4')};
+    static const u64 fenu_t5[2] = {MULTI_CHAR('fenu_t5s'), MULTI_CHAR('fenu_t5')};
+    static const u64 menu_t5[2] = {MULTI_CHAR('menu_t5s'), MULTI_CHAR('menu_t5')};
+#else
+    static const u64 fenu_t0[2] = {MULTI_CHAR('fenu_t0s'), MULTI_CHAR('fenu_t0')};
+    static const u64 menu_t0[2] = {MULTI_CHAR('menu_t0s'), MULTI_CHAR('menu_t0')};
+    static const u64 fenu_t2[2] = {MULTI_CHAR('fenu_t1s'), MULTI_CHAR('fenu_t1')};
+    static const u64 menu_t2[2] = {MULTI_CHAR('menu_t1s'), MULTI_CHAR('menu_t1')};
+    static const u64 fenu_t3[2] = {MULTI_CHAR('fenu_t2s'), MULTI_CHAR('fenu_t2')};
+    static const u64 menu_t3[2] = {MULTI_CHAR('menu_t2s'), MULTI_CHAR('menu_t2')};
+    static const u64 fenu_t4[2] = {MULTI_CHAR('fenu_t3s'), MULTI_CHAR('fenu_t3')};
+    static const u64 menu_t4[2] = {MULTI_CHAR('menu_t3s'), MULTI_CHAR('menu_t3')};
+    static const u64 fenu_t1[2] = {MULTI_CHAR('fenu_t4s'), MULTI_CHAR('fenu_t4')};
+    static const u64 menu_t1[2] = {MULTI_CHAR('menu_t4s'), MULTI_CHAR('menu_t4')};
+    static const u64 fenu_t5[2] = {MULTI_CHAR('fenu_t5s'), MULTI_CHAR('fenu_t5')};
+    static const u64 menu_t5[2] = {MULTI_CHAR('menu_t5s'), MULTI_CHAR('menu_t5')};
+#endif
+    static const u64 menut_0[6] = {
+        MULTI_CHAR('menut0as'), MULTI_CHAR('menut0a'), MULTI_CHAR('menut0a2'), MULTI_CHAR('menut0a1'), MULTI_CHAR('menut0a4'), MULTI_CHAR('menut0a3'),
+    };
+    static const u64 fenut_0[6] = {
+        MULTI_CHAR('menut010'), MULTI_CHAR('menut0a9'), MULTI_CHAR('menut0a8'), MULTI_CHAR('menut0a7'), MULTI_CHAR('menut0a6'), MULTI_CHAR('menut0a5'),
+    };
+    static const u64 menut_1[6] = {
+        MULTI_CHAR('menut1as'), MULTI_CHAR('menut1a'), MULTI_CHAR('menut1a2'), MULTI_CHAR('menut1a1'), MULTI_CHAR('menut1a4'), MULTI_CHAR('menut1a3'),
+    };
+    static const u64 fenut_1[6] = {
+        MULTI_CHAR('menut110'), MULTI_CHAR('menut1a9'), MULTI_CHAR('menut1a8'), MULTI_CHAR('menut1a7'), MULTI_CHAR('menut1a6'), MULTI_CHAR('menut1a5'),
+    };
+    static const u64 menut_2[6] = {
+        MULTI_CHAR('menut2as'), MULTI_CHAR('menut2a'), MULTI_CHAR('menut2a2'), MULTI_CHAR('menut2a1'), MULTI_CHAR('menut2a4'), MULTI_CHAR('menut2a3'),
+    };
+    static const u64 fenut_2[6] = {
+        MULTI_CHAR('menut210'), MULTI_CHAR('menut2a9'), MULTI_CHAR('menut2a8'), MULTI_CHAR('menut2a7'), MULTI_CHAR('menut2a6'), MULTI_CHAR('menut2a5'),
+    };
+    static const u64 menut_3[6] = {
+        MULTI_CHAR('menut3a5'), MULTI_CHAR('menut3a6'), MULTI_CHAR('menut3a7'), MULTI_CHAR('menut3a8'), MULTI_CHAR('menut3a9'), MULTI_CHAR('menut310'),
+    };
+    static const u64 fenut_3[6] = {
+        MULTI_CHAR('menut315'), MULTI_CHAR('menut314'), MULTI_CHAR('menut313'), MULTI_CHAR('menut312'), MULTI_CHAR('menut311'), MULTI_CHAR('menut001'),
+    };
+    static const u64 menut_4[6] = {
+        MULTI_CHAR('menut3as'), MULTI_CHAR('menut3a'), MULTI_CHAR('menut3a2'), MULTI_CHAR('menut3a1'), MULTI_CHAR('menut3a4'), MULTI_CHAR('menut3a3'),
+    };
+    static const u64 fenut_4[6] = {
+        MULTI_CHAR('menut321'), MULTI_CHAR('menut320'), MULTI_CHAR('menut319'), MULTI_CHAR('menut318'), MULTI_CHAR('menut317'), MULTI_CHAR('menut316'),
+    };
+
+#if TARGET_PC
+    static const u64 tx_jpn[6] = {
+        MULTI_CHAR('wps_text'), MULTI_CHAR('w_p_text'), MULTI_CHAR('g_ps_tx3'), MULTI_CHAR('g_p_tex3'), MULTI_CHAR('wps_tex1'), MULTI_CHAR('w_p_tex1'),
+    };
+    static const u64 tx[6] = {
+        MULTI_CHAR('w_p_tex5'), MULTI_CHAR('w_p_tex6'), MULTI_CHAR('w_p_tex3'), MULTI_CHAR('w_p_tex4'), MULTI_CHAR('fps_tex1'), MULTI_CHAR('f_p_tex1'),
+    };
+#elif VERSION == VERSION_GCN_JPN
+    static const u64 tx[6] = {
+        MULTI_CHAR('wps_text'), MULTI_CHAR('w_p_text'), MULTI_CHAR('g_ps_tx3'), MULTI_CHAR('g_p_tex3'), MULTI_CHAR('wps_tex1'), MULTI_CHAR('w_p_tex1'),
+    };
+#else
+    static const u64 tx[6] = {
+        MULTI_CHAR('w_p_tex5'), MULTI_CHAR('w_p_tex6'), MULTI_CHAR('w_p_tex3'), MULTI_CHAR('w_p_tex4'), MULTI_CHAR('fps_tex1'), MULTI_CHAR('f_p_tex1'),
+    };
+#endif
+
+    static const u64 op_tx[4] = {
+        MULTI_CHAR('w_text_n'), MULTI_CHAR('w_btn_n'), MULTI_CHAR('w_k_t_n'), MULTI_CHAR('w_abtn_n'),
+    };
+    static const u64 z_tx[3] = {
+        MULTI_CHAR('z_gc_n'), 0, 0,
+    };
+
+#if TARGET_PC
+    static const u64 txTV_jpn[10] = {
+        MULTI_CHAR('menu_t6s'), MULTI_CHAR('menu_t6'),  MULTI_CHAR('menu_t9s'), MULTI_CHAR('menu_t9'),  MULTI_CHAR('menut10s'),
+        MULTI_CHAR('menu_t10'), MULTI_CHAR('menu_t7s'), MULTI_CHAR('menu_t7'),  MULTI_CHAR('menu_t8s'), MULTI_CHAR('menu_t8'),
+    };
+    static const u64 txTV[10] = {
+        MULTI_CHAR('menu_t61'), MULTI_CHAR('menu_t2'),  MULTI_CHAR('menu_t91'), MULTI_CHAR('menu_t1'),  MULTI_CHAR('menut101'),
+        MULTI_CHAR('menu_t01'), MULTI_CHAR('menu_t71'), MULTI_CHAR('menu_t3'),  MULTI_CHAR('menu_t81'), MULTI_CHAR('menu_t4'),
+    };
+#elif VERSION == VERSION_GCN_JPN
+    static const u64 txTV[10] = {
+        MULTI_CHAR('menu_t6s'), MULTI_CHAR('menu_t6'),  MULTI_CHAR('menu_t9s'), MULTI_CHAR('menu_t9'),  MULTI_CHAR('menut10s'),
+        MULTI_CHAR('menu_t10'), MULTI_CHAR('menu_t7s'), MULTI_CHAR('menu_t7'),  MULTI_CHAR('menu_t8s'), MULTI_CHAR('menu_t8'),
+    };
+#else
+    static const u64 txTV[10] = {
+        MULTI_CHAR('menu_t61'), MULTI_CHAR('menu_t2'),  MULTI_CHAR('menu_t91'), MULTI_CHAR('menu_t1'),  MULTI_CHAR('menut101'),
+        MULTI_CHAR('menu_t01'), MULTI_CHAR('menu_t71'), MULTI_CHAR('menu_t3'),  MULTI_CHAR('menu_t81'), MULTI_CHAR('menu_t4'),
+    };
+#endif
+
+    mpTitle = JKR_NEW CPaneMgr(mpBackScreen, MULTI_CHAR('title_n'), 0, NULL);
+    Vec pos = mpTitle->getGlobalVtxCenter(mpTitle->mPane, false, 0);
+    mpWarning->mPosY = pos.y + g_drawHIO.mOptionScreen.mBackgroundPosY;
+    for (int i = 0; i < 6; i++) {
+        field_0x280[i] = (J2DPicture*)mpScreen->search(tag_frame[i]);
+        field_0x298[i] = (J2DTextBox*)mpScreen->search(DUSK_IF_ELSE(dusk::version::isRegionJpn() ? tag_menu0_jpn[i] : tag_menu0[i], tag_menu0[i]));
+    }
+    field_0x2b0[0] = field_0x280[1]->getBlack();
+    field_0x2c0[0] = field_0x280[1]->getWhite();
+    field_0x2b0[1] = field_0x298[1]->getBlack();
+    field_0x2c0[1] = field_0x298[1]->getWhite();
+    field_0x2b8[0] = field_0x280[0]->getBlack();
+    field_0x2c8[0] = field_0x280[0]->getWhite();
+    field_0x2b8[1] = field_0x298[0]->getBlack();
+    field_0x2c8[1] = field_0x298[0]->getWhite();
+    field_0x2b8[0].a = 0xff;
+    field_0x2b0[0].a = 0xff;
+    mpDrawCursor = JKR_NEW dSelect_cursor_c(2, 1.0f, NULL);
+    mpDrawCursor->setAlphaRate(0.0f);
+    mpDrawCursor->setScale(0.0f);
+    mpDrawCursor->setParam(1.01f, 0.85f, 0.02f, 0.5f, 0.5f);
+    mpDrawCursor->offPlayAnime(0);
+    mpParent[0] = JKR_NEW CPaneMgr(mpScreen, MULTI_CHAR('n_all'), 2, NULL);
+    mpParent[1] = JKR_NEW CPaneMgr(mpClipScreen, MULTI_CHAR('n_all'), 2, NULL);
+    mpParent[2] = JKR_NEW CPaneMgr(mpShadowScreen, 'nall', 2, NULL);
+    mpParent[3] = JKR_NEW CPaneMgr(mpTVScreen, MULTI_CHAR('n_all'), 2, NULL);
+    mpParent[4] = JKR_NEW CPaneMgr(mpBackScreen, MULTI_CHAR('n_all'), 2, NULL);
+    for (int i = 0; i < 6; i++) {
+        mpMenuNull[i] = JKR_NEW CPaneMgr(mpScreen, let_n[i], 0, NULL);
+        mpMenuPane[i] = JKR_NEW CPaneMgr(mpScreen, menu_n[i], 0, NULL);
+        if (menu2_n[i] != 0) {
+            mpMenuPaneC[i] = JKR_NEW CPaneMgr(mpScreen, menu2_n[i], 0, NULL);
+            Vec pos = mpMenuPaneC[i]->getGlobalVtxCenter(mpMenuPaneC[i]->mPane, false, 0);
+            field_0x344[i] = pos.x;
+            field_0x35c[i] = pos.y;
+        } else {
+            mpMenuPaneC[i] = NULL;
+            field_0x344[i] = 0.0f;
+            field_0x35c[i] = 0.0f;
+        }
+        field_0x2d0[i][0] = mpScreen->search(al0_n[i]);
+        field_0x2d0[i][1] = mpScreen->search(al1_n[i]);
+        field_0x2d0[i][2] = mpScreen->search(al2_n[i]);
+        field_0x2d0[i][3] = mpScreen->search(al3_n[i]);
+    }
+    for (int i = 0; i < 4; i++) {
+        field_0x404[i] = field_0x2d0[1][i]->getAlpha();
+        field_0x408[i] = field_0x2d0[0][i]->getAlpha();
+    }
+    for (int i = 0; i < 5; i++) {
+        mpHaihaiPosL[i] = JKR_NEW CPaneMgr(mpScreen, haihail_n[i], 0, NULL);
+        mpHaihaiPosR[i] = JKR_NEW CPaneMgr(mpScreen, haihair_n[i], 0, NULL);
+    }
+    for (int i = 0; i < 6; i++) {
+        if (let2_n[i] != 0) {
+            mpMenuPane2[i] = JKR_NEW CPaneMgr(mpShadowScreen, let2_n[i], 0, NULL);
+        } else {
+            mpMenuPane2[i] = NULL;
+        }
+    }
+    for (int i = 0; i < 6; i++) {
+        if (let2_n[i] != 0) {
+            mpMenuPane3[i] = JKR_NEW CPaneMgr(mpClipScreen, let2_n[i], 0, NULL);
+        } else {
+            mpMenuPane3[i] = NULL;
+        }
+        if (menu3_n[i] != 0) {
+            mpMenuPane32[i] = JKR_NEW CPaneMgr(mpClipScreen, menu3_n[i], 0, NULL);
+        } else {
+            mpMenuPane32[i] = NULL;
+        }
+    }
+#if TARGET_PC
+    if (dusk::version::isRegionJpn()) {
+        field_0x270[0] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('t_t00'));
+        field_0x270[1] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('t_t01'));
+        mpBackScreen->search(MULTI_CHAR('f_t00'))->hide();
+        mpBackScreen->search(MULTI_CHAR('t_t01'))->hide();
+        field_0x270[2] = (J2DTextBox*)mpTVScreen->search(MULTI_CHAR('t_t00'));
+        mpTVScreen->search(MULTI_CHAR('f_t00'))->hide();
+    } else {
+        field_0x270[0] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('f_t00'));
+        field_0x270[1] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('t_t01'));
+        mpBackScreen->search(MULTI_CHAR('t_t00'))->hide();
+        mpBackScreen->search(MULTI_CHAR('t_t01'))->hide();
+        field_0x270[2] = (J2DTextBox*)mpTVScreen->search(MULTI_CHAR('f_t00'));
+        mpTVScreen->search(MULTI_CHAR('t_t00'))->hide();
+    }
+#elif VERSION == VERSION_GCN_JPN
+    field_0x270[0] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('t_t00'));
+    field_0x270[1] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('t_t01'));
+    mpBackScreen->search(MULTI_CHAR('f_t00'))->hide();
+    mpBackScreen->search(MULTI_CHAR('t_t01'))->hide();
+    field_0x270[2] = (J2DTextBox*)mpTVScreen->search(MULTI_CHAR('t_t00'));
+    mpTVScreen->search(MULTI_CHAR('f_t00'))->hide();
+#else
+    field_0x270[0] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('f_t00'));
+    field_0x270[1] = (J2DTextBox*)mpBackScreen->search(MULTI_CHAR('t_t01'));
+    mpBackScreen->search(MULTI_CHAR('t_t00'))->hide();
+    mpBackScreen->search(MULTI_CHAR('t_t01'))->hide();
+    field_0x270[2] = (J2DTextBox*)mpTVScreen->search(MULTI_CHAR('f_t00'));
+    mpTVScreen->search(MULTI_CHAR('t_t00'))->hide();
+#endif
+    for (int i = 0; i < 3; i++) {
+        field_0x270[i]->setFont(mDoExt_getRubyFont());
+        field_0x270[i]->setString(0x40, "");
+    }
+    mpString->getString(0x547, field_0x270[0], NULL, NULL, NULL, 0);
+    mpString->getString(0x547, field_0x270[1], NULL, NULL, NULL, 0);
+    mpString->getString(0x55C, field_0x270[2], NULL, NULL, NULL, 0);
+    for (int i = 0; i < 5; i++) {
+#if TARGET_PC
+        if (dusk::version::isJpnOrLessThanWiiJpn()) {
+            field_0x25c[i] = (J2DTextBox*)mpTVScreen->search(tv_btnA[i]);
+            if (dusk::version::getGameVersion() >= dusk::version::GameVersion::WiiJpn) {
+                mpTVScreen->search(ftv_btnA[i])->hide();
+            }
+        } else {
+            field_0x25c[i] = (J2DTextBox*)mpTVScreen->search(ftv_btnA[i]);
+            mpTVScreen->search(tv_btnA[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        field_0x25c[i] = (J2DTextBox*)mpTVScreen->search(tv_btnA[i]);
+        mpTVScreen->search(ftv_btnA[i])->hide();
+#else
+        field_0x25c[i] = (J2DTextBox*)mpTVScreen->search(ftv_btnA[i]);
+        mpTVScreen->search(tv_btnA[i])->hide();
+#endif
+        field_0x25c[i]->setFont(mDoExt_getMesgFont());
+        field_0x25c[i]->setString(0x40, "");
+        mpString->getString(0x564, field_0x25c[i], NULL, NULL, NULL, 0);
+    }
+
+    for (int i = 0; i < 2; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            field_0x21c[0][i] = (J2DTextBox*)mpScreen->search(menu_t0_jpn[i]);
+            mpScreen->search(fenu_t0_jpn[i])->hide();
+        } else {
+            field_0x21c[0][i] = (J2DTextBox*)mpScreen->search(fenu_t0[i]);
+            mpScreen->search(menu_t0[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        field_0x21c[0][i] = (J2DTextBox*)mpScreen->search(menu_t0[i]);
+        mpScreen->search(fenu_t0[i])->hide();
+#else
+        field_0x21c[0][i] = (J2DTextBox*)mpScreen->search(fenu_t0[i]);
+        mpScreen->search(menu_t0[i])->hide();
+#endif
+        field_0x21c[0][i]->setFont(mpFont);
+        field_0x21c[0][i]->setString(0x40, "");
+        mpString->getString(0x548, field_0x21c[0][i], NULL, NULL, NULL, 0);
+    }
+    for (int i = 0; i < 2; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            field_0x21c[1][i] = (J2DTextBox*)mpScreen->search(menu_t1_jpn[i]);
+            mpScreen->search(fenu_t1_jpn[i])->hide();
+        } else {
+            field_0x21c[1][i] = (J2DTextBox*)mpScreen->search(fenu_t2[i]);
+            mpScreen->search(menu_t2[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        field_0x21c[1][i] = (J2DTextBox*)mpScreen->search(menu_t1[i]);
+        mpScreen->search(fenu_t1[i])->hide();
+#else
+        field_0x21c[1][i] = (J2DTextBox*)mpScreen->search(fenu_t2[i]);
+        mpScreen->search(menu_t2[i])->hide();
+#endif
+        field_0x21c[1][i]->setFont(mpFont);
+        field_0x21c[1][i]->setString(0x40, "");
+
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            mpString->getString(0x54B, field_0x21c[1][i], NULL, NULL, NULL, 0);
+        } else {
+            mpString->getString(0x54E, field_0x21c[1][i], NULL, NULL, NULL, 0);
+        }
+#elif VERSION == VERSION_GCN_JPN
+        mpString->getString(0x54B, field_0x21c[1][i], NULL, NULL, NULL, 0);
+#else
+        mpString->getString(0x54E, field_0x21c[1][i], NULL, NULL, NULL, 0);
+#endif
+    }
+    for (int i = 0; i < 2; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            field_0x21c[2][i] = (J2DTextBox*)mpScreen->search(menu_t2_jpn[i]);
+            mpScreen->search(fenu_t2_jpn[i])->hide();
+        } else {
+            field_0x21c[2][i] = (J2DTextBox*)mpScreen->search(fenu_t3[i]);
+            mpScreen->search(menu_t3[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        field_0x21c[2][i] = (J2DTextBox*)mpScreen->search(menu_t2[i]);
+        mpScreen->search(fenu_t2[i])->hide();
+#else
+        field_0x21c[2][i] = (J2DTextBox*)mpScreen->search(fenu_t3[i]);
+        mpScreen->search(menu_t3[i])->hide();
+#endif
+        field_0x21c[2][i]->setFont(mpFont);
+        field_0x21c[2][i]->setString(0x40, "");
+
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            mpString->getString(0x54E, field_0x21c[2][i], NULL, NULL, NULL, 0);
+        } else {
+            mpString->getString(0x54F, field_0x21c[2][i], NULL, NULL, NULL, 0);
+        }
+#elif VERSION == VERSION_GCN_JPN
+        mpString->getString(0x54E, field_0x21c[2][i], NULL, NULL, NULL, 0);
+#else
+        mpString->getString(0x54F, field_0x21c[2][i], NULL, NULL, NULL, 0);
+#endif
+    }
+    for (int i = 0; i < 2; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            field_0x21c[3][i] = (J2DTextBox*)mpScreen->search(menu_t3_jpn[i]);
+            mpScreen->search(fenu_t3_jpn[i])->hide();
+        } else {
+            field_0x21c[3][i] = (J2DTextBox*)mpScreen->search(fenu_t4[i]);
+            mpScreen->search(menu_t4[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        field_0x21c[3][i] = (J2DTextBox*)mpScreen->search(menu_t3[i]);
+        mpScreen->search(fenu_t3[i])->hide();
+#else
+        field_0x21c[3][i] = (J2DTextBox*)mpScreen->search(fenu_t4[i]);
+        mpScreen->search(menu_t4[i])->hide();
+#endif
+        field_0x21c[3][i]->setFont(mpFont);
+        field_0x21c[3][i]->setString(0x40, "");
+
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            mpString->getString(0x54F, field_0x21c[3][i], NULL, NULL, NULL, 0);
+        }
+#elif VERSION == VERSION_GCN_JPN
+        mpString->getString(0x54F, field_0x21c[3][i], NULL, NULL, NULL, 0);
+#endif
+    }
+    for (int i = 0; i < 2; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            field_0x21c[4][i] = (J2DTextBox*)mpScreen->search(menu_t4_jpn[i]);
+            mpScreen->search(fenu_t4_jpn[i])->hide();
+        } else {
+            field_0x21c[4][i] = (J2DTextBox*)mpScreen->search(fenu_t1[i]);
+            mpScreen->search(menu_t1[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        field_0x21c[4][i] = (J2DTextBox*)mpScreen->search(menu_t4[i]);
+        mpScreen->search(fenu_t4[i])->hide();
+#else
+        field_0x21c[4][i] = (J2DTextBox*)mpScreen->search(fenu_t1[i]);
+        mpScreen->search(menu_t1[i])->hide();
+#endif
+        field_0x21c[4][i]->setFont(mpFont);
+        field_0x21c[4][i]->setString(0x40, "");
+    }
+    for (int i = 0; i < 2; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            field_0x21c[5][i] = (J2DTextBox*)mpScreen->search(menu_t5_jpn[i]);
+            mpScreen->search(fenu_t5_jpn[i])->hide();
+        } else {
+            field_0x21c[5][i] = (J2DTextBox*)mpScreen->search(fenu_t5[i]);
+            mpScreen->search(menu_t5[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        field_0x21c[5][i] = (J2DTextBox*)mpScreen->search(menu_t5[i]);
+        mpScreen->search(fenu_t5[i])->hide();
+#else
+        field_0x21c[5][i] = (J2DTextBox*)mpScreen->search(fenu_t5[i]);
+        mpScreen->search(menu_t5[i])->hide();
+#endif
+        field_0x21c[5][i]->setFont(mpFont);
+        field_0x21c[5][i]->setString(0x40, "");
+        mpString->getString(0x554, field_0x21c[5][i], NULL, NULL, NULL, 0);
+    }
+    for (int i = 0; i < 6; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            paneResize(menut_0[i]);
+            mpMenuText[0][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_0[i], 0, NULL);
+            mpClipScreen->search(fenut_0[i])->hide();
+        } else {
+            paneResize(fenut_0[i]);
+            mpMenuText[0][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_0[i], 0, NULL);
+            mpClipScreen->search(menut_0[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        paneResize(menut_0[i]);
+        mpMenuText[0][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_0[i], 0, NULL);
+        mpClipScreen->search(fenut_0[i])->hide();
+#else
+        paneResize(fenut_0[i]);
+        mpMenuText[0][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_0[i], 0, NULL);
+        mpClipScreen->search(menut_0[i])->hide();
+#endif
+        ((J2DTextBox*)(mpMenuText[0][i]->getPanePtr()))->setFont(mpFont);
+        ((J2DTextBox*)(mpMenuText[0][i]->getPanePtr()))->setString(0x40, "");
+        mpMenuText[0][i]->getPanePtr()->setBasePosition(J2DBasePosition_4);
+    }
+    for (int i = 0; i < 6; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            paneResize(menut_1[i]);
+            mpMenuText[1][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_1[i], 0, NULL);
+            mpClipScreen->search(fenut_1[i])->hide();
+        } else {
+            paneResize(fenut_1[i]);
+            mpMenuText[1][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_1[i], 0, NULL);
+            mpClipScreen->search(menut_1[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        paneResize(menut_1[i]);
+        mpMenuText[1][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_1[i], 0, NULL);
+        mpClipScreen->search(fenut_1[i])->hide();
+#else
+        paneResize(fenut_1[i]);
+        mpMenuText[1][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_1[i], 0, NULL);
+        mpClipScreen->search(menut_1[i])->hide();
+#endif
+        mpMenuText[1][i]->show();
+        ((J2DTextBox*)(mpMenuText[1][i]->getPanePtr()))->setFont(mpFont);
+        ((J2DTextBox*)(mpMenuText[1][i]->getPanePtr()))->setString(0x40, "");
+        mpMenuText[1][i]->getPanePtr()->setBasePosition(J2DBasePosition_4);
+    }
+    for (int i = 0; i < 6; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            paneResize(menut_2[i]);
+            mpMenuText[2][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_2[i], 0, NULL);
+            mpClipScreen->search(fenut_2[i])->hide();
+        } else {
+            paneResize(fenut_2[i]);
+            mpMenuText[2][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_2[i], 0, NULL);
+            mpClipScreen->search(menut_2[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        paneResize(menut_2[i]);
+        mpMenuText[2][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_2[i], 0, NULL);
+        mpClipScreen->search(fenut_2[i])->hide();
+#else
+        paneResize(fenut_2[i]);
+        mpMenuText[2][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_2[i], 0, NULL);
+        mpClipScreen->search(menut_2[i])->hide();
+#endif
+        mpMenuText[2][i]->show();
+        ((J2DTextBox*)(mpMenuText[2][i]->getPanePtr()))->setFont(mpFont);
+        ((J2DTextBox*)(mpMenuText[2][i]->getPanePtr()))->setString(0x40, "");
+        mpMenuText[2][i]->getPanePtr()->setBasePosition(J2DBasePosition_4);
+    }
+    for (int i = 0; i < 6; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            paneResize(menut_3[i]);
+            mpMenuText[3][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_3[i], 0, NULL);
+            mpClipScreen->search(fenut_3[i])->hide();
+        } else {
+            paneResize(fenut_3[i]);
+            mpMenuText[3][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_3[i], 0, NULL);
+            mpClipScreen->search(menut_3[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        paneResize(menut_3[i]);
+        mpMenuText[3][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_3[i], 0, NULL);
+        mpClipScreen->search(fenut_3[i])->hide();
+#else
+        paneResize(fenut_3[i]);
+        mpMenuText[3][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_3[i], 0, NULL);
+        mpClipScreen->search(menut_3[i])->hide();
+#endif
+        mpMenuText[3][i]->show();
+        ((J2DTextBox*)(mpMenuText[3][i]->getPanePtr()))->setFont(mpFont);
+        ((J2DTextBox*)(mpMenuText[3][i]->getPanePtr()))->setString(0x40, "");
+        mpMenuText[3][i]->getPanePtr()->setBasePosition(J2DBasePosition_4);
+    }
+    for (int i = 0; i < 6; i++) {
+#if TARGET_PC
+        if (dusk::version::isRegionJpn()) {
+            paneResize(menut_4[i]);
+            mpMenuText[4][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_4[i], 0, NULL);
+            mpClipScreen->search(fenut_4[i])->hide();
+        } else {
+            paneResize(fenut_4[i]);
+            mpMenuText[4][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_4[i], 0, NULL);
+            mpClipScreen->search(menut_4[i])->hide();
+        }
+#elif VERSION == VERSION_GCN_JPN
+        paneResize(menut_4[i]);
+        mpMenuText[4][i] = JKR_NEW CPaneMgr(mpClipScreen, menut_4[i], 0, NULL);
+        mpClipScreen->search(fenut_4[i])->hide();
+#else
+        paneResize(fenut_4[i]);
+        mpMenuText[4][i] = JKR_NEW CPaneMgr(mpClipScreen, fenut_4[i], 0, NULL);
+        mpClipScreen->search(menut_4[i])->hide();
+#endif
+        mpMenuText[4][i]->show();
+        ((J2DTextBox*)(mpMenuText[4][i]->getPanePtr()))->setFont(mpFont);
+        ((J2DTextBox*)(mpMenuText[4][i]->getPanePtr()))->setString(0x40, "");
+        mpMenuText[4][i]->getPanePtr()->setBasePosition(J2DBasePosition_4);
+    }
+    for (int i = 0; i < 6; i++) {
+        mpMenuText[5][i] = NULL;
+    }
+    for (int i = 0; i < 6; i++) {
+        for (int j = 2; j < 6; j++) {
+            if (mpMenuText[i][j] != NULL) {
+                mpMenuText[i][j]->hide();
+            }
+        }
+    }
+    field_0x3b4 = 0.0f;
+    menuVisible();
+
+#if TARGET_PC
+    if (dusk::version::isRegionJpn()) {
+        mpBackScreen->search(MULTI_CHAR('jpn_n'))->show();
+        mpBackScreen->search(MULTI_CHAR('foregn_n'))->hide();
+    } else {
+        mpBackScreen->search(MULTI_CHAR('jpn_n'))->hide();
+        mpBackScreen->search(MULTI_CHAR('foregn_n'))->show();
+    }
+#elif VERSION == VERSION_GCN_JPN
+    mpBackScreen->search(MULTI_CHAR('jpn_n'))->show();
+    mpBackScreen->search(MULTI_CHAR('foregn_n'))->hide();
+#else
+    mpBackScreen->search(MULTI_CHAR('jpn_n'))->hide();
+    mpBackScreen->search(MULTI_CHAR('foregn_n'))->show();
+#endif
+    for (int i = 0; i < 6; i++) {
+        J2DTextBox* backScreen = (J2DTextBox*)mpBackScreen->search(DUSK_IF_ELSE(dusk::version::isRegionJpn() ? tx_jpn[i] : tx[i], tx[i]));
+        backScreen->setFont(mpFont);
+        backScreen->setString(0x80, "");
+        if (i < 2) {
+            mpString->getString(0x55D, backScreen, NULL, NULL, NULL, 0);
+        } else if (i < 4) {
+            mpString->getString(0x55E, backScreen, NULL, NULL, NULL, 0);
+        } else {
+            mpString->getString(0x556, backScreen, NULL, NULL, NULL, 0);
+        }
+    }
+    mpBackScreen->search(MULTI_CHAR('wi_btn_n'))->hide();
+    for (int i = 0; i < 4; i++) {
+        field_0x1c0[i] = 0;
+    }
+    for (int i = 0; i < 3; i++) {
+        if (z_tx[i] != 0) {
+            mpZButtonText[i] = JKR_NEW CPaneMgr(mpBackScreen, z_tx[i], 2, NULL);
+        } else {
+            mpZButtonText[i] = NULL;
+        }
+    }
+    for (int i = 0; i < 10; i++) {
+        J2DTextBox* tvScreen = (J2DTextBox*)mpTVScreen->search(DUSK_IF_ELSE(dusk::version::isRegionJpn() ? txTV_jpn[i] : txTV[i], txTV[i]));
+        tvScreen->setFont(mpFont);
+#if TARGET_PC || VERSION != VERSION_GCN_JPN
+        IF_DUSK_BLOCK(!dusk::version::isRegionJpn())
+        tvScreen->setCharSpace(0.0f);
+        IF_DUSK_BLOCK_END
+#endif
+
+        if (i < 2) {
+            tvScreen->setString(0x100, "");
+            mpString->getString(0x558, tvScreen, NULL, NULL, NULL, 0);
+        } else if (i < 4) {
+            tvScreen->setString(0x100, "");
+            mpString->getString(0x557, tvScreen, NULL, NULL, NULL, 0);
+        } else if (i < 6) {
+            tvScreen->setString(0x100, "");
+            mpString->getString(0x559, tvScreen, NULL, NULL, NULL, 0);
+        } else if (i < 8) {
+            tvScreen->setString(0x100, "");
+            mpString->getString(0x55A, tvScreen, NULL, NULL, NULL, 0);
+        } else {
+            tvScreen->setString(0x100, "");
+            mpString->getString(0x55B, tvScreen, NULL, NULL, NULL, 0);
+        }
+    }
+    for (int i = 0; i < 5; i++) {
+        mpParent[i]->setAlphaRate(0.0f);
+    }
+}
+
+void dMenu_Option_c::setSoundMode(u32 soundMode) {
+    switch (soundMode) {
+    case JAS_OUTPUT_MONO:
+        OSSetSoundMode(OS_SOUND_MODE_MONO);
+        break;
+    case JAS_OUTPUT_STEREO:
+    case JAS_OUTPUT_SURROUND: // Via dolby pro logic 2, so it's over 2 output channels.
+        OSSetSoundMode(OS_SOUND_MODE_STEREO);
+        break;
+    }
+}
+
+void dMenu_Option_c::setAttenString() {
+    u16 stringId1;
+    u16 stringId2;
+
+    if (field_0x3e4 == 0) {
+        stringId1 = 0x549;
+        stringId2 = 0x54A;
+    } else {
+        stringId1 = 0x54A;
+        stringId2 = 0x549;
+    }
+    for (int i = 0; i < 6; i++) {
+        if (i < 2) {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[0][i]->getPanePtr();
+            mpString->getString(stringId1, textBox, NULL, NULL, NULL, 0);
+        } else {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[0][i]->getPanePtr();
+            mpString->getString(stringId2, textBox, NULL, NULL, NULL, 0);
+        }
+    }
+}
+
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+void dMenu_Option_c::setRubyString() {
+    u16 stringId1;
+    u16 stringId2;
+
+    if (field_0x3e5_JPN == 0) {
+        stringId1 = 0x54c;
+        stringId2 = 0x54d;
+    } else {
+        stringId1 = 0x54d;
+        stringId2 = 0x54c;
+    }
+    for (int i = 0; i < 6; i++) {
+        if (i < 2) {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[1][i]->getPanePtr();
+            mpString->getString(stringId1, textBox, NULL, NULL, NULL, 0);
+        } else {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[1][i]->getPanePtr();
+            mpString->getString(stringId2, textBox, NULL, NULL, NULL, 0);
+        }
+    }
+}
+#endif
+
+void dMenu_Option_c::setVibString() {
+    u16 stringId1;
+    u16 stringId2;
+
+    if (field_0x3ea == 0) {
+        stringId1 = 0x54C;
+        stringId2 = 0x54D;
+    } else {
+        stringId1 = 0x54D;
+        stringId2 = 0x54C;
+    }
+    for (int i = 0; i < 6; i++) {
+#if TARGET_PC
+        const int IDX = dusk::version::isRegionJpn() ? 2 : 1;
+#elif VERSION == VERSION_GCN_JPN
+        const int IDX = 2;
+#else
+        const int IDX = 1;
+#endif
+        if (i < 2) {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[IDX][i]->getPanePtr();
+            mpString->getString(stringId1, textBox, NULL, NULL, NULL, 0);
+        } else {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[IDX][i]->getPanePtr();
+            mpString->getString(stringId2, textBox, NULL, NULL, NULL, 0);
+        }
+    }
+}
+
+void dMenu_Option_c::setSoundString() {
+    u16 stringId1;
+    u16 stringId2;
+    u16 stringId3;
+
+    if (field_0x3e9 == 0) {
+        stringId1 = 0x551;
+        stringId2 = 0x550;
+        stringId3 = 0x552;
+    } else if (field_0x3e9 == 1) {
+        stringId1 = 0x550;
+        stringId2 = 0x552;
+        stringId3 = 0x551;
+    } else {
+        stringId1 = 0x552;
+        stringId2 = 0x551;
+        stringId3 = 0x550;
+    }
+    for (int i = 0; i < 6; i++) {
+#if TARGET_PC
+        const int IDX = dusk::version::isRegionJpn() ? 3 : 2;
+#elif VERSION == VERSION_GCN_JPN
+        const int IDX = 3;
+#else
+        const int IDX = 2;
+#endif
+        if (i < 2) {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[IDX][i]->getPanePtr();
+            mpString->getString(stringId1, textBox, NULL, NULL, NULL, 0);
+        } else if (i < 4) {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[IDX][i]->getPanePtr();
+            mpString->getString(stringId2, textBox, NULL, NULL, NULL, 0);
+        } else {
+            J2DTextBox* textBox = (J2DTextBox*)mpMenuText[IDX][i]->getPanePtr();
+            mpString->getString(stringId3, textBox, NULL, NULL, NULL, 0);
+        }
+    }
+}
+
+void dMenu_Option_c::setCursorPos(u8 i_index) {
+#if TARGET_PC || VERSION != VERSION_GCN_JPN
+    IF_DUSK_BLOCK(!dusk::version::isRegionJpn())
+    if (i_index == 4) {
+        i_index = 5;
+    }
+    IF_DUSK_BLOCK_END
+#endif
+
+    Vec pos = mpMenuPane[i_index]->getGlobalVtxCenter(mpMenuPane[i_index]->mPane, false, 0);
+    mpDrawCursor->setPos(pos.x + (field_0x330 - field_0x334), pos.y,
+                         mpMenuPane[i_index]->getPanePtr(), false);
+    setSelectColor(i_index, false);
+    changeBarColor(false);
+}
+
+void dMenu_Option_c::setSelectColor(u8 param_0, bool param_1) {
+    for (int i = 0; i < 6; i++) {
+        if (i == param_0 || param_1) {
+            if (field_0x21c[i][0] != NULL) {
+                field_0x21c[i][0]->setFontColor(field_0x3b8, field_0x3b8);
+            }
+            if (field_0x21c[i][1] != NULL) {
+                field_0x21c[i][1]->setFontColor(field_0x3b8, field_0x3b8);
+            }
+            mpMenuNull[i]->scale(mBarScale[0], mBarScale[0]);
+            if (mpMenuPaneC[i] != NULL) {
+                Vec pos = mpMenuPaneC[i]->getGlobalVtxCenter(mpMenuPaneC[i]->mPane, false, 0);
+                if (mpMenuPane2[i] != NULL) {
+                    mpMenuPane2[i]->scale(mBarScale[0], mBarScale[0]);
+                }
+                if (mpMenuPane3[i] != NULL) {
+                    mpMenuPane3[i]->scale(mBarScale[0], mBarScale[0]);
+                }
+            }
+        } else {
+            if (field_0x21c[i][0] != NULL) {
+                field_0x21c[i][0]->setFontColor(field_0x3bc, field_0x3bc);
+            }
+            if (field_0x21c[i][1] != NULL) {
+                field_0x21c[i][1]->setFontColor(field_0x3bc, field_0x3bc);
+            }
+            mpMenuNull[i]->scale(mBarScale[1], mBarScale[1]);
+            if (mpMenuPaneC[i] != NULL) {
+                Vec pos = mpMenuPaneC[i]->getGlobalVtxCenter(mpMenuPaneC[i]->mPane, false, 0);
+                if (mpMenuPane2[i] != NULL) {
+                    mpMenuPane2[i]->scale(mBarScale[1], mBarScale[1]);
+                }
+                if (mpMenuPane3[i] != NULL) {
+                    mpMenuPane3[i]->scale(mBarScale[1], mBarScale[1]);
+                }
+            }
+        }
+    }
+}
+
+u8 dMenu_Option_c::getSelectType() {
+    if (field_0x3ef < OPTION_SELECT(PROC_CHANGE_MOVE_e)) {
+        return field_0x3ef;
+    }
+    if (field_0x3f5 < OPTION_SELECT(PROC_CHANGE_MOVE_e)) {
+        return field_0x3f5;
+    }
+    return 0;
+}
+
+void dMenu_Option_c::changeBarColor(bool i_changeColor) {
+    u8 selectType = getSelectType();
+
+    for (int i = 0; i < 6; i++) {
+        if (i == selectType || i_changeColor) {
+            field_0x280[i]->setBlackWhite(field_0x2b0[0], field_0x2c0[0]);
+            field_0x298[i]->setBlackWhite(field_0x2b0[1], field_0x2c0[1]);
+            for (int j = 0; j < 4; j++) {
+                field_0x2d0[i][j]->setAlpha(field_0x404[j]);
+            }
+        } else {
+            field_0x280[i]->setBlackWhite(field_0x2b8[0], field_0x2c8[0]);
+            field_0x298[i]->setBlackWhite(field_0x2b8[1], field_0x2c8[1]);
+            for (int j = 0; j < 4; j++) {
+                field_0x2d0[i][j]->setAlpha(field_0x408[j]);
+            }
+        }
+    }
+}
+
+void dMenu_Option_c::setHIO(bool i_useHIO) {
+    if (field_0x378 != g_drawHIO.mOptionScreen.mWindowPosX ||
+        field_0x37c != g_drawHIO.mOptionScreen.mWindowPosY)
+    {
+        field_0x378 = g_drawHIO.mOptionScreen.mWindowPosX;
+        field_0x37c = g_drawHIO.mOptionScreen.mWindowPosY;
+        for (int i = 0; i < 5; i++) {
+            mpParent[i]->paneTrans(field_0x378, field_0x37c);
+        }
+        setCursorPos(getSelectType());
+    }
+    if (field_0x380 != g_drawHIO.mOptionScreen.mWindowScale) {
+        field_0x380 = g_drawHIO.mOptionScreen.mWindowScale;
+        for (int i = 0; i < 5; i++) {
+            f32 windowScale = field_0x380;
+            mpParent[i]->scale(windowScale, windowScale);
+        }
+        setCursorPos(getSelectType());
+    }
+    if (field_0x3b8.r != g_drawHIO.mOptionScreen.mSelectColor.r ||
+        field_0x3b8.g != g_drawHIO.mOptionScreen.mSelectColor.g ||
+        field_0x3b8.b != g_drawHIO.mOptionScreen.mSelectColor.b ||
+        field_0x3b8.a != g_drawHIO.mOptionScreen.mSelectColor.a ||
+        field_0x3bc.r != g_drawHIO.mOptionScreen.mUnselectColor.r ||
+        field_0x3bc.g != g_drawHIO.mOptionScreen.mUnselectColor.g ||
+        field_0x3bc.b != g_drawHIO.mOptionScreen.mUnselectColor.b ||
+        field_0x3bc.a != g_drawHIO.mOptionScreen.mUnselectColor.a)
+    {
+        field_0x3b8.set(g_drawHIO.mOptionScreen.mSelectColor);
+        field_0x3bc.set(g_drawHIO.mOptionScreen.mUnselectColor);
+        setSelectColor(getSelectType(), false);
+    }
+    for (int i = 0; i < 6; i++) {
+        if (field_0x384[i] != g_drawHIO.mOptionScreen.mOptionTypeBGPosX[i] ||
+            field_0x39c[i] != g_drawHIO.mOptionScreen.mOptionTypeBGPosY[i])
+        {
+            field_0x384[i] = g_drawHIO.mOptionScreen.mOptionTypeBGPosX[i];
+            field_0x39c[i] = g_drawHIO.mOptionScreen.mOptionTypeBGPosY[i];
+            mpMenuPane[i]->paneTrans(field_0x384[i], field_0x39c[i]);
+        }
+    }
+    for (int i = 0; i < 2; i++) {
+        if (mBarScale[i] != g_drawHIO.mOptionScreen.mBarScale[i]) {
+            mBarScale[i] = g_drawHIO.mOptionScreen.mBarScale[i];
+        }
+    }
+    if (g_drawHIO.mOptionScreen.mDebug) {
+        Vec pos = mpTitle->getGlobalVtxCenter(mpTitle->mPane, false, 0);
+        mpWarning->mPosY = pos.y + g_drawHIO.mOptionScreen.mBackgroundPosY;
+    }
+    if (g_drawHIO.mCollectScreen.mButtonDebugON != false || i_useHIO) {
+        if (mpButtonAB[0] != NULL) {
+            mpButtonAB[0]->paneTrans(g_drawHIO.mCollectScreen.mButtonAPosX,
+                                     g_drawHIO.mCollectScreen.mButtonAPosY);
+            f32 AButtonScale = g_drawHIO.mCollectScreen.mButtonAScale;
+            mpButtonAB[0]->scale(AButtonScale, AButtonScale);
+        }
+        if (mpButtonAB[1] != NULL) {
+            mpButtonAB[1]->paneTrans(g_drawHIO.mCollectScreen.mButtonBPosX,
+                                     g_drawHIO.mCollectScreen.mButtonBPosY);
+            f32 BButtonScale = g_drawHIO.mCollectScreen.mButtonBScale;
+            mpButtonAB[1]->scale(BButtonScale, BButtonScale);
+        }
+        if (mpButtonText[0] != NULL) {
+            mpButtonText[0]->paneTrans(g_drawHIO.mCollectScreen.mButtonATextPosX,
+                                       g_drawHIO.mCollectScreen.mButtonATextPosY);
+            f32 AButtonTextScale = g_drawHIO.mCollectScreen.mButtonATextScale;
+            mpButtonText[0]->scale(AButtonTextScale, AButtonTextScale);
+        }
+        if (mpButtonText[1] != NULL) {
+            mpButtonText[1]->paneTrans(g_drawHIO.mCollectScreen.mButtonBTextPosX,
+                                       g_drawHIO.mCollectScreen.mButtonBTextPosY);
+            f32 BButtonTextScale = g_drawHIO.mCollectScreen.mButtonBTextScale;
+            mpButtonText[1]->scale(BButtonTextScale, BButtonTextScale);
+        }
+    }
+}
+
+void dMenu_Option_c::cursorAnime(f32 i_cursorValue) {
+    mpDrawCursor->setAlphaRate(i_cursorValue);
+    mpDrawCursor->setScale(i_cursorValue);
+}
+
+void dMenu_Option_c::setZButtonString(u16 i_stringID) {
+#if TARGET_PC
+    dusk::ui::set_control_override(dusk::ui::Control::Z,
+        i_stringID != 0 ? dusk::ui::ControlOverride::Action : dusk::ui::ControlOverride::Default);
+#endif
+
+    if (i_stringID == 0) {
+        for (int i = 0; i < 3; i++) {
+            if (mpZButtonText[i] != NULL) {
+                mpZButtonText[i]->hide();
+            }
+        }
+    } else {
+        for (int i = 0; i < 3; i++) {
+            if (mpZButtonText[i] != NULL) {
+                mpZButtonText[i]->show();
+            }
+        }
+    }
+}
+
+void dMenu_Option_c::changeTVCheck() {
+    if (mDoCPd_c::getTrigZ(PAD_1) != 0) {
+        Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_CHANGE_WINDOW, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f,
+                                 0);
+        field_0x3f3 = 0;
+        setAButtonString(0);
+        setBButtonString(0);
+        setZButtonString(0);
+        dMw_c::dMw_fade_out();
+        dMeter2Info_set2DVibration();
+    }
+}
+
+static void dummy() {
+#if VERSION == VERSION_GCN_JPN
+    static const u64 txTVhide[5] = {MULTI_CHAR('fmenu_6n'), MULTI_CHAR('fmenu_9n'), MULTI_CHAR('fmenu_10'), MULTI_CHAR('fmenu_7n'), MULTI_CHAR('fmenu_8n')};
+#else
+    static const u64 txTVhide[5] = {MULTI_CHAR('menu_6n'), MULTI_CHAR('menu_9n'), MULTI_CHAR('menu_10n'), MULTI_CHAR('menu_7n'), MULTI_CHAR('menu_8n')};
+#endif
+}
+
+void dMenu_Option_c::setAButtonString(u16 i_stringID) {
+    static const u64 text_a_tag[5] = {MULTI_CHAR('atext1_1'), MULTI_CHAR('atext1_2'), MULTI_CHAR('atext1_3'), MULTI_CHAR('atext1_4'), MULTI_CHAR('atext1_5')};
+    u32 stringId = i_stringID;
+    if (stringId != field_0x3dc) {
+        field_0x3dc = i_stringID;
+        if (stringId == 0) {
+            for (int i = 0; i < 5; i++) {
+                J2DTextBox* textBox = (J2DTextBox*)mpScreenIcon->search(text_a_tag[i]);
+                SAFE_STRCPY(textBox->getStringPtr(), "");
+            }
+        } else {
+            for (int i = 0; i < 5; i++) {
+                J2DTextBox* textBox = (J2DTextBox*)mpScreenIcon->search(text_a_tag[i]);
+                dMeter2Info_getStringKanji(stringId, textBox->getStringPtr(), NULL);
+            }
+        }
+    }
+}
+
+void dMenu_Option_c::setBButtonString(u16 i_stringID) {
+    static const u64 text_b_tag[5] = {MULTI_CHAR('btext1_1'), MULTI_CHAR('btext1_2'), MULTI_CHAR('btext1_3'), MULTI_CHAR('btext1_4'), MULTI_CHAR('btext1_5')};
+    u32 stringId = i_stringID;
+    if (stringId != field_0x3de) {
+        field_0x3de = i_stringID;
+
+        if (stringId == 0) {
+            for (int i = 0; i < 5; i++) {
+                J2DTextBox* textBox = (J2DTextBox*)mpScreenIcon->search(text_b_tag[i]);
+                SAFE_STRCPY(textBox->getStringPtr(), "");
+            }
+        } else {
+            for (int i = 0; i < 5; i++) {
+                J2DTextBox* textBox = (J2DTextBox*)mpScreenIcon->search(text_b_tag[i]);
+                dMeter2Info_getStringKanji(stringId, textBox->getStringPtr(), NULL);
+            }
+        }
+    }
+}
+
+bool dMenu_Option_c::isRumbleSupported() {
+    return JUTGamePad::sRumbleSupported >> 0x1f;
+}
+
+#if TARGET_PC
+bool dMenu_Option_c::pointerConfirmSelect() {
+    dusk::menu_pointer::begin_context(dusk::menu_pointer::Context::Options);
+    for (u8 i = 0; i < (dusk::version::isRegionJpn() ? 3 : 2); ++i) {
+        if (dusk::menu_pointer::hit_pane(mpMenuPane[i], 8.0f)) {
+            dusk::menu_pointer::set_hover_target(i);
+            return false;
+        }
+    }
+
+    dusk::menu_pointer::set_hover_target(0x200);
+    if (!dusk::menu_pointer::consume_click()) {
+        return false;
+    }
+
+    field_0x3f7 = 1;
+    field_0x3f5 = field_0x3ef;
+    field_0x3ef = OPTION_SELECT(PROC_CONFIRM_OPEN_MOVE_e);
+    dMeter2Info_set2DVibration();
+    (this->*init[OPTION_PROC(field_0x3ef)])();
+    return true;
+}
+#endif
+
+bool dMenu_Option_c::dpdMenuMove() {
+#if TARGET_PC
+    dusk::menu_pointer::begin_context(dusk::menu_pointer::Context::Options);
+    for (u8 i = 0; i < (dusk::version::isRegionJpn() ? 3 : 2); ++i) {
+        if (!dusk::menu_pointer::hit_pane(mpMenuPane[i], 8.0f)) {
+            continue;
+        }
+        dusk::menu_pointer::set_hover_target(i);
+
+        u8 selectProc = 0;
+        if (dusk::version::isRegionJpn()) {
+            switch (i) {
+            case 0:
+                selectProc = PROC_ATTEN_e;
+                break;
+            case 1:
+                selectProc = PROC_RUBY_e;
+                break;
+            case 2:
+                selectProc = PROC_VIB_e;
+                break;
+            case 3:
+                selectProc = PROC_SOUND_e;
+                break;
+            }
+        } else {
+            switch (i) {
+            case 0:
+                selectProc = PROC_ATTEN_e;
+                break;
+            case 1:
+                selectProc = PROC_VIB_e;
+                break;
+            case 2:
+                selectProc = PROC_SOUND_e;
+                break;
+            }
+        }
+
+        if (getSelectType() != i) {
+            field_0x3ef = OPTION_SELECT(selectProc);
+            setCursorPos(i);
+            Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_OPTION, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+        }
+        if (!dusk::menu_pointer::consume_click()) {
+            return true;
+        }
+
+        switch (selectProc) {
+        case PROC_ATTEN_e:
+            field_0x3e4 ^= 1;
+            field_0x3da = 5;
+            field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+            field_0x3f5 = OPTION_SELECT(PROC_ATTEN_e);
+            Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                     -1.0f, 0);
+            return true;
+        case PROC_RUBY_e:
+            if (field_0x3e5_JPN == 0) {
+                field_0x3e5_JPN = 1;
+                field_0x3da = 5;
+            } else if (field_0x3e5_JPN == 1) {
+                field_0x3e5_JPN = 0;
+                field_0x3da = 5;
+            }
+            field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+            field_0x3f5 = OPTION_SELECT(PROC_RUBY_e);
+            Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+            return true;
+        case PROC_VIB_e:
+            if (isRumbleSupported()) {
+                field_0x3ea ^= 1;
+                if (field_0x3ea != 0) {
+                    mDoCPd_c::startMotorWave(0, &field_0x3e0, JUTGamePad::CRumble::VAL_0, 0x3c);
+                }
+                field_0x3da = 5;
+                field_0x3ef = OPTION_SELECT(PROC_CHANGE_MOVE_e);
+                field_0x3f5 = OPTION_SELECT(PROC_VIB_e);
+                Z2GetAudioMgr()->seStart(Z2SE_SY_OPTION_SWITCH, NULL, 0, 0, 1.0f, 1.0f, -1.0f,
+                                         -1.0f, 0);
+            }
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+void dMenu_Option_c::paneResize(u64 i_tag) {
+    f32 boundsY = mpClipScreen->search(i_tag)->getBounds().i.y;
+    f32 boundsX = mpClipScreen->search(i_tag)->getBounds().i.x - 5.0f;
+    mpClipScreen->search(i_tag)->move(boundsX, boundsY);
+
+    // Fake match
+    JGeometry::TBox2<f32>& bounds = mpClipScreen->search(i_tag)->mBounds;
+    boundsY = bounds.f.y - bounds.i.y;
+    boundsX = mpClipScreen->search(i_tag)->getWidth();
+
+    mpClipScreen->search(i_tag)->resize(boundsX + 10.0f, boundsY);
+}
+
+void dMenu_Option_c::initialize() {
+    field_0x3e4 = dComIfGs_getOptAttentionType();
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    if (IF_DUSK(dusk::version::isRegionJpn() &&) dComIfGs_getOptRuby() == 0) {
+        field_0x3e5_JPN = 1;
+    } else {
+        field_0x3e5_JPN = 0;
+    }
+#endif
+    field_0x3e5 = dComIfGs_getOptCameraControl();
+    field_0x3e8 = 0;
+    field_0x3eb = 0;
+    field_0x3e6 = 0;
+    field_0x3e7 = 0;
+    field_0x3e9 = dComIfGs_getOptSound();
+    if (isRumbleSupported()) {
+        field_0x3ea = dComIfGp_getNowVibration();
+    } else {
+        field_0x3ea = 0;
+    }
+    setAttenString();
+#if TARGET_PC || VERSION == VERSION_GCN_JPN
+    IF_DUSK_BLOCK(dusk::version::isRegionJpn())
+    setRubyString();
+    IF_DUSK_BLOCK_END
+#endif
+    setVibString();
+    setSoundString();
+    mFrame = 0;
+    field_0x3da = 0;
+}
+
+void dMenu_Option_c::yesnoMenuMoveAnmInitSet(int param_0, int param_1) {
+    if (field_0x3f8 == 0) {
+        field_0x3f9 = 0;
+        field_0x3fa = 1;
+    }
+    if (param_0 == 0x473) {
+        ((J2DTextBox*)mpYesNoTxt_c[field_0x3f9]->getPanePtr())
+            ->setWhite(JUtility::TColor(0xff, 0xff, 0xff, 0xff));
+        ((J2DTextBox*)mpYesNoTxt_c[field_0x3fa]->getPanePtr())
+            ->setWhite(JUtility::TColor(0x96, 0x96, 0x96, 0xff));
+    }
+    mpDrawCursor->setAlphaRate(0.0f);
+    mpYesNoSelBase_c[0]->getPanePtr()->setAnimation(field_0x20);
+    mpYesNoSelBase_c[1]->getPanePtr()->setAnimation(field_0x20);
+    field_0x3c8[2] = param_0;
+    field_0x3c8[3] = param_1;
+    field_0x20->setFrame(field_0x3c8[2]);
+    mpYesNoSelBase_c[0]->getPanePtr()->animationTransform();
+    mpYesNoSelBase_c[1]->getPanePtr()->animationTransform();
+}
+
+bool dMenu_Option_c::yesnoMenuMoveAnm() {
+    bool ret;
+    if (field_0x3c8[2] != field_0x3c8[3]) {
+#if !TARGET_PC
+        if (field_0x3c8[2] < field_0x3c8[3]) {
+            field_0x3c8[2] += 2;
+            if (field_0x3c8[2] > field_0x3c8[3]) {
+                field_0x3c8[2] = field_0x3c8[3];
+            }
+        } else {
+            field_0x3c8[2] -= 2;
+            if (field_0x3c8[2] < field_0x3c8[3]) {
+                field_0x3c8[2] = field_0x3c8[3];
+            }
+        }
+        field_0x20->setFrame(field_0x3c8[2]);
+        mpYesNoSelBase_c[0]->getPanePtr()->animationTransform();
+        mpYesNoSelBase_c[1]->getPanePtr()->animationTransform();
+#endif
+        ret = 0;
+    }
+    if (field_0x3c8[2] == field_0x3c8[3]) {
+        mpYesNoSelBase_c[0]->getPanePtr()->setAnimation((J2DAnmTransform*)NULL);
+        mpYesNoSelBase_c[1]->getPanePtr()->setAnimation((J2DAnmTransform*)NULL);
+        if (field_0x3c8[2] == 0x47D) {
+            field_0x3f8 = 1;
+        } else {
+            field_0x3f8 = 0;
+            if (field_0x3f9 != 0xff) {
+                mpYesNoCurWaku_c[field_0x3f9]->setAlpha(0);
+                mpYesNoCurWakuG0_c[field_0x3f9]->setAlpha(0);
+                mpYesNoCurWakuG1_c[field_0x3f9]->setAlpha(0);
+            }
+        }
+        ret = 1;
+    }
+    return ret;
+}
+
+static s32 OptYnSelStartFrameTbl[2] = {1251, 1236};
+
+static s32 OptYnSelEndFrameTbl[2] = {1236, 1251};
+
+#if TARGET_PC
+void dMenu_Option_c::presentAnims() {
+    if (field_0x3da != 0.0f) {
+        dusk::vdt::advance_toward_frame(field_0x3da, 0.0f, 1.0f);
+        const u8 index = field_0x3f5;
+        if (field_0x3da == 0.0f) {
+            switch (OPTION_PROC(field_0x3f5)) {
+            case PROC_ATTEN_e:
+                setAttenString();
+                break;
+            case PROC_RUBY_e:
+                IF_DUSK_BLOCK(dusk::version::isRegionJpn())
+                setRubyString();
+                IF_DUSK_BLOCK_END
+                break;
+            case PROC_VIB_e:
+                setVibString();
+                break;
+            case PROC_SOUND_e:
+                setSoundString();
+                break;
+            }
+            for (int i = 0; i < 6; i++) {
+                for (int j = 2; j < 6; j++) {
+                    if (mpMenuText[i][j] != NULL) {
+                        mpMenuText[i][j]->hide();
+                    }
+                }
+            }
+            for (int i = 0; i < 2; i++) {
+                if (mpMenuText[index][i] != NULL) {
+                    mpMenuText[index][i]->show();
+                    mpMenuText[index][i]->paneTrans(field_0x3b4, 0.0f);
+                }
+            }
+        } else {
+            f32 x = 0.0f;
+            if (field_0x3da > 0) {
+                f32 initPosX = (5 - field_0x3da) / 5.0f;
+                if (mpMenuText[index][3] != NULL) {
+                    x = mpMenuText[index][3]->getInitPosX() - mpMenuText[index][0]->getInitPosX();
+                }
+                x *= initPosX;
+            } else if (field_0x3da < 0) {
+                f32 initPosX = (field_0x3da + 5) / 5.0f;
+                if (mpMenuText[index][5] != NULL) {
+                    x = mpMenuText[index][5]->getInitPosX() - mpMenuText[index][0]->getInitPosX();
+                }
+                x *= initPosX;
+            }
+            for (int i = 0; i < 6; i++) {
+                if (mpMenuText[index][i] != NULL) {
+                    mpMenuText[index][i]->show();
+                    mpMenuText[index][i]->paneTrans(x + field_0x3b4, 0.0f);
+                }
+            }
+        }
+    }
+    setAnimation();
+    if (OPTION_PROC(field_0x3ef) == PROC_CONFIRM_OPEN_MOVE_e) {
+        dusk::vdt::present_addCalc2(&field_0x374, 1.0f, 0.4f, 0.5f, 0.1f);
+    } else if (OPTION_PROC(field_0x3ef) == PROC_CONFIRM_CLOSE_MOVE_e) {
+        dusk::vdt::present_addCalc2(&field_0x374, 0.0f, 0.4f, 0.5f, 0.1f);
+    }
+    if (mpSelectScreen != NULL) {
+        mpSelectScreen->animation();
+    }
+    presentLayoutAnims();
+    for (int i = 0; i < 2; ++i) {
+        mpYesNoTxt_c[i]->presentAnime();
+        mpYesNoCurWaku_c[i]->presentAnime();
+        mpYesNoCurWakuG0_c[i]->presentAnime();
+        mpYesNoCurWakuG1_c[i]->presentAnime();
+    }
+}
+
+void dMenu_Option_c::presentLayoutAnims() {
+    if (mpWarning != NULL) {
+        mpWarning->presentAnims();
+    }
+
+    if (field_0x3c8[2] != field_0x3c8[3]) {
+        dusk::vdt::present_shared(field_0x3c8[2], field_0x3c8[3], field_0x20,
+                                  {mpYesNoSelBase_c[0] != NULL ? mpYesNoSelBase_c[0]->getPanePtr() : NULL,
+                                   mpYesNoSelBase_c[1] != NULL ? mpYesNoSelBase_c[1]->getPanePtr() : NULL});
+    }
+
+    for (int i = 0; i < 2; i++) {
+        J2DPane* pane = mpYesNoSelBase_c[i] != NULL ? mpYesNoSelBase_c[i]->getPanePtr() : NULL;
+        dusk::vdt::present_selected(field_0x3c8[i], pane, field_0x24, (f32)OptYnSelStartFrameTbl[i],
+                                    field_0x28, (f32)OptYnSelEndFrameTbl[i]);
+    }
+}
+#endif
+
+u8 dMenu_Option_c::yesnoSelectMoveAnm() {
+    u8 ret = 0;
+    bool bVar1;
+    bool bVar2;
+
+    if (field_0x3fa != 0xff) {
+        if (field_0x3c8[field_0x3fa] != OptYnSelStartFrameTbl[field_0x3fa]) {
+#if !TARGET_PC
+            if (field_0x3c8[field_0x3fa] < OptYnSelStartFrameTbl[field_0x3fa]) {
+                field_0x3c8[field_0x3fa] += 2;
+                if (field_0x3c8[field_0x3fa] > OptYnSelStartFrameTbl[field_0x3fa]) {
+                    field_0x3c8[field_0x3fa] = OptYnSelStartFrameTbl[field_0x3fa];
+                }
+            } else {
+                field_0x3c8[field_0x3fa] -= 2;
+                if (field_0x3c8[field_0x3fa] < OptYnSelStartFrameTbl[field_0x3fa]) {
+                    field_0x3c8[field_0x3fa] = OptYnSelStartFrameTbl[field_0x3fa];
+                }
+            }
+            field_0x24->setFrame(field_0x3c8[field_0x3fa]);
+            mpYesNoSelBase_c[field_0x3fa]->getPanePtr()->animationTransform();
+#endif
+        }
+        if (field_0x3c8[field_0x3fa] == OptYnSelStartFrameTbl[field_0x3fa]) {
+            bVar1 = true;
+        } else {
+            bVar1 = false;
+        }
+    } else {
+        bVar1 = true;
+    }
+    if (field_0x3f9 != 0xff) {
+        if (field_0x3c8[field_0x3f9] != OptYnSelEndFrameTbl[field_0x3f9]) {
+#if !TARGET_PC
+            if (field_0x3c8[field_0x3f9] < OptYnSelEndFrameTbl[field_0x3f9]) {
+                field_0x3c8[field_0x3f9] += 2;
+                if (field_0x3c8[field_0x3f9] > OptYnSelEndFrameTbl[field_0x3f9]) {
+                    field_0x3c8[field_0x3f9] = OptYnSelEndFrameTbl[field_0x3f9];
+                }
+            } else {
+                field_0x3c8[field_0x3f9] -= 2;
+                if (field_0x3c8[field_0x3f9] < OptYnSelEndFrameTbl[field_0x3f9]) {
+                    field_0x3c8[field_0x3f9] = OptYnSelEndFrameTbl[field_0x3f9];
+                }
+            }
+            field_0x28->setFrame(field_0x3c8[field_0x3f9]);
+            mpYesNoSelBase_c[field_0x3f9]->getPanePtr()->animationTransform();
+#endif
+        }
+        if (field_0x3c8[field_0x3f9] == OptYnSelEndFrameTbl[field_0x3f9]) {
+            bVar2 = true;
+        } else {
+            bVar2 = false;
+        }
+    } else {
+        bVar2 = true;
+    }
+    if (bVar1 == 1 && bVar2 == 1) {
+        if (field_0x3fa != 0xff) {
+            mpYesNoSelBase_c[field_0x3fa]->getPanePtr()->setAnimation((J2DAnmTransform*)NULL);
+        }
+        if (field_0x3f9 != 0xff) {
+            mpYesNoSelBase_c[field_0x3f9]->getPanePtr()->setAnimation((J2DAnmTransform*)NULL);
+        }
+        ret = 1;
+    }
+    return ret;
+}
+
+void dMenu_Option_c::yesnoCursorShow() {
+    if (field_0x3f9 != 0xff) {
+        ((J2DTextBox*)mpYesNoTxt_c[field_0x3f9]->getPanePtr())
+            ->setWhite(JUtility::TColor(0xff, 0xff, 0xff, 0xff));
+        mpYesNoCurWaku_c[field_0x3f9]->setAlpha(0xff);
+        mpYesNoCurWakuG0_c[field_0x3f9]->setAlpha(0xff);
+        mpYesNoCurWakuG1_c[field_0x3f9]->setAlpha(0xff);
+        Vec pos = mpYesNoSelBase_c[field_0x3f9]->getGlobalVtxCenter(
+            mpYesNoSelBase_c[field_0x3f9]->mPane, false, 0);
+        mpDrawCursor->setPos(pos.x, pos.y, mpYesNoSelBase_c[field_0x3f9]->getPanePtr(), true);
+        mpDrawCursor->setAlphaRate(1.0f);
+        mpDrawCursor->setParam(0.96f, 0.84f, 0.06f, 0.5f, 0.5f);
+    }
+}
+
+void dMenu_Option_c::yesNoSelectStart() {
+    if (field_0x3f9 != 0) {
+        if (field_0x3f7 == 1) {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_NAME_OK, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        } else {
+            Z2GetAudioMgr()->seStart(Z2SE_SY_MENU_BACK, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        }
+        yesnoMenuMoveAnmInitSet(0x47D, 0x473);
+        mpDrawCursor->setAlphaRate(0.0f);
+    } else {
+        yesnoCancelAnmSet();
+    }
+}
+
+void dMenu_Option_c::yesnoSelectAnmSet() {
+    if (field_0x3fa != 0xff) {
+        yesnoWakuAlpahAnmInit(field_0x3fa, 0xff, 0, 5);
+        mpYesNoSelBase_c[field_0x3fa]->getPanePtr()->setAnimation(field_0x24);
+        field_0x3c8[field_0x3fa] = OptYnSelEndFrameTbl[field_0x3fa];
+        field_0x24->setFrame(field_0x3c8[field_0x3fa]);
+        mpYesNoSelBase_c[field_0x3fa]->getPanePtr()->animationTransform();
+        mpDrawCursor->setAlphaRate(0.0f);
+    }
+    if (field_0x3f9 != 0xff) {
+        mpYesNoSelBase_c[field_0x3f9]->getPanePtr()->setAnimation(field_0x28);
+        field_0x3c8[field_0x3f9] = OptYnSelStartFrameTbl[field_0x3f9];
+        field_0x28->setFrame(field_0x3c8[field_0x3f9]);
+        mpYesNoSelBase_c[field_0x3f9]->getPanePtr()->animationTransform();
+    }
+}
+
+void dMenu_Option_c::yesnoCancelAnmSet() {
+    Z2GetAudioMgr()->seStart(Z2SE_SY_CURSOR_CANCEL, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    mpDrawCursor->setAlphaRate(0.0f);
+    yesnoMenuMoveAnmInitSet(0x47D, 0x473);
+}
+
+void dMenu_Option_c::yesnoWakuAlpahAnmInit(u8 i_idx, u8 param_1, u8 param_2, u8 param_3) {
+    if (i_idx != 0xff) {
+        mpYesNoCurWaku_c[i_idx]->alphaAnimeStart(0);
+        mpYesNoCurWakuG0_c[i_idx]->alphaAnimeStart(0);
+        mpYesNoCurWakuG1_c[i_idx]->alphaAnimeStart(0);
+        field_0x3fb[i_idx] = param_1;
+        field_0x3fd[i_idx] = param_2;
+        field_0x3ff[i_idx] = param_3;
+        mpYesNoTxt_c[i_idx]->colorAnimeStart(0);
+    }
+}
+
+u8 dMenu_Option_c::yesnoWakuAlpahAnm(u8 i_idx) {
+    u8 ret = 0;
+    bool wakuAnime;
+    bool wakuAnimeG0;
+    bool wakuAnimeG1;
+    bool colorAnime;
+
+    if (i_idx != 0xff) {
+        wakuAnime = mpYesNoCurWaku_c[i_idx]->alphaAnime(field_0x3ff[i_idx], field_0x3fb[i_idx],
+                                                        field_0x3fd[i_idx], 0);
+        wakuAnimeG0 = mpYesNoCurWakuG0_c[i_idx]->alphaAnime(field_0x3ff[i_idx], field_0x3fb[i_idx],
+                                                            field_0x3fd[i_idx], 0);
+        wakuAnimeG1 = mpYesNoCurWakuG1_c[i_idx]->alphaAnime(field_0x3ff[i_idx], field_0x3fb[i_idx],
+                                                            field_0x3fd[i_idx], 0);
+        colorAnime = mpYesNoTxt_c[i_idx]->colorAnime(
+            field_0x3ff[i_idx], mpYesNoTxt_c[i_idx]->getInitBlack(),
+            mpYesNoTxt_c[i_idx]->getInitBlack(), JUtility::TColor(0xff, 0xff, 0xff, 0xff),
+            JUtility::TColor(0x96, 0x96, 0x96, 0xff), 0);
+    } else {
+        wakuAnime = true;
+        wakuAnimeG0 = true;
+        wakuAnimeG1 = true;
+        colorAnime = true;
+    }
+    if (wakuAnime == 1 && wakuAnimeG0 == 1 && wakuAnimeG1 == 1 && colorAnime == 1) {
+        ret = 1;
+    }
+    return ret;
+}

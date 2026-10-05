@@ -1,0 +1,188 @@
+#include "JSystem/JSystem.h" // IWYU pragma: keep
+
+#include "JSystem/JUtility/JUTTexture.h"
+#include "JSystem/JUtility/JUTPalette.h"
+#include <gx.h>
+#include "os_report.h"
+#include "dusk/logging.h"
+
+#include "JSystem/JKernel/JKRHeap.h"
+
+JUTTexture::~JUTTexture() {
+    if (getCaptureFlag()) {
+        JKR_DELETE_ARRAY(field_0x3c);
+    }
+    if (getEmbPaletteDelFlag()) {
+        JKR_DELETE(mEmbPalette);
+    }
+}
+
+void JUTTexture::storeTIMG(ResTIMG const* param_0, u8 param_1) {
+    if (param_0 && param_1 < 0x10) {
+        mTexInfo = param_0;
+        s32 imgOffset = mTexInfo->imageOffset;
+        mTexData = (void*)((intptr_t)mTexInfo + imgOffset);
+
+        if (mTexInfo->imageOffset == 0) {
+            mTexData = (void*)((intptr_t)mTexInfo + 0x20);
+        }
+
+        mPalette = NULL;
+        mTlutName = 0;
+        mWrapS = mTexInfo->wrapS;
+        mWrapT = mTexInfo->wrapT;
+        mMinFilter = mTexInfo->minFilter;
+        mMagFilter = mTexInfo->magFilter;
+        mMinLOD = (s8)mTexInfo->minLOD;
+        mMaxLOD = (s8)mTexInfo->maxLOD;
+        mLODBias = mTexInfo->LODBias;
+
+        u16 numColors = mTexInfo->numColors;
+
+        if (numColors == 0) {
+            initTexObj();
+        } else {
+            GXTlut tlut;
+            if (numColors > 0x100) {
+                tlut = (GXTlut)((param_1 % 4) + GX_BIGTLUT0);
+            } else {
+                tlut = (GXTlut)param_1;
+            }
+
+            s32 palOffset = mTexInfo->paletteOffset;
+
+            if (mEmbPalette == NULL || !getEmbPaletteDelFlag()) {
+                mEmbPalette = JKR_NEW JUTPalette(tlut, (GXTlutFmt)mTexInfo->colorFormat,
+                                             (JUTTransparency)mTexInfo->alphaEnabled,
+                                             numColors,
+                                             (void*)((intptr_t)mTexInfo + palOffset));
+                setEmbPaletteDelFlag(true);
+            } else {
+                mEmbPalette->storeTLUT(tlut, (GXTlutFmt)mTexInfo->colorFormat,
+                                       (JUTTransparency)mTexInfo->alphaEnabled,
+                                       numColors,
+                                       (void*)((intptr_t)mTexInfo + palOffset));
+            }
+            attachPalette(mEmbPalette);
+        }
+    }
+}
+
+void JUTTexture::storeTIMG(ResTIMG const* param_0, JUTPalette* param_1) {
+    GXTlut type;
+
+    if (param_1 != NULL) {
+        type = param_1->getTlutName();
+    } else {
+        type = GX_TLUT0;
+    }
+    storeTIMG(param_0, param_1, type);
+}
+
+void JUTTexture::storeTIMG(ResTIMG const* param_0, JUTPalette* param_1, GXTlut param_2) {
+    GXTlut type;
+
+    if (param_0 == NULL) {
+        return;
+    }
+    mTexInfo = param_0;
+    mTexData = ((u8*)mTexInfo) + mTexInfo->imageOffset;
+    if (mTexInfo->imageOffset == 0) {
+        mTexData = ((u8*)mTexInfo) + sizeof(ResTIMG);
+    }
+    if (getEmbPaletteDelFlag()) {
+            JKR_DELETE(mEmbPalette);
+    }
+    mEmbPalette = param_1;
+    setEmbPaletteDelFlag(false);
+    mPalette = NULL;
+    if (param_1 != NULL) {
+        mTlutName = param_2;
+        if (param_2 != param_1->getTlutName()) {
+            GXTlutFmt format = param_1->getFormat();
+            JUTTransparency transperancy = param_1->getTransparency();
+            u16 numColors = param_1->getNumColors();
+            ResTLUT* colorTable = param_1->getColorTable();
+            param_1->storeTLUT(param_2, format, transperancy, numColors, colorTable);
+        }
+    }
+
+    mWrapS = mTexInfo->wrapS;
+    mWrapT = mTexInfo->wrapT;
+    mMinFilter = mTexInfo->minFilter;
+    mMagFilter = mTexInfo->magFilter;
+    mMinLOD = mTexInfo->minLOD;
+    mMaxLOD = mTexInfo->maxLOD;
+    mLODBias = mTexInfo->LODBias;
+    init();
+}
+
+void JUTTexture::attachPalette(JUTPalette* param_0) {
+    if (mTexInfo->indexTexture) {
+        if (param_0 == NULL && mEmbPalette != NULL) {
+            mPalette = mEmbPalette;
+        } else {
+            mPalette = param_0;
+        }
+        initTexObj(mPalette->getTlutName());
+    }
+}
+
+void JUTTexture::init() {
+    if (mTexInfo->numColors == 0) {
+        initTexObj();
+    } else {
+        if (mEmbPalette != NULL) {
+            mPalette = mEmbPalette;
+
+            initTexObj(mPalette->getTlutName());
+        } else {
+            OS_REPORT("This texture is CI-Format, but EmbPalette is NULL.\n");
+        }
+    }
+}
+
+void JUTTexture::initTexObj() {
+    GXBool mipmapEnabled = mTexInfo->mipmapEnabled != 0 ? GX_TRUE : GX_FALSE;
+    u8* image = ((u8*)mTexInfo);
+    s32 imgOffset = mTexInfo->imageOffset;
+    image += (imgOffset ? imgOffset : 0x20);
+#ifdef TARGET_PC
+    mTexObj.reset();
+#endif
+    GXInitTexObj(&mTexObj, image, mTexInfo->width, mTexInfo->height,
+                 (GXTexFmt)mTexInfo->format, (GXTexWrapMode)mWrapS, (GXTexWrapMode)mWrapT,
+                 mipmapEnabled);
+    GXInitTexObjLOD(&mTexObj, (GXTexFilter)mMinFilter, (GXTexFilter)mMagFilter, mMinLOD / 8.0f,
+                    mMaxLOD / 8.0f, mLODBias / 100.0f, mTexInfo->biasClamp,
+                    mTexInfo->doEdgeLOD, (GXAnisotropy)mTexInfo->maxAnisotropy);
+}
+
+void JUTTexture::initTexObj(GXTlut param_0) {
+    GXBool mipmapEnabled = mTexInfo->mipmapEnabled != 0 ? GX_TRUE : GX_FALSE;
+    mTlutName = param_0;
+    u8* image = ((u8*)mTexInfo);
+    s32 imgOffset = mTexInfo->imageOffset;
+    /*
+    DuskLog.debug("initTexObj: Offset={}, W={}, H={}, Ptr={}", imgOffset, (u16)mTexInfo->width,
+           (u16)mTexInfo->height,
+           (void*)mTexInfo);
+    */
+    image += (imgOffset ? imgOffset : 0x20);
+#ifdef TARGET_PC
+    mTexObj.reset();
+#endif
+    GXInitTexObjCI(&mTexObj, image, mTexInfo->width, mTexInfo->height,
+                 (GXCITexFmt)mTexInfo->format, (GXTexWrapMode)mWrapS,
+                 (GXTexWrapMode)mWrapT, mipmapEnabled, param_0);
+    GXInitTexObjLOD(&mTexObj, (GXTexFilter)mMinFilter, (GXTexFilter)mMagFilter, mMinLOD / 8.0f,
+                    mMaxLOD / 8.0f, mLODBias / 100.0f, mTexInfo->biasClamp,
+                    mTexInfo->doEdgeLOD, (GXAnisotropy)mTexInfo->maxAnisotropy);
+}
+
+void JUTTexture::load(GXTexMapID param_0) {
+    if (mPalette) {
+        mPalette->load();
+    }
+    GXLoadTexObj(&mTexObj, param_0);
+}

@@ -1,0 +1,264 @@
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_tag_evt.h"
+#include "d/actor/d_a_player.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_com_static.h"
+#include "d/d_save.h"
+#include "f_op/f_op_actor_mng.h"
+#include <cstring>
+
+#if TARGET_PC
+#include "helpers/string.hpp"
+#endif
+
+static DUSK_CONST char* l_evtNameList[] = {
+    NULL,
+    "JUMP_DEMOSTAGE",
+};
+
+static DUSK_CONST char* l_resFileName = "TAGEVT";
+
+DUSK_GAME_DATA DUSK_CONST char* daTag_Evt_c::mEvtCutList[] = {
+    "WAIT",
+    "TALK",
+    "NEXT",
+};
+
+int daTag_Evt_c::create() {
+    fopAcM_ct(this, daTag_Evt_c);
+    cPhs_Step phase = dComIfG_resLoad(&mPhase, l_resFileName);
+    if (phase == cPhs_COMPLEATE_e) {
+        eventInfo.setArchiveName(l_resFileName);
+        SAFE_STRCPY(field_0x568, "TagEvt");
+        getParam();
+        field_0x572 = -1;
+    }
+    return phase;
+}
+
+int daTag_Evt_c::destroy() {
+    dComIfG_resDelete(&mPhase, l_resFileName);
+    return 1;
+}
+
+int daTag_Evt_c::execute() {
+    cXyz sp14;
+    int var_r29 = 0;
+    BOOL bVar = true;
+    u16 eventId;
+    int iVar1;
+    int actIdx;
+
+    eyePos.set(current.pos.x, current.pos.y + 100.0f, current.pos.z);
+    attention_info.position = eyePos;
+    fopAcM_SetRoomNo(this, dComIfGp_roomControl_getStayNo());
+    if (field_0x5E4 == 0 || field_0x5E4 == 1) {
+        if (dComIfGp_event_runCheck()) {
+            bVar = false;
+            iVar1 = dComIfGp_evmng_getMyStaffId(field_0x568, 0, 0);
+            if (!eventInfo.checkCommandTalk()) {
+                if (eventInfo.checkCommandDemoAccrpt()) {
+                    if (dComIfGp_getEventManager().endCheck(field_0x572)) {
+                        dComIfGp_event_reset();
+                        field_0x570 = 0;
+                        field_0x572 = -1;
+                        bVar = true;
+                    } else {
+                        if (iVar1 != -1) {
+                            actIdx = dComIfGp_getEventManager().getMyActIdx(
+                                iVar1, mEvtCutList, 3, 0, 0);
+                            var_r29 = 0;
+                            switch (actIdx) {
+                            case 0:
+                                var_r29 = doEvtCutWait(iVar1);
+                                break;
+                            case 1:
+                                var_r29 = doEvtCutTalk(iVar1);
+                                break;
+                            case 2:
+                                var_r29 = doEvtCutNext(iVar1);
+                            }
+                            if (var_r29 != 0) {
+                                dComIfGp_getEventManager().cutEnd(iVar1);
+                            }
+                        }
+                    }
+                }
+            } else if (field_0x5DC != 0) {
+                if (mMsgFlow.doFlow(this, NULL, 0) != 0) {
+                    dComIfGp_event_reset();
+                    eventId = mMsgFlow.getEventId(NULL);
+                    if (eventId != 0) {
+                        daNpcMsg_setEvtNum(eventId);
+                        field_0x570 = 1;
+                        bVar = true;
+                    } else {
+                        fopAcM_delete(this);
+                    }
+                }
+            } else {
+                mMsgFlow.init(this, field_0x574, 0, NULL);
+                field_0x5DC = 1;
+            }
+        }
+        if (!isDelete() && cLib_calcTimer(&field_0x5D0) == 0) {
+            sp14 = daPy_getPlayerActorClass()->current.pos - current.pos;
+            if (sp14.absXZ() < scale.x && -scale.y < sp14.y && sp14.y < scale.y) {
+                field_0x570 = 1;
+            }
+        }
+        if (bVar != 0 && field_0x570 != 0) {
+            field_0x572 = dComIfGp_getEventManager().getEventIdx(this, l_evtNameList[field_0x570], -1);
+            fopAcM_orderOtherEventId(this, field_0x572, -1, -1, 0, 1);
+        }
+    } else if (field_0x5E4 == 2 && isDelete()) {
+        fopAcM_delete(this);
+    }
+    return 1;
+}
+
+int daTag_Evt_c::draw() {
+    return 1;
+}
+
+int daTag_Evt_c::getParam() {
+    field_0x5E0 = fopAcM_GetParam(this) & 0xFFF;
+    field_0x5E2 = (fopAcM_GetParam(this) & 0xFFF000) >> 12;
+    if ((fopAcM_GetParam(this) & 0xF000000) != 0xF000000) {
+        field_0x5D8 = (fopAcM_GetParam(this) & 0xF000000) >> 24;
+    } else {
+        field_0x5D8 = -1;
+    }
+
+    field_0x5E4 = (fopAcM_GetParam(this) & 0xC0000000) >> 30;
+    field_0x5DD = home.angle.x;
+    field_0x5DE = (home.angle.x & 0xFF00) >> 8;
+    field_0x5D4 = home.angle.z & 0xFF;
+    if ((home.angle.z & 0xFF00) != 0xFF00) {
+        field_0x5D0 = ((home.angle.z & 0xFF00) >> 8) * 0x1E;
+    } else {
+        field_0x5D0 = 0;
+    }
+    field_0x574 = -1;
+    scale.x *= 100.0f;
+    scale.y *= 100.0f;
+    scale.z *= 100.0f;
+    if (field_0x5E4 == 1) {
+        scale.x *= 10.0f;
+        scale.y *= 10.0f;
+        scale.z *= 10.0f;
+    }
+    home.angle.x = 0;
+    home.angle.z = 0;
+    return 1;
+}
+
+int daTag_Evt_c::isDelete() {
+    if (field_0x5E0 != 0xFFF || field_0x5E2 != 0xFFF) {
+        if (field_0x5E0 == 0xFFF ||
+            (field_0x5E0 != 0xFFF &&
+             dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[field_0x5E0]) != 0))
+        {
+            if (field_0x5E2 != 0xFFF) {
+                return dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[field_0x5E2]);
+            } else {
+                return false;
+            }
+        } else {
+            return true;
+        }
+    } else if (field_0x5DD != 0xFF || field_0x5DE != 0xFF) {
+        if (field_0x5DD == 0xFF ||
+            (field_0x5DD != 0xFF && dComIfGs_isSwitch(field_0x5DD, fopAcM_GetRoomNo(this)) != 0))
+        {
+            // !@bug Comparison of u8 field with 0xFFF will always evaluate to false
+            if (field_0x5DE != 0xFFF) {
+                return dComIfGs_isSwitch(field_0x5DE, fopAcM_GetRoomNo(this));
+            } else {
+                return false;
+            }
+        } else {
+            return true;
+        }
+    } else {
+        return false;
+    }
+}
+
+int daTag_Evt_c::doEvtCutWait(int param_0) {
+    int* pTimer = NULL;
+    if (dComIfGp_getEventManager().getIsAddvance(param_0)) {
+        pTimer = dComIfGp_evmng_getMyIntegerP(param_0, "timer");
+        mTimer = pTimer == NULL ? 0 : *pTimer;
+    }
+    return cLib_calcTimer(&mTimer) == 0;
+}
+
+int daTag_Evt_c::doEvtCutTalk(int param_0) {
+    int* pTimer = NULL;
+    if (dComIfGp_getEventManager().getIsAddvance(param_0)) {
+        pTimer = dComIfGp_evmng_getMyIntegerP(param_0, "flowNodeNo");
+        mMsgFlow.init(this, *pTimer, 0, NULL);
+        return 0;
+    } else {
+        return mMsgFlow.doFlow(this, NULL, 0);
+    }
+}
+
+int daTag_Evt_c::doEvtCutNext(int param_0) {
+    int* pTimer = NULL;
+    if (dComIfGp_getEventManager().getIsAddvance(param_0)) {
+        if ((field_0x5E4 == 0 || field_0x5E4 == 1) && field_0x5DE != 0xFF) {
+            dComIfGs_onSwitch(field_0x5DE, fopAcM_GetRoomNo(this));
+        }
+        dStage_changeScene(field_0x5D4, 0.0f, 0, fopAcM_GetRoomNo(this), 0,
+                           dComIfG_play_c::getLayerNo(0));
+    }
+    return 0;
+}
+
+static int daTag_Evt_Create(void* i_this) {
+    return static_cast<daTag_Evt_c*>(i_this)->create();
+}
+
+static int daTag_Evt_Delete(void* i_this) {
+    return static_cast<daTag_Evt_c*>(i_this)->destroy();
+}
+
+static int daTag_Evt_Execute(void* i_this) {
+    return static_cast<daTag_Evt_c*>(i_this)->execute();
+}
+
+static int daTag_Evt_Draw(void* i_this) {
+    return static_cast<daTag_Evt_c*>(i_this)->draw();
+}
+
+static int daTag_Evt_IsDelete(void* i_this) {
+    return 1;
+}
+
+daTag_Evt_c::~daTag_Evt_c() {}
+
+static DUSK_CONST actor_method_class daTag_Evt_MethodTable = {
+    (process_method_func)daTag_Evt_Create,  (process_method_func)daTag_Evt_Delete,
+    (process_method_func)daTag_Evt_Execute, (process_method_func)daTag_Evt_IsDelete,
+    (process_method_func)daTag_Evt_Draw,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_TAG_EVT = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_TAG_EVT_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTag_Evt_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_TAG_EVT_e,
+    /* Actor SubMtd */ &daTag_Evt_MethodTable,
+    /* Status       */ fopAcStts_UNK_0x40000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

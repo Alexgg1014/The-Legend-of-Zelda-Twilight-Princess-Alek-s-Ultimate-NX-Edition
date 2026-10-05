@@ -1,0 +1,78 @@
+#pragma once
+
+#include "button.hpp"
+#include "document.hpp"
+#include "dusk/iso_validate.hpp"
+#include "dusk/settings.h"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace dusk::ui {
+
+class Prelaunch : public Document {
+public:
+    Prelaunch();
+    void build_menu_buttons();
+
+    void show() override;
+    void hide(bool close) override;
+    void update() override;
+    bool focus() override;
+    bool visible() const override;
+    bool obscures_game() const override { return true; }
+
+    static void refresh_menu_buttons();
+
+protected:
+    bool handle_nav_command(Rml::Event& event, NavCommand cmd) override;
+
+private:
+    bool mEntranceAnimationStarted = false;
+    bool mRestartSuppressed = false;
+    std::vector<std::unique_ptr<Button>> mMenuButtons;
+    Button* mModsButton = nullptr;
+    Rml::Element* mRoot = nullptr;
+    Rml::Element* mDiscStatus = nullptr;
+    Rml::Element* mDiscDetail = nullptr;
+    Rml::Element* mVersion = nullptr;
+    Rml::Element* mUpdateStatus = nullptr;
+    Rml::Element* mUpdateMessage = nullptr;
+    Rml::Element* mUpdateDownload = nullptr;
+    Rml::Element* mUpdateDownloadLabel = nullptr;
+};
+
+class PrelaunchOptions;
+
+struct PrelaunchState {
+    bool initialized = false;
+    bool firstLaunch = true;
+    std::string configuredDiscPath;
+    bool configuredDiscCanLaunch = false;
+    iso::DiscInfo configuredDiscInfo{};
+    iso::ValidationError configuredDiscValidation = iso::ValidationError::Unknown;
+    std::string activeDiscPath;
+    iso::DiscInfo activeDiscInfo{};
+    GameLanguage initialLanguage = GameLanguage::English;
+    GameLanguage unavailableLanguage = GameLanguage::English;
+    bool pendingLanguageUnavailableNotice = false;
+    std::string initialGraphicsBackend;
+    int initialCardFileType = 0;
+    std::string errorString;
+    std::string pendingDiscPath;
+    iso::DiscInfo pendingDiscInfo{};
+    iso::ValidationError pendingDiscValidation = iso::ValidationError::Unknown;
+    bool returnToPrelaunchOnReset = false;
+};
+
+PrelaunchState& prelaunch_state() noexcept;
+void return_to_prelaunch() noexcept;
+void ensure_initialized() noexcept;
+void refresh_configured_disc_state() noexcept;
+void open_iso_picker() noexcept;
+bool is_restart_pending() noexcept;
+void try_push_verification_modal(Document& host);
+void try_push_language_unavailable_modal(Document& host);
+
+}  // namespace dusk::ui

@@ -1,0 +1,7 @@
+{
+  "id": "dev.aleks2.loader_lab",
+  "name": "Loader Lab (H37)",
+  "version": "1.0.0",
+  "author": "Alek's Ultimate NX Edition",
+  "description": "Diagnostic: the smallest native mod. Logs its constructors, every lifecycle call and a C++ exception it throws and catches. Writes nothing."
+}

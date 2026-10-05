@@ -1,0 +1,1141 @@
+#include "d/dolzel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_npc_cd2.h"
+#include "d/actor/d_a_player.h"
+#include "d/d_path.h"
+#include "f_op/f_op_actor_mng.h"
+
+static int jntNodeCallBack(J3DJoint* i_jnt, int param_1) {
+    if (param_1 == 0) {
+        if (j3dSys.getModel()->getUserArea() != 0) {
+            ((daNpcCd2_c*)j3dSys.getModel()->getUserArea())->jntNodeCB(i_jnt, j3dSys.getModel());
+        }
+    }
+    return 1;
+}
+
+static DUSK_CONST char* const l_resMANa[6] = {
+    "MAN_a", "MAN_a_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMADa[6] = {
+    "MAD_a", "MAD_a_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMCNa[6] = {
+    "MCN_a", "MCN_a_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMONa[6] = {
+    "MON_a", "MON_a_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMANb[6] = {
+    "MAN_b", "MAN_b_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMANc[6] = {
+    "MAN_c", "MAN_c_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMASa[6] = {
+    "MAS_a", "MAS_a_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMBNa[6] = {
+    "MBN_a", "MBN_a_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMANa2[6] = {
+    "MAN_a2", "MAN_a2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMADa2[6] = {
+    "MAD_a2", "MAD_a2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMCNa2[6] = {
+    "MCN_a2", "MCN_a2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMONa2[6] = {
+    "MON_a2", "MON_a2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMANb2[6] = {
+    "MAN_b2", "MAN_b2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMANc2[6] = {
+    "MAN_c2", "MAN_c2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMASa2[6] = {
+    "MAS_a2", "MAS_a2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMBNa2[6] = {
+    "MBN_a2", "MBN_a2_TW", "Mgeneral", "Mspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWANa[6] = {
+    "WAN_a", "WAN_a_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWADa[6] = {
+    "WAD_a", "WAD_a_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMATa[6] = {
+    "MAT_a", "MAT_a_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWCNa[6] = {
+    "WCN_a", "WCN_a_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWONa[6] = {
+    "WON_a", "WON_a_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWGNa[6] = {
+    "WGN_a", "WGN_a_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWANb[6] = {
+    "WAN_b", "WAN_b_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWANa2[6] = {
+    "WAN_a2", "WAN_a2_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWADa2[6] = {
+    "WAD_a2", "WAD_a2_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resMATa2[6] = {
+    "MAT_a2", "MAT_a2_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWCNa2[6] = {
+    "WCN_a2", "WCN_a2_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWONa2[6] = {
+    "WON_a2", "WON_a2_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWGNa2[6] = {
+    "WGN_a2", "WGN_a2_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+static DUSK_CONST char* const l_resWANb2[6] = {
+    "WAN_b2", "WAN_b2_TW", "Wgeneral", "Wspecial", "object", "objectTW",
+};
+
+struct anmTblPrm {
+    DUSK_CONST char* name;
+    int index;
+};
+
+static anmTblPrm const l_objTbl[13] = {
+    {"object", 9},  {"object", 9},  {"object", 8},  {"object", 3}, {"object", 13},
+    {"object", 14}, {"object", 12}, {"object", 6},  {"object", 7}, {"object", 10},
+    {"object", 11}, {"object", 15}, {"object", 16},
+};
+
+static anmTblPrm const l_objTWTbl[13] = {
+    {"objectTW", 9},  {"objectTW", 9},  {"objectTW", 8},  {"objectTW", 3}, {"objectTW", 13},
+    {"objectTW", 14}, {"objectTW", 12}, {"objectTW", 6},  {"objectTW", 7}, {"objectTW", 10},
+    {"objectTW", 11}, {"objectTW", -1}, {"objectTW", -1},
+};
+
+static anmTblPrm const l_bckTbl_M[54] = {
+    {"Mgeneral", 26}, {"Mgeneral", 27}, {"Mgeneral", 29}, {"Mgeneral", 30}, {"Mgeneral", 8},
+    {"Mgeneral", 9},  {"Mgeneral", 20}, {"Mgeneral", 21}, {"Mgeneral", 23}, {"Mgeneral", 5},
+    {"Mgeneral", 6},  {"Mgeneral", 28}, {"Mgeneral", 24}, {"Mgeneral", 22}, {"Mgeneral", 17},
+    {"Mgeneral", 13}, {"Mgeneral", 14}, {"Mgeneral", 18}, {"Mgeneral", 15}, {"Mgeneral", 16},
+    {"Mgeneral", 3},  {"Mgeneral", 4},  {"Mspecial", 18}, {"Mspecial", 15}, {"Mspecial", 12},
+    {"Mspecial", 21}, {"Mspecial", 19}, {"Mspecial", 16}, {"Mspecial", 13}, {"Mspecial", 22},
+    {"Mspecial", 20}, {"Mspecial", 17}, {"Mspecial", 14}, {"Mspecial", 23}, {"Mspecial", 7},
+    {"Mspecial", 8},  {"Mspecial", 10}, {"Mspecial", 11}, {"Mgeneral", 25}, {"Mgeneral", 11},
+    {"Mgeneral", 12}, {"Mgeneral", 19}, {"Mspecial", 3},  {"Mspecial", 6},  {"Mspecial", 5},
+    {"Mspecial", 9},  {"Mspecial", 4},  {"Mgeneral", 7},  {"Mgeneral", -1}, {"Mgeneral", -1},
+    {"Mgeneral", -1}, {"Mgeneral", -1}, {"Mgeneral", -1}, {"Mgeneral", 10},
+};
+
+static anmTblPrm const l_bckTbl_W[54] = {
+    {"Wgeneral", 31}, {"Wgeneral", 32}, {"Wgeneral", 34}, {"Wgeneral", 35}, {"Wgeneral", 13},
+    {"Wgeneral", 14}, {"Wgeneral", 25}, {"Wgeneral", 26}, {"Wgeneral", 28}, {"Wgeneral", 10},
+    {"Wgeneral", 11}, {"Wgeneral", 33}, {"Wgeneral", 29}, {"Wgeneral", 27}, {"Wgeneral", 22},
+    {"Wgeneral", 18}, {"Wgeneral", 19}, {"Wgeneral", 23}, {"Wgeneral", 20}, {"Wgeneral", 21},
+    {"Wgeneral", 7},  {"Wgeneral", 8},  {"Wspecial", 13}, {"Wspecial", 10}, {"Wspecial", 7},
+    {"Wspecial", 16}, {"Wspecial", 14}, {"Wspecial", 11}, {"Wspecial", 8},  {"Wspecial", 17},
+    {"Wspecial", 15}, {"Wspecial", 12}, {"Wspecial", 9},  {"Wspecial", 18}, {"Wspecial", 3},
+    {"Wspecial", 4},  {"Wspecial", 5},  {"Wspecial", 6},  {"Wgeneral", 30}, {"Wgeneral", 16},
+    {"Wgeneral", 17}, {"Wgeneral", 24}, {"Wspecial", -1}, {"Wspecial", -1}, {"Wspecial", -1},
+    {"Wspecial", -1}, {"Wspecial", -1}, {"Wgeneral", 12}, {"Wgeneral", 3},  {"Wgeneral", 4},
+    {"Wgeneral", 5},  {"Wgeneral", 6},  {"Wgeneral", 9},  {"Wgeneral", 15},
+};
+
+DUSK_GAME_DATA dCcD_SrcCyl const daNpcCd2_c::m_cylDat = {
+    {
+        {0x0, {{0x0, 0x0, 0x0}, {0, 0}, 0x79}}, // mObj
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0x0}, // mGObjAt
+        {dCcD_SE_NONE, 0x0, 0x0, 0x0, 0}, // mGObjTg
+        {0x0}, // mGObjCo
+    }, // mObjInf
+    {
+        {
+            {0.0f, 0.0f, 0.0f}, // mCenter
+            0.0f, // mRadius
+            0.0f // mHeight
+        } // mCyl
+    }
+};
+
+static DUSK_CONST char* const* l_resNameTbl[30] = {
+    l_resMANa,  l_resMADa,  l_resMCNa,  l_resMONa,  l_resMANb,  l_resMANc,  l_resMASa,  l_resMBNa,
+    l_resMANa2, l_resMADa2, l_resMCNa2, l_resMONa2, l_resMANb2, l_resMANc2, l_resMASa2, l_resMBNa2,
+    l_resWANa,  l_resWADa,  l_resMATa,  l_resWCNa,  l_resWONa,  l_resWGNa,  l_resWANb,  l_resWANa2,
+    l_resWADa2, l_resMATa2, l_resWCNa2, l_resWONa2, l_resWGNa2, l_resWANb2,
+};
+
+static anmTblPrm const l_bmdTbl[30] = {
+    l_resMANa[0],  3, l_resMADa[0],  3, l_resMCNa[0],  4, l_resMONa[0],  4, l_resMANb[0],  3,
+    l_resMANc[0],  4, l_resMASa[0],  4, l_resMBNa[0],  4, l_resMANa2[0], 4, l_resMADa2[0], 4,
+    l_resMCNa2[0], 4, l_resMONa2[0], 4, l_resMANb2[0], 3, l_resMANc2[0], 4, l_resMASa2[0], 4,
+    l_resMBNa2[0], 4, l_resWANa[0],  4, l_resWADa[0],  4, l_resMATa[0],  3, l_resWCNa[0],  4,
+    l_resWONa[0],  4, l_resWGNa[0],  4, l_resWANb[0],  4, l_resWANa2[0], 4, l_resWADa2[0], 4,
+    l_resMATa2[0], 3, l_resWCNa2[0], 4, l_resWONa2[0], 4, l_resWGNa2[0], 4, l_resWANb2[0], 4,
+};
+
+static anmTblPrm const l_bmdTWTbl[30] = {
+    l_resMANa[1],  3, l_resMADa[1],  3, l_resMCNa[1],  4, l_resMONa[1],  4, l_resMANb[1],  3,
+    l_resMANc[1],  4, l_resMASa[1],  4, l_resMBNa[1],  4, l_resMANa2[1], 4, l_resMADa2[1], 3,
+    l_resMCNa2[1], 4, l_resMONa2[1], 4, l_resMANb2[1], 3, l_resMANc2[1], 4, l_resMASa2[1], 4,
+    l_resMBNa2[1], 4, l_resWANa[1],  4, l_resWADa[1],  4, l_resMATa[1],  3, l_resWCNa[1],  4,
+    l_resWONa[1],  4, l_resWGNa[1],  4, l_resWANb[1],  4, l_resWANa2[1], 4, l_resWADa2[1], 4,
+    l_resMATa2[1], 3, l_resWCNa2[1], 4, l_resWONa2[1], 4, l_resWGNa2[1], 4, l_resWANb2[1], 4,
+};
+
+static anmTblPrm const l_btpTbl[30] = {
+    l_resMANa[0],  -1, l_resMADa[0],  -1, l_resMCNa[0],  7, l_resMONa[0],  7, l_resMANb[0],  -1,
+    l_resMANc[0],  7, l_resMASa[0],  7, l_resMBNa[0],  7, l_resMANa2[0], 7, l_resMADa2[0], 7,
+    l_resMCNa2[0], 7, l_resMONa2[0], 7, l_resMANb2[0], -1, l_resMANc2[0], 7, l_resMASa2[0], 7,
+    l_resMBNa2[0], 7, l_resWANa[0],  7, l_resWADa[0],  7, l_resMATa[0],  -1, l_resWCNa[0],  7,
+    l_resWONa[0],  7, l_resWGNa[0],  7, l_resWANb[0],  7, l_resWANa2[0], 7, l_resWADa2[0], 7,
+    l_resMATa2[0], -1, l_resWCNa2[0], 7, l_resWONa2[0], 7, l_resWGNa2[0], 7, l_resWANb2[0], 7,
+};
+
+static anmTblPrm const l_btpTWTbl[30] = {
+    l_resMANa[1],  -1, l_resMADa[1],  -1, l_resMCNa[1],  7, l_resMONa[1],  7, l_resMANb[1],  -1,
+    l_resMANc[1],  7, l_resMASa[1],  7, l_resMBNa[1],  7, l_resMANa2[1], 7, l_resMADa2[1], -1,
+    l_resMCNa2[1], 7, l_resMONa2[1], 7, l_resMANb2[1], -1, l_resMANc2[1], 7, l_resMASa2[1], 7,
+    l_resMBNa2[1], 7, l_resWANa[1],  7, l_resWADa[1],  7, l_resMATa[1],  -1, l_resWCNa[1],  7,
+    l_resWONa[1],  7, l_resWGNa[1],  7, l_resWANb[1],  7, l_resWANa2[1], 7, l_resWADa2[1], 7,
+    l_resMATa2[1], -1, l_resWCNa2[1], 7, l_resWONa2[1], 7, l_resWGNa2[1], 7, l_resWANb2[1], 7,
+};
+
+#include "d/actor/d_a_npc_cd2_HIO.inc"
+
+DUSK_GAME_DATA daNpcCd2_HIO_c l_Cd2_HIO;
+
+int daNpcCd2_c::NpcCreate(int param_1) {
+    J3DModelData* a_mdlData_p = getNpcMdlDataP(param_1);
+    JUT_ASSERT(590, NULL != a_mdlData_p);
+    J3DAnmTexPattern* anmTex = getTexAnmP(param_1);
+    int uVar5;
+    if (anmTex != NULL) {
+        uVar5 = 0x11020084;
+    } else {
+        uVar5 = 0x11000084;
+    }
+    mpMorf = JKR_NEW mDoExt_McaMorfSO(a_mdlData_p, NULL, NULL, NULL, -1, 1.0f, 0, -1, &mCitizen,
+                                  0x80000, uVar5);
+    if (mpMorf != NULL && mpMorf->getModel() == NULL) {
+        mpMorf->stopZelAnime();
+        mpMorf = NULL;
+    }
+    if (mpMorf == NULL) {
+        return 0;
+    }
+    mCitizen.init(&current.pos, &eyePos, 3, 1);
+    mCitizen.setMdlType(param_1, false, mIsDarkWorld != 0 ? 1 : 0);
+    if (anmTex != NULL) {
+        mpBtpAnm = JKR_NEW mDoExt_btpAnm();
+        JUT_ASSERT(622, NULL != mpBtpAnm);
+        if (mpBtpAnm == NULL || !mpBtpAnm->init(a_mdlData_p, anmTex, 1, 2, 1.0f, 0, -1)) {
+            return 0;
+        }
+        field_0xac4 = 0;
+        field_0xaa4 = 0;
+    }
+    static Vec const a_transScaleTbl[30] = {
+        {1.0f, 1.0f, 1.0f},        {1.0f, 1.1983438f, 2.173357f},
+        {1.0f, 0.5581154f, 1.0f},  {1.0f, 0.95, 1.0f},
+        {1.0f, 1.1642542f, 1.0f},  {1.0f, 1.0820773f, 1.0f},
+        {1.0f, 0.78816104f, 1.0f}, {1.0f, 0.91999996f, 1.0f},
+        {1.0f, 1.0f, 1.0f},        {1.0f, 1.1983438f, 2.173357f},
+        {1.0f, 0.5581154f, 1.0f},  {1.0f, 0.95, 1.0f},
+        {1.0f, 1.1642542f, 1.0f},  {1.0f, 1.0820773f, 1.0f},
+        {1.0f, 0.78816104f, 1.0f}, {1.0f, 0.91999996f, 1.0f},
+        {1.0f, 1.0f, 1.0f},        {1.0f, 0.95, 1.0f},
+        {1.0f, 1.0999999f, 1.0f},  {1.0f, 0.5656486f, 1.0f},
+        {1.0f, 0.9f, 1.0f},        {1.0f, 0.8630768f, 1.0f},
+        {1.0f, 1.0529536f, 1.0f},  {1.0f, 1.0f, 1.0f},
+        {1.0f, 0.95, 1.0f},        {1.0f, 1.0999999f, 1.0f},
+        {1.0f, 0.5656486f, 1.0f},  {1.0f, 0.9f, 1.0f},
+        {1.0f, 0.8630768f, 1.0f},  {1.0f, 1.0529536f, 1.0f},
+    };
+    cXyz cStack_38(a_transScaleTbl[param_1]);
+    mpMorf->offTranslate();
+    mpMorf->setTranslateScale(cStack_38);
+    for (u16 i = 0; i < a_mdlData_p->getJointNum(); i++) {
+        a_mdlData_p->getJointNodePointer(i)->setCallBack(jntNodeCallBack);
+    }
+    mpMorf->getModel()->setUserArea((uintptr_t)this);
+    return 1;
+}
+
+J3DModel* daNpcCd2_c::ObjCreate(int param_0) {
+    J3DModel* model;
+    J3DModelData* modelData = getObjMdlDataP(param_0);
+    if (modelData) {
+        model = mDoExt_J3DModel__create(modelData, 0x80000, 0x11000084);
+    } else {
+        model = NULL;
+    }
+    return model;
+}
+
+J3DModel* daNpcCd2_c::ChairCreate(f32 param_1) {
+    const char* resName = (mIsDarkWorld) ?  "objectTW" :  "object";
+    int resIndex = isM_() ? ((mIsDarkWorld != 0) ? 4 : 4) : ((mIsDarkWorld != 0) ? 5 : 5);
+
+    J3DModelData* modelData = (J3DModelData*)dComIfG_getObjectRes(resName, resIndex);
+    if (modelData != NULL) {
+        J3DModel* chairModel = mDoExt_J3DModel__create(modelData, 0x80000, 0x11000084);
+        if (chairModel == NULL) {
+            return NULL;
+        }
+        Vec chairScale = {param_1, param_1, param_1};
+        mDoMtx_stack_c::transS(current.pos);
+        mDoMtx_stack_c::ZXYrotM(shape_angle);
+        chairModel->setBaseScale(chairScale);
+        chairModel->setBaseTRMtx(mDoMtx_stack_c::get());
+        return chairModel;
+    }
+    return NULL;
+}
+
+bool daNpcCd2_c::isM_() {
+    if (mpMorf == NULL) {
+        return m_type < 16;
+    }
+    u16 a_jntNum = mpMorf->getModel()->getModelData()->getJointNum();
+    JUT_ASSERT(738, (a_jntNum == JntM_NUM_e) || (a_jntNum == JntW_NUM_e));
+    return a_jntNum == JntM_NUM_e;
+}
+
+J3DAnmTransform* daNpcCd2_c::getAnmP(int param_1, int param_2) {
+    int a_anmNum = param_1;
+    switch (a_anmNum) {
+    case 0:
+    case 0x16:
+    case 0x1a:
+    case 0x1e:
+    case 0x22:
+        switch (param_2) {
+        case 1:
+        case 8:
+            a_anmNum = 0x1e;
+            break;
+        case 2:
+        case 3:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            a_anmNum = 0x1a;
+            break;
+        case 4:
+        case 5:
+            a_anmNum = 0x16;
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 1:
+        switch (param_2) {
+        case 1:
+        case 8:
+            a_anmNum = 0x1e;
+            break;
+        case 2:
+        case 3:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            a_anmNum = 0x1a;
+            break;
+        case 4:
+        case 5:
+            a_anmNum = 0x16;
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 2:
+    case 0x19:
+    case 0x1d:
+    case 0x21:
+        switch (param_2) {
+        case 1:
+        case 8:
+            a_anmNum = 0x21;
+            break;
+        case 2:
+        case 3:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            a_anmNum = 0x1d;
+            break;
+        case 4:
+        case 5:
+            a_anmNum = 0x19;
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 3:
+    switch (param_2) {
+        case 1:
+        case 8:
+            a_anmNum = 0x21;
+            break;
+        case 2:
+        case 3:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            a_anmNum = 0x1d;
+            break;
+        case 4:
+        case 5:
+            a_anmNum = 0x19;
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 6:
+    case 0x17:
+    case 0x1b:
+    case 0x1f:
+        switch (param_2) {
+        case 1:
+        case 8:
+            a_anmNum = 0x1f;
+            break;
+        case 2:
+        case 3:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            a_anmNum = 0x1b;
+            break;
+        case 4:
+        case 5:
+            a_anmNum = 0x17;
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 7:
+    case 0x18:
+    case 0x1c:
+    case 0x20:
+        switch (param_2) {
+        case 1:
+        case 8:
+            a_anmNum = 0x20;
+            break;
+        case 2:
+        case 3:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            a_anmNum = 0x1c;
+            break;
+        case 4:
+        case 5:
+            a_anmNum = 0x18;
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 4:
+    case 5:
+        switch(param_2) {
+        case 0:
+            break;
+        case 1:
+        case 8:
+            a_anmNum = 0x25;
+            break;
+        case 2:
+            a_anmNum = 0x2d;
+            break;
+        case 3:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            a_anmNum = 0x24;
+            break;
+        case 4:
+        case 5:
+            a_anmNum = 0x23;
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 8:
+    case 9:
+    case 10:
+    case 0xb:
+    case 0xc:
+    case 0xd:
+    case 0xe:
+    case 0xf:
+    case 0x10:
+    case 0x11:
+    case 0x12:
+    case 0x13:
+    case 0x14:
+    case 0x15:
+        switch(param_2) {
+        case 1:
+        case 2:
+        case 3:
+        case 4:
+        case 5:
+        case 8:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            break;
+        case 6:
+        case 7:
+            a_anmNum = 0x22;
+            break;
+        }
+        break;
+    case 0x26:
+    case 0x27:
+    case 0x28:
+    case 0x29:
+    case 0x2f:
+    case 0x30:
+    case 0x31:
+    case 0x32:
+    case 0x33:
+    case 0x34:
+    case 0x35:
+        break;
+    case 0x2a:
+    case 0x2b:
+    case 0x2c:
+    case 0x2e:
+        JUT_ASSERT(939, m_type == MdlMANa_e || m_type == MdlMADa_e);
+        break;
+    default:
+        return 0;
+    }
+    const char* name;
+    int index;
+    end:
+    if (isM_()) {
+        JUT_ASSERT(948, 0 <= a_anmNum && a_anmNum < (sizeof(l_bckTbl_M)/sizeof(anmTblPrm)));
+        name = l_bckTbl_M[a_anmNum].name;
+        index = l_bckTbl_M[a_anmNum].index;
+    } else {
+        JUT_ASSERT(953, 0 <= a_anmNum && a_anmNum < (sizeof(l_bckTbl_W)/sizeof(anmTblPrm)));
+        name = l_bckTbl_W[a_anmNum].name;
+        index = l_bckTbl_W[a_anmNum].index;
+    }
+    if (index == -1) {
+        return NULL;
+    }
+    return (J3DAnmTransform*)dComIfG_getObjectRes(name, index);
+}
+
+int daNpcCd2_c::setAttention(int param_1) {
+    static cXyz a_eyeOfsTbl[30] = {
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+        cXyz(0.0f, 10.0f, 0.0f),
+    };
+
+    int anmIdx = isM_() ? 3 : 3;
+    mDoMtx_stack_c::copy(mpMorf->getModel()->getAnmMtx(anmIdx));
+    mDoMtx_stack_c::multVec(&a_eyeOfsTbl[param_1], &eyePos);
+    attention_info.position.set(current.pos.x, Cd2_HIO_atnOfs(param_1) + current.pos.y, current.pos.z);
+    return 1;
+}
+
+int daNpcCd2_c::loadResrc(int idx, int param_1) {
+    int result;
+    if (mIsDarkWorld) {
+        result = dComIfG_resLoad(&mPhase1, l_resNameTbl[idx][1]);
+        if (result != cPhs_COMPLEATE_e) {
+            return result;
+        }
+        result = dComIfG_resLoad(&mPhase4, l_resNameTbl[idx][5]);
+        if (result != cPhs_COMPLEATE_e) {
+            return result;
+        }
+    } else {
+        result = dComIfG_resLoad(&mPhase1, l_resNameTbl[idx][0]);
+        if (result != cPhs_COMPLEATE_e) {
+            return result;
+        }
+        result = dComIfG_resLoad(&mPhase4, l_resNameTbl[idx][4]);
+        if (result != cPhs_COMPLEATE_e) {
+            return result;
+        }
+    }
+    result = dComIfG_resLoad(&mPhase2, l_resNameTbl[idx][2]);
+    if (result != cPhs_COMPLEATE_e) {
+        return result;
+    }
+    result = dComIfG_resLoad(&mPhase3, l_resNameTbl[idx][3]);
+    if (result != cPhs_COMPLEATE_e) {
+        return result;
+    }
+    return result;
+}
+
+int daNpcCd2_c::removeResrc(int idx, int param_1) {
+    if (mIsDarkWorld) {
+        dComIfG_resDelete(&mPhase1, l_resNameTbl[idx][1]);
+        dComIfG_resDelete(&mPhase4, l_resNameTbl[idx][5]);
+    } else {
+        dComIfG_resDelete(&mPhase1, l_resNameTbl[idx][0]);
+        dComIfG_resDelete(&mPhase4, l_resNameTbl[idx][4]);
+    }
+    dComIfG_resDelete(&mPhase2, l_resNameTbl[idx][2]);
+    dComIfG_resDelete(&mPhase3, l_resNameTbl[idx][3]);
+    return 1;
+}
+
+void daNpcCd2_c::setEnvTevCol() {
+    tevStr.YukaCol = dComIfG_Bgsp().GetPolyColor(mAcch.m_gnd);
+    tevStr.room_no = dComIfG_Bgsp().GetRoomId(mAcch.m_gnd);
+}
+
+void daNpcCd2_c::setRoomNo() {
+    s32 id = dComIfG_Bgsp().GetRoomId(mAcch.m_gnd);
+    fopAcM_SetRoomNo(this, id);
+    mStts.SetRoomId(id);
+}
+
+void daNpcCd2_c::animation(int param_1) {
+    if (mpBtpAnm != NULL && cLib_calcTimer(&field_0xaa4) == 0) {
+        field_0xac4++;
+        if (field_0xac4 >= mpBtpAnm->getBtpAnm()->getFrameMax()) {
+            field_0xaa4 = (param_1 >= 0) ? param_1 : cLib_getRndValue(30, 30);
+            field_0xac4 = 0;
+        }
+    }
+    f32 prevFrame = mpMorf->getFrame();
+    mpMorf->play(0, 0);
+    if (mpMorf->getFrame() < prevFrame) {
+        cLib_calcTimer(&field_0xaa0);
+    }
+}
+
+void daNpcCd2_c::setAnm(J3DAnmTransformKey* param_1, f32 param_2, f32 param_3, int param_4,
+                        int param_5, int param_6) {
+    if (param_1 != mpMorf->getAnm()) {
+        mpMorf->setAnm(param_1, param_4, param_3, param_2, param_5, param_6);
+    }
+}
+
+int daNpcCd2_c::drawShadow(f32 param_0) {
+    if (mIsDarkWorld && !daPy_py_c::checkNowWolfEyeUp()) {
+        return 1;
+    }
+    dComIfGd_setSimpleShadow(&current.pos, mAcch.GetGroundH(), param_0, mAcch.m_gnd, 0,
+                             1.0f,
+                             dDlst_shadowControl_c::getSimpleTex());
+    return 1;
+}
+
+int daNpcCd2_c::drawObj(int idx, J3DModel* i_model, f32 i_scale) {
+    if (i_model == NULL) {
+        return 0;
+    }
+    if (mIsDarkWorld && !daPy_py_c::checkNowWolfEyeUp()) {
+        return 0;
+    }
+    int x = isM_() ? 0 : 1;
+    static s32 const a_jntNumTbl[13][2] = {
+        {-1, -1}, {7, -1}, {11, -1}, {-1, 11}, {7, -1},  {-1, 11}, {1, -1},
+        {-1, 11}, {-1, 7}, {10, -1}, {-1, 11}, {10, -1}, {-1, 11},
+    };
+    s32 jntNum = a_jntNumTbl[idx][x];
+    if (i_model && jntNum >= 0) {
+        g_env_light.setLightTevColorType_MAJI(i_model, &tevStr);
+        mDoMtx_copy(mpMorf->getModel()->getAnmMtx(jntNum), mDoMtx_stack_c::now);
+        mDoMtx_stack_c::scaleM(i_scale, i_scale, i_scale);
+        i_model->setBaseTRMtx(mDoMtx_stack_c::now);
+        mDoExt_modelUpdateDL(i_model);
+    }
+    return 1;
+}
+
+int daNpcCd2_c::drawNpc() {
+    if (mIsDarkWorld) {
+        g_env_light.settingTevStruct(4, &current.pos, &tevStr);
+    } else {
+        g_env_light.settingTevStruct(0, &current.pos, &tevStr);
+    }
+    if (mIsDarkWorld && !daPy_py_c::checkNowWolfEyeUp()) {
+        setHitodamaParticle();
+        return 1;
+    }
+    g_env_light.setLightTevColorType_MAJI(mpMorf->getModel(), &tevStr);
+    if (mIsDarkWorld) {
+        dComIfGd_setListDark();
+    }
+    if (mpBtpAnm) {
+        mpBtpAnm->entry(mpMorf->getModel()->getModelData(), field_0xac4);
+        mpMorf->entryDL();
+        mpBtpAnm->remove(mpMorf->getModel()->getModelData());
+    } else {
+        mpMorf->entryDL();
+    }
+    if (mIsDarkWorld) {
+        dComIfGd_setList();
+    }
+    return 1;
+}
+
+static inline f32 Cd2_HIO_jntTZ(int param_1, int param_2) {
+    f32 rv;
+    if (param_1 < 16) {
+        rv = l_Cd2_HIO.field_0x0004[param_1].field_0x004[param_2].field_0x04.field_0x00[2];
+    } else {
+        rv = l_Cd2_HIO.field_0x20c4[param_1 - 16].field_0x004[param_2].field_0x04.field_0x00[2];
+    }
+    return 10.0f * rv;
+}
+
+static inline f32 Cd2_HIO_jntTY(int param_1, int param_2) {
+    f32 rv;
+    if (param_1 < 16) {
+        rv = l_Cd2_HIO.field_0x0004[param_1].field_0x004[param_2].field_0x04.field_0x00[1];
+    } else {
+        rv = l_Cd2_HIO.field_0x20c4[param_1 - 16].field_0x004[param_2].field_0x04.field_0x00[1];
+    }
+    return 10.0f * rv;
+}
+
+static inline f32 Cd2_HIO_jntTX(int param_1, int param_2) {
+    f32 rv;
+    if (param_1 < 16) {
+        rv = l_Cd2_HIO.field_0x0004[param_1].field_0x004[param_2].field_0x04.field_0x00[0];
+    } else {
+        rv = l_Cd2_HIO.field_0x20c4[param_1 - 16].field_0x004[param_2].field_0x04.field_0x00[0];
+    }
+    return 10.0f * rv;
+}
+
+static inline s16 Cd2_HIO_jntRZ(int param_1, int param_2) {
+    s16 rv;
+    if (param_1 < 16) {
+        rv = l_Cd2_HIO.field_0x0004[param_1].field_0x004[param_2].field_0x04.field_0x0C[2];
+    } else {
+        rv = l_Cd2_HIO.field_0x20c4[param_1 - 16].field_0x004[param_2].field_0x04.field_0x0C[2];
+    }
+    return DEG2S(rv);
+}
+
+static inline s16 Cd2_HIO_jntRY(int param_1, int param_2) {
+    s16 rv;
+    if (param_1 < 16) {
+        rv = l_Cd2_HIO.field_0x0004[param_1].field_0x004[param_2].field_0x04.field_0x0C[1];
+    } else {
+        rv = l_Cd2_HIO.field_0x20c4[param_1 - 16].field_0x004[param_2].field_0x04.field_0x0C[1];
+    }
+    return DEG2S(rv);
+}
+
+static inline s16 Cd2_HIO_jntRX(int param_1, int param_2) {
+    s16 rv;
+    if (param_1 < 16) {
+        rv = l_Cd2_HIO.field_0x0004[param_1].field_0x004[param_2].field_0x04.field_0x0C[0];
+    } else {
+        rv = l_Cd2_HIO.field_0x20c4[param_1 - 16].field_0x004[param_2].field_0x04.field_0x0C[0];
+    }
+    return DEG2S(rv);
+}
+
+int daNpcCd2_c::jntNodeCB(J3DJoint* param_1, J3DModel* param_2) {
+    int jntNo = param_1->getJntNo();
+    cXyz cStack_3c(Cd2_HIO_jntTX(m_type, jntNo), Cd2_HIO_jntTY(m_type, jntNo), Cd2_HIO_jntTZ(m_type, jntNo));
+    s16 rz = Cd2_HIO_jntRZ(m_type, jntNo);
+    s16 ry = Cd2_HIO_jntRY(m_type, jntNo);
+    s16 rx = Cd2_HIO_jntRX(m_type, jntNo);
+    csXyz cStack_44(rx, ry, rz);
+    mDoMtx_stack_c::copy(param_2->getAnmMtx(jntNo));
+    mDoMtx_stack_c::ZXYrotM(cStack_44);
+    mDoMtx_stack_c::transM(cStack_3c);
+    param_2->setAnmMtx(jntNo, mDoMtx_stack_c::get());
+    cMtx_copy(mDoMtx_stack_c::get(), J3DSys::mCurrentMtx);
+    return 1;
+}
+
+void daNpcCd2_c::setHitodamaParticle() {
+    static const u16 id[2] = {
+        0x8497,
+        0x8498,
+    };
+    
+    field_0xac0 = (u16)(field_0xac2 * 2);
+    field_0xab4.x = 8.0f * cM_ssin(field_0xac2);
+    field_0xab4.y = 4.0f * cM_ssin(field_0xac0);
+    field_0xab4.z = field_0xab4.x * -cM_ssin(shape_angle.y);
+    field_0xab4.x = field_0xab4.x * cM_scos(shape_angle.y);
+    field_0xac2 += 0x400;
+    cXyz local_28(eyePos.x + field_0xab4.x, eyePos.y + field_0xab4.y, eyePos.z + field_0xab4.z);
+    for (int i = 0; i < 2; i++) {
+        mHitodamaEmitters[i] =
+            dComIfGp_particle_set(mHitodamaEmitters[i], id[i], &local_28, &shape_angle, 0);
+        JPABaseEmitter* pEmitter = dComIfGp_particle_getEmitter(mHitodamaEmitters[i]);
+        if (pEmitter != NULL) {
+            u8 alpha;
+            if (daPy_py_c::checkNowWolfEyeUp() == FALSE) {
+                alpha = 0xff;
+            } else {
+                alpha = 0;
+            }
+            pEmitter->setGlobalTranslation(local_28.x, local_28.y, local_28.z);
+            pEmitter->setGlobalAlpha(alpha);
+        }
+    }
+}
+
+static void* target;
+
+static f32 targetWay;
+
+static s16 wolfAngle;
+
+static void* s_sub1(void* param_0, void* param_1) {
+    if (fopAc_IsActor(param_0) && fopAcM_GetName(param_0) == 0x28A) {
+        s16 angle = fopAcM_searchActorAngleY((fopAc_ac_c*)param_1, (fopAc_ac_c*)param_0);
+        s32 dist = cLib_distanceAngleS(wolfAngle, angle);
+        if (target == NULL) {
+            targetWay = fopAcM_searchActorDistanceXZ2((fopAc_ac_c*)param_1, (fopAc_ac_c*)param_0);
+            target = param_0;
+            return NULL;
+        } else if (dist > 0x4000) {
+            f32 way = fopAcM_searchActorDistanceXZ2((fopAc_ac_c*)param_1, (fopAc_ac_c*)param_0);
+            if (targetWay > way) {
+                targetWay = way;
+                target = param_0;
+            }
+        }
+    }
+    return NULL;
+}
+
+daTagEscape_c* daNpcCd2_c::getEscapeTag() {
+    target = NULL;
+    wolfAngle = fopAcM_searchPlayerAngleY(this);
+    fpcM_Search(s_sub1, this);
+    return (daTagEscape_c*)target;
+}
+
+bool daNpcCd2_c::checkFearSituation() {
+    f32 dVar10 =
+        fopAcM_GetPosition_p(this)->y - fopAcM_GetPosition_p(daPy_getPlayerActorClass())->y;
+    return !mIsDarkWorld &&
+        daPy_py_c::checkNowWolf() &&
+        dVar10 < 200.0f &&
+        fopAcM_searchPlayerDistanceXZ2(this) < std::pow(500.0f, 2.0f);
+}
+
+J3DModelData* daNpcCd2_c::getNpcMdlDataP(int param_1) {
+    const anmTblPrm* def;
+    if (mIsDarkWorld) {
+        def = &l_bmdTWTbl[param_1];
+    } else {
+        def = &l_bmdTbl[param_1];
+    }
+    return (J3DModelData*)dComIfG_getObjectRes(def->name, def->index);
+}
+
+J3DModelData* daNpcCd2_c::getObjMdlDataP(int param_1) {
+    J3DModelData* model_data = NULL;
+    const anmTblPrm* def;
+    if (mIsDarkWorld) {
+        def = &l_objTWTbl[param_1];
+    } else {
+        def = &l_objTbl[param_1];
+    }
+    if (def->index > 0) {
+        model_data = (J3DModelData*)dComIfG_getObjectRes(def->name, def->index);
+    }
+     return model_data;
+}
+
+J3DAnmTexPattern* daNpcCd2_c::getTexAnmP(int param_1) {
+    const anmTblPrm* def;
+    if (mIsDarkWorld) {
+        def = &l_btpTWTbl[param_1];
+    } else {
+        def = &l_btpTbl[param_1];
+    }
+    if (def->index != -1) {
+        return (J3DAnmTexPattern*)dComIfG_getObjectRes(def->name, def->index);
+    }
+     return NULL;
+}
+
+bool PathTrace_c::setPath(int param_1, int param_2, int param_3, cXyz* param_4, bool param_5) {
+    mPath = NULL;
+    mPath = dPath_GetRoomPath(param_1, param_2);
+    field_0x24 = param_3;
+    if (mPath == NULL) {
+        return FALSE;
+    }
+
+    field_0x20 = 0;
+    if (param_5) {
+        f32 minDist = G_CM3D_F_INF;
+        field_0x20 = 0;
+        for (int i = 0; i < mPath->m_num; i++) {
+            dPnt* pnt = dPath_GetPnt(mPath, i);
+            f32 dist = param_4->abs2(pnt->m_position);
+            if (dist < minDist) {
+                minDist = dist;
+                field_0x20 = i;
+            }
+        }
+    }
+    mNextPoint = param_4->abs(dPath_GetPnt(mPath, field_0x20)->m_position);
+    return TRUE;
+}
+
+bool PathTrace_c::checkPoint(cXyz param_1, f32 param_2) {
+    dPnt* pnt = dPath_GetPnt(mPath, field_0x20);
+    f32 dist = param_1.absXZ(pnt->m_position);
+    if (dist < param_2 || dist < 10.0f) {
+        return true;
+    }
+
+    mNextPoint -= param_2;
+    return mNextPoint < 0.0f;
+}
+
+bool PathTrace_c::checkPathEnd(cXyz param_1, f32 param_2) {
+    if (checkPoint(param_1, param_2)) {
+        if (field_0x24 > 0) {
+            if (field_0x20 >= mPath->m_num - 1) {
+                return true;
+            }
+        } else if (field_0x20 <= 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void PathTrace_c::getTargetPoint(Vec* targetPoint) {
+    if (mObstacle == NULL) {
+        dPnt* pnt = dPath_GetPnt(mPath, field_0x20);
+        *targetPoint = pnt->m_position;
+    } else {
+        getAvoidPoint(targetPoint);
+    }
+}
+
+void PathTrace_c::setAvoidPoint() {
+    JUT_ASSERT(1602, mPath != NULL);
+    JUT_ASSERT(1603, mMyself != NULL);
+    JUT_ASSERT(1604, mObstacle != NULL);
+    cXyz& selfPos = fopAcM_GetPosition(mMyself);
+    s16 obstacleAngle = cLib_targetAngleY(&selfPos, &fopAcM_GetPosition(mObstacle));
+#if TARGET_LITTLE_ENDIAN
+    Vec copy = dPath_GetPnt(mPath, field_0x20)->m_position;
+    s16 diff = (s16)obstacleAngle - cLib_targetAngleY(&selfPos, &copy);
+#else
+    s16 diff = (s16)obstacleAngle - cLib_targetAngleY(&selfPos, &dPath_GetPnt(mPath, field_0x20)->m_position);
+#endif
+    s16 rot;
+    if (diff > 0) {
+        rot = (s16)obstacleAngle + 0x4000;
+    } else {
+        rot = (s16)obstacleAngle - 0x4000;
+    }
+    mAvoidPoint.x = 0.0f;
+    mAvoidPoint.y = 0.0f;
+    mAvoidPoint.z = -250.0f;
+    mDoMtx_stack_c::transS(fopAcM_GetPosition(mObstacle));
+    mDoMtx_stack_c::YrotM(rot);
+    mDoMtx_stack_c::multVec(&mAvoidPoint, &mAvoidPoint);
+}
+
+void PathTrace_c::setNextPoint(cXyz& param_1) {
+    setNextPoint();
+    mNextPoint = param_1.abs(dPath_GetPnt(mPath, field_0x20)->m_position);
+}
+
+void PathTrace_c::setNextPoint() {
+    dPnt* pnt1 = dPath_GetPnt(mPath, field_0x20);
+    if (field_0x24 > 0) {
+        field_0x20 = incIndex(field_0x20);
+    } else {
+        field_0x20 = decIndex(field_0x20);
+    }
+    dPnt* pnt2 = dPath_GetPnt(mPath, field_0x20);
+    cXyz acStack_28(pnt1->m_position);
+    field_0x18 = acStack_28.abs(pnt2->m_position);
+    mNextPoint = G_CM3D_F_INF;
+}
+
+int PathTrace_c::incIndex(int param_1) {
+    if (++param_1 < mPath->m_num) {
+        return param_1;
+    }
+    if (isClose()) {
+        return 0;
+    } else {
+        return --param_1;
+    }
+}
+
+int PathTrace_c::decIndex(int param_1) {
+    int rv = param_1 - 1;
+    if (rv < 0) {
+        if (isClose()) {
+            rv = mPath->m_num - 1;
+        } else {
+            rv = 0;
+        }
+    }
+    return rv;
+}
+
+static void* s_sub(void* param_1, void* param_2) {
+    if (fopAcM_IsActor(param_1) &&
+        ((fopAcM_GetName(param_1) == fpcNm_ALINK_e && !dKy_darkworld_check()) ||
+         fopAcM_GetName(param_1) == fpcNm_NPC_CD3_e || fopAcM_GetName(param_1) == fpcNm_NPC_PASSER_e ||
+         fopAcM_GetName(param_1) == fpcNm_NPC_GUARD_e || fopAcM_GetName(param_1) == fpcNm_NPC_FGUARD_e ||
+         fopAcM_GetName(param_1) == fpcNm_NPC_SHOE_e || fopAcM_GetName(param_1) == fpcNm_NPC_KASIHANA_e ||
+         fopAcM_GetName(param_1) == fpcNm_NPC_KASIKYU_e ||
+         fopAcM_GetName(param_1) == fpcNm_NPC_KASIMICH_e))
+    {
+        static_cast<PathTrace_c*>(param_2)->checkObstacleSub((fopAc_ac_c*)param_1);
+    }
+    return NULL;
+}
+
+fopAc_ac_c* PathTrace_c::checkObstacle(fopAc_ac_c* param_0) {
+    mMyself = param_0;
+    mObstacle = NULL;
+    if (fopAcM_CheckCondition(mMyself, 4)) {
+        return NULL;
+    }
+    fpcM_Search(s_sub, this);
+    if (mObstacle) {
+        setAvoidPoint();
+    }
+    return mObstacle;
+}
+
+void PathTrace_c::checkObstacleSub(fopAc_ac_c* pObstacle) {
+    if (mMyself != pObstacle) {
+        JUT_ASSERT(1816, mPath != NULL);
+        cXyz& newObstaclePos = fopAcM_GetPosition(pObstacle);
+        dPnt* pnt = dPath_GetPnt(mPath, field_0x20);
+        f32 local_38;
+        f32 local_3c;
+        f32 local_40;
+        local_38 = G_CM3D_F_INF;
+        JUT_ASSERT(1822, mMyself != NULL);
+        cXyz& selfPos = fopAcM_GetPosition(mMyself);
+        if (mObstacle != NULL) {
+            f32 distCurObstacle = selfPos.abs2(fopAcM_GetPosition(mObstacle));
+            f32 distNewObstacle = selfPos.abs2(newObstaclePos);
+            if (!(distNewObstacle < distCurObstacle)) {
+                return;
+            }
+        }
+        if (cM3d_Len2dSqPntAndSegLine(newObstaclePos.x, newObstaclePos.z, selfPos.x, selfPos.z, pnt->m_position.x,
+                                      pnt->m_position.z, &local_40, &local_3c, &local_38) &&
+                                      local_38 < (f32)pow(250.0f, 2.0f))
+        {
+            mObstacle = pObstacle;
+        }
+    }
+}

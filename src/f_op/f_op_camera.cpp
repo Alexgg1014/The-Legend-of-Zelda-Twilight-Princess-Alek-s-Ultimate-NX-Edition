@@ -1,0 +1,108 @@
+/**
+ * f_op_camera.cpp
+ * Camera Process Framework
+ */
+
+#include "f_op/f_op_camera.h"
+#include "f_op/f_op_camera_mng.h"
+#include "f_ap/f_ap_game.h"
+#include "d/d_com_inf_game.h"
+#include "d/d_s_play.h"
+#include "f_op/f_op_draw_tag.h"
+
+static s32 fopCam_Draw(camera_class* i_this) {
+    s32 ret = 1;
+    #if DEBUG
+    fapGm_HIO_c::startCpuTimer();
+    #endif
+
+    if (!dComIfGp_isPauseFlag()) {
+        ret = fpcLf_DrawMethod(i_this->submethod, i_this);
+    }
+
+    #if DEBUG
+    fapGm_HIO_c::stopCpuTimer("カメラ（描画処理）"); // Camera (rendering process)
+    #endif
+
+    return ret;
+}
+
+static int fopCam_Execute(camera_class* i_this) {
+    int ret;
+#if AVOID_UB
+    ret = 0;
+#endif
+    #if DEBUG
+    fapGm_HIO_c::startCpuTimer();
+    #endif
+
+    #if TARGET_PC
+    if (dusk::getSettings().game.debugFlyCam && dusk::getSettings().game.debugFlyCamLockEvents) {
+        dScnPly_c::setPauseTimer(1);
+        ret = fpcMtd_Execute((process_method_class*)i_this->submethod, i_this);
+    } else {
+        if (!dComIfGp_isPauseFlag() && !dScnPly_c::isPause()) {
+            ret = fpcMtd_Execute((process_method_class*)i_this->submethod, i_this);
+        }
+    }
+    #else
+    if (!dComIfGp_isPauseFlag() && !dScnPly_c::isPause()) {
+        ret = fpcMtd_Execute((process_method_class*)i_this->submethod, i_this);
+    }
+    #endif
+
+    #if DEBUG
+    fapGm_HIO_c::stopCpuTimer("カメラ（計算処理）"); // Camera (computational processing)
+    #endif
+
+    return ret;
+}
+
+int fopCam_IsDelete(camera_class* i_this) {
+    int ret = fpcMtd_IsDelete((process_method_class*)i_this->submethod, i_this);
+    if (ret == 1) {
+        fopDwTg_DrawQTo(&i_this->create_tag);
+    }
+
+    return ret;
+}
+
+int fopCam_Delete(camera_class* i_this) {
+    int ret = 0;
+    ret = fpcMtd_Delete((process_method_class*)i_this->submethod, i_this);
+    if (ret == 1) {
+        fopDwTg_DrawQTo(&i_this->create_tag);
+    }
+
+    return ret;
+}
+
+static int fopCam_Create(void* i_this) {
+    camera_class* a_this = (camera_class*)i_this;
+    int ret;
+
+    if (fpcM_IsFirstCreating(i_this)) {
+        camera_process_profile_definition* profile = (camera_process_profile_definition*)fpcM_GetProfile(i_this);
+        a_this->submethod = profile->sub_method;
+
+        fopDwTg_Init(&a_this->create_tag, a_this);
+        u32* append = (u32*)fpcM_GetAppend(a_this);
+
+        if (append != NULL) {
+            fpcM_SetParam(a_this, *append);
+        }
+    }
+
+    ret = fpcMtd_Create(&a_this->submethod->base, a_this);
+    if (ret == cPhs_COMPLEATE_e) {
+        fopDwTg_ToDrawQ(&a_this->create_tag, fpcM_DrawPriority(a_this));
+    }
+
+    return ret;
+}
+
+DUSK_GAME_DATA leafdraw_method_class g_fopCam_Method = {
+    (process_method_func)fopCam_Create,  (process_method_func)fopCam_Delete,
+    (process_method_func)fopCam_Execute, (process_method_func)fopCam_IsDelete,
+    (process_method_func)fopCam_Draw,
+};

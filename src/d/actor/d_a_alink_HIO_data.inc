@@ -1,0 +1,3316 @@
+#include "d/actor/d_a_alink.h"
+
+// clang-format off
+DUSK_GAME_DATA const daAlinkHIO_basic_c1 daAlinkHIO_basic_c0::m = {
+    false,
+	20000,
+	-10000,
+	8000,
+	1,
+	30,
+	400,
+	600,
+	16384,
+	1.0f,
+	4.0f,
+	0.7f,
+	3.0f,
+    60.0f,
+	85.0f,
+	300.0f,
+	200.0f,
+	20.0f,
+	30.0f,
+	23.0f,
+	41.0f,
+	0.7f,
+	0.5f,
+	0.7f,
+	400.0f,
+	5000.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_move_c1 daAlinkHIO_move_c0::m = {
+	{
+        11,
+	    0.7f,
+	    3.0f,
+	    4.0f,
+	    12.0f,
+    },
+    4500,
+    100,
+    5,
+    1.0f,
+    0.75f,
+    1.5f,
+    0.4f,
+    0.8f,
+    23.0f,
+    1.9f,
+    2.2f,
+    0.6f,
+    1.1f,
+    1.5f,
+    0.99f,
+    3.0f,
+    0.7f,
+    0.4f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_atnMove_c1 daAlinkHIO_atnMove_c0::m = {
+    3000,
+	2000,
+	6,
+	1.2f,
+	1.1f,
+	1.5f,
+	0.5f,
+	0.6f,
+	13.0f,
+	6.0f,
+	7.5f,
+    0.7f,
+	1.4f,
+	0.25f,
+	0.7f,
+	15.0f,
+	2.5f,
+	8.0f,
+	0.5f,
+	0.4f,
+	1.0f,
+	1.3f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_noActAtnMove_c1 daAlinkHIO_noActAtnMove_c0::m = {
+    3000,
+	2000,
+	6,
+	0.9f,
+	1.1f,
+	1.3f,
+	0.5f,
+	0.6f,
+	13.0f,
+	6.0f,
+	7.5f,
+    0.7f,
+	1.3f,
+	0.25f,
+	0.7f,
+	13.0f,
+	2.5f,
+	8.0f,
+	0.35f,
+	0.4f,
+	0.1f,
+	2.3f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_frontRoll_c1 daAlinkHIO_frontRoll_c0::m = {
+	{
+        29,
+	    1.1f,
+	    0.0f,
+	    3.0f,
+	    22.0f,
+    },
+	{
+        29,
+	    0.8f,
+	    3.0f,
+	    2.0f,
+	    25.0f,
+    },
+	{
+        33,
+	    1.2f,
+	    0.0f,
+	    1.0f,
+	    25.0f,
+    },
+    10000,
+    5,
+    1000,
+    100,
+    3.0f,
+    1.3f,
+    25.0f,
+    10.0f,
+    3.0f,
+    15.0f,
+    10.0f,
+    12.0f,
+    9.0f,
+    19.0f,
+    60.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_backJump_c1 daAlinkHIO_backJump_c0::m = {
+	{
+		9,
+	    0.7f,
+	    0.0f,
+	    2.0f,
+	    12.0f,
+	},
+	{
+        17,
+	    1.0f,
+	    2.0f,
+	    2.0f,
+	    3.0f,
+	},
+	24.0f,
+	10.0f,
+	100.0f,
+	10.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_sideStep_c1 daAlinkHIO_sideStep_c0::m = {
+	{
+		5,
+        1.1f,
+        1.0f,
+        3.0f,
+        6.0f,
+	},
+	{
+		9,
+        1.0f,
+        0.0f,
+        3.0f,
+        2.0f,
+	},
+	{
+		6,
+        1.0f,
+        0.0f,
+        3.0f,
+        7.0f,
+	},
+	{
+		9,
+        1.1f,
+        0.0f,
+        3.0f,
+        4.0f,
+	},
+    28.0f,
+    22.0f,
+    25.0f,
+    20.0f,
+    100.0f,
+    10.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_slide_c1 daAlinkHIO_slide_c0::m = {
+	{
+		14,
+        0.75f,
+        0.0f,
+        5.0f,
+        15.0f,
+	},
+	{
+		6,
+        0.9f,
+        0.0f,
+        3.0f,
+        7.0f,
+	},
+	{
+		15,
+        1.0f,
+        0.0f,
+        3.0f,
+        9.0f,
+	},
+	{
+		20,
+        1.0f,
+        0.0f,
+        3.0f,
+        16.0f,
+	},
+    40.0f,
+    3.0f,
+    50.0f,
+    27.0f,
+    0.2f,
+    12.0f,
+    50.0f,
+    3.0f,
+    33.0f,
+    1.2f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutNormal_c1 daAlinkHIO_cutNmV_c0::m = {
+	{
+		27,
+        1.2f,
+        2.0f,
+        2.0f,
+        16.0f,
+	},
+    5.0f,
+    5.0f,
+    10.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutNormal_c1 daAlinkHIO_cutNmL_c0::m = {
+	{
+		27,
+        1.2f,
+        2.0f,
+        2.0f,
+        16.0f,
+	},
+    3.0f,
+    7.0f,
+    13.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutNormal_c1 daAlinkHIO_cutNmR_c0::m = {
+	{
+		27,
+        1.2f,
+        3.0f,
+        1.0f,
+        16.0f,
+	},
+    3.0f,
+    7.0f,
+    12.5f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutNormal_c1 daAlinkHIO_cutNmSL_c0::m = {
+	{
+		31,
+        1.1f,
+        3.0f,
+        3.0f,
+        17.0f,
+	},
+    10.0f,
+    3.0f,
+    10.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutNormal_c1 daAlinkHIO_cutNmSR_c0::m = {
+	{
+		27,
+        1.1f,
+        4.0f,
+        3.0f,
+        17.0f,
+	},
+    8.0f,
+    3.0f,
+    10.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutFinish_c1 daAlinkHIO_cutFnL_c0::m = {
+	{
+		29,
+        1.0f,
+        0.0f,
+        3.0f,
+        27.0f,
+	},
+	0,
+    0,
+	5.0f,
+	7.0f,
+	12.0f,
+	21.0f,
+	3.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutFinish_c1 daAlinkHIO_cutFnV_c0::m = {
+	{
+		33,
+        1.0f,
+        0.0f,
+        3.0f,
+        20.0f,
+	},
+	0,
+    0,
+	5.0f,
+	5.0f,
+	11.0f,
+	17.0f,
+	1.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutFinish_c1 daAlinkHIO_cutFnS_c0::m = {
+	{
+		31,
+        1.1f,
+        0.0f,
+        3.0f,
+        28.0f,
+	},
+	0,
+	4,
+	10.0f,
+	10.0f,
+	17.0f,
+	23.0f,
+	3.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutFinish_c1 daAlinkHIO_cutFnSl_c0::m = {
+	{
+		33,
+        0.9f,
+        2.0f,
+        3.0f,
+        25.0f,
+	},
+	0,
+	4,
+	15.0f,
+	6.0f,
+	13.0f,
+	21.0f,
+	5.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutFinish_c1 daAlinkHIO_cutFnSm_c0::m = {
+	{
+		31,
+        0.9f,
+        2.0f,
+        3.0f,
+        20.0f,
+	},
+	0,
+	2,
+	5.0f,
+	10.0f,
+	17.0f,
+	24.0f,
+	5.0f,
+};
+#pragma pop
+
+#pragma push
+DUSK_GAME_DATA const daAlinkHIO_cutFinish_c1 daAlinkHIO_cutFnR_c0::m = {
+	{
+		34,
+        1.1f,
+        0.0f,
+        3.0f,
+        25.0f,
+	},
+	0,
+    0,
+	5.0f,
+	8.0f,
+	14.0f,
+	17.0f,
+	1.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_cutFnJU_c1 daAlinkHIO_cutFnJU_c0::m = {
+	{
+		19,
+        1.0f,
+        5.0f,
+        2.0f,
+        20.0f,
+	},
+	{
+		17,
+        1.1f,
+        2.0f,
+        4.0f,
+        8.0f,
+	},
+    0,
+    0,
+    8.0f,
+    33.0f,
+    2.0f,
+    14.0f,
+    6.0f,
+    6.0f,
+    200.0f,
+    10.0f,
+    150.0f,
+    80.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_cutJump_c1 daAlinkHIO_cutJump_c0::m = {
+	{
+		17,
+        1.1f,
+        0.0f,
+        2.0f,
+        18.0f,
+	},
+	{
+		29,
+        1.0f,
+        2.0f,
+        0.0f,
+        9.0f,
+	},
+    25.0f,
+    27.0f,
+    15.0f,
+    13.0f,
+    13.0f,
+    1.0f,
+    3.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_cutTurn_c1 daAlinkHIO_cutTurn_c0::m = {
+	{
+		47,
+        1.0f,
+        2.0f,
+        3.0f,
+        28.0f,
+	},
+	{
+		9,
+        0.55f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		42,
+        1.0f,
+        2.0f,
+        3.0f,
+        27.0f,
+	},
+    0,
+    0,
+    7.0f,
+    6.0f,
+    22.0f,
+    0.6f,
+    3.0f,
+    0.6f,
+    3.0f,
+    5.0f,
+    1.2f,
+    1.0f,
+    10.0f,
+    5.0f,
+    260.0f,
+    5.0f,
+    7.0f,
+    24.0f,
+    5.0f,
+    20.0f,
+    400.0f,
+    35.0f,
+    400.0f,
+    35.0f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_hoCut_c1 daAlinkHIO_hoCutLA_c0::m = {
+	{
+		21,
+        0.9f,
+        1.0f,
+        2.0f,
+        14.0f,
+	},
+    2.0f,
+    6.0f,
+    6.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_hoCut_c1 daAlinkHIO_hoCutLB_c0::m = {
+	{
+		24,
+        0.9f,
+        4.0f,
+        2.0f,
+        16.0f,
+	},
+    7.0f,
+    13.0f,
+    6.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_hoCut_c1 daAlinkHIO_hoCutRA_c0::m = {
+	{
+		24,
+        0.95f,
+        0.0f,
+        2.0f,
+        13.0f,
+	},
+    2.0f,
+    6.0f,
+    6.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_hoCut_c1 daAlinkHIO_hoCutRB_c0::m = {
+	{
+		11,
+        0.9f,
+        0.0f,
+        2.0f,
+        10.0f,
+	},
+    2.0f,
+    11.0f,
+    6.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_hoCutCharge_c1 daAlinkHIO_hoCutCharge_c0::m = {
+	{
+		6,
+        0.45f,
+        0.0f,
+        3.0f,
+        7.0f,
+	},
+	{
+		21,
+        1.0f,
+        3.0f,
+        3.0f,
+        22.0f,
+	},
+	{
+		49,
+        1.0f,
+        5.0f,
+        2.0f,
+        27.0f,
+	},
+    4,
+    5,
+    8.0f,
+    15.0f,
+    0.0f,
+    25.0f,
+    300.0f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutDash_c1 daAlinkHIO_cutDaL_c0::m = {
+	{
+		12,
+        0.8f,
+        1.0f,
+        3.0f,
+        10.0f,
+	},
+    2.0f,
+    6.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutDash_c1 daAlinkHIO_cutDaR_c0::m = {
+	{
+		14,
+        1.0f,
+        0.0f,
+        5.0f,
+        11.0f,
+	},
+    2.0f,
+    6.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_cutDash_c1 daAlinkHIO_cutDaCharge_c0::m = {
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+    3.0f,
+    8.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_cutDown_c1 daAlinkHIO_cutDown_c0::m = {
+	{
+		8,
+        1.0f,
+        0.0f,
+        3.0f,
+        9.0f,
+	},
+	{
+		15,
+        1.0f,
+        0.0f,
+        3.0f,
+        9.0f,
+	},
+	{
+		16,
+        1.3f,
+        1.0f,
+        3.0f,
+        17.0f,
+	},
+	{
+		73,
+        1.0f,
+        0.0f,
+        2.0f,
+        70.0f,
+	},
+	{
+		9,
+        0.85f,
+        0.0f,
+        3.0f,
+        12.0f,
+	},
+    15,
+    6,
+    40.0f,
+    20.0f,
+    10.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_cutHead_c1 daAlinkHIO_cutHead_c0::m = {
+	{
+		8,
+        0.9f,
+        0.0f,
+        1.0f,
+        9.0f,
+	},
+	{
+		21,
+        1.0f,
+        0.0f,
+        2.0f,
+        22.0f,
+	},
+	{
+		16,
+        1.2f,
+        1.0f,
+        3.0f,
+        10.0f,
+	},
+    -4.0f,
+    300.0f,
+    400.0f,
+    10.0f,
+    12.0f,
+    2.0f,
+    8.0f,
+    60.0f,
+    1.6f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_cutLargeJump_c1 daAlinkHIO_cutLargeJump_c0::m = {
+	{
+		29,
+        1.3f,
+        0.0f,
+        3.0f,
+        30.0f,
+	},
+	{
+		6,
+        1.0f,
+        0.0f,
+        3.0f,
+        7.0f,
+	},
+	{
+		16,
+        1.0f,
+        0.0f,
+        2.0f,
+        17.0f,
+	},
+	{
+		35,
+        1.25f,
+        0.0f,
+        0.0f,
+        22.0f,
+	},
+    20.0f,
+    33.0f,
+    2.0f,
+    6.0f,
+    13.0f,
+    0.0f,
+    10.0f,
+    250.0f,
+    5.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_cut_c1 daAlinkHIO_cut_c0::m = {
+	{
+		18,
+        -1.100f,
+        0.0f,
+        3.0f,
+        -1.0f,
+	},
+	{
+		22,
+        0.9f,
+        0.0f,
+        3.0f,
+        23.0f,
+	},
+	{
+		45,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		47,
+        1.0f,
+        0.0f,
+        5.0f,
+        27.0f,
+	},
+    0,
+    1,
+    15,
+    8,
+    10,
+    90,
+    75,
+    4000,
+    -4000,
+    30,
+    12.0f,
+    1.250f,
+    1.0f,
+    1.0f,
+    1.6f,
+    45.0f,
+    1.65f,
+    65.0f,
+    1.21f,
+    35.0f,
+    2.3f,
+    2.2f,
+    65.0f,
+    0.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_guardAttack_c1 daAlinkHIO_gAtPush_c0::m = {
+	{
+		14,
+        1.0f,
+        1.0f,
+        5.0f,
+        18.0f,
+	},
+	14.0f,
+	1.0f,
+	12.0f,
+	14.0f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_guardAttack_c1 daAlinkHIO_gAtKick_c0::m = {
+	{
+		21,
+        1.2f,
+        0.0f,
+        0.0f,
+        22.0f,
+	},
+	10.0f,
+	6.0f,
+	11.0f,
+	18.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_turnMove_c1 daAlinkHIO_turnMove_c0::m = {
+	{
+		27,
+        1.0f,
+        0.0f,
+        3.0f,
+        22.0f,
+	},
+	5,
+	2500,
+	200,
+	1000,
+	1.1f,
+	19.0f,
+	1.5f,
+	25.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_guard_c1 daAlinkHIO_guard_c0::m = {
+	{
+		11,
+        1.0f,
+        0.0f,
+        0.0f,
+        12.0f,
+	},
+	{
+		11,
+        1.0f,
+        0.0f,
+        0.0f,
+        12.0f,
+	},
+	{
+		19,
+        1.0f,
+        0.0f,
+        3.0f,
+        20.0f,
+	},
+	{
+		35,
+        1.0f,
+        0.0f,
+        3.0f,
+        28.0f,
+	},
+    8000,
+    5000,
+    0,
+    8000,
+    4000,
+    2.5f,
+    3.0f,
+    14.0f,
+    20.0f,
+    26.0f,
+    80.0f,
+    60.0f,
+    40.0f,
+    18.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_crouch_c1 daAlinkHIO_crouch_c0::m = {
+	{
+		9,
+        1.0f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		7,
+        -1.0f,
+        0.0f,
+        3.0f,
+        2.0f,
+	},
+    5,
+    500,
+    50,
+    1.0f,
+    4.0f,
+    4.0f,
+    4.0f,
+    2.0f,
+    0.5f,
+    5.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_autoJump_c1 daAlinkHIO_autoJump_c0::m = {
+	{
+		6,
+        1.2f,
+        3.0f,
+        6.0f,
+        7.0f,
+	},
+	{
+		7,
+        0.9f,
+        1.0f,
+        0.0f,
+        5.0f,
+	},
+	{
+		4,
+        0.75f,
+        0.0f,
+        2.0f,
+        5.0f,
+	},
+	{
+		10,
+        0.6f,
+        0.0f,
+        2.0f,
+        11.0f,
+	},
+    1,
+    9158,
+    12287,
+    8,
+    16384,
+    10.0f,
+    10.0f,
+    1.3f,
+    5.0f,
+    10.0f,
+    3.0f,
+    -3.4f,
+    -200.0f,
+    26.0f,
+    3.0f,
+    4.0f,
+    10.0f,
+    1.0f,
+    170.0f,
+    100.0f,
+    20.0f,
+    30.0f,
+    20.0f,
+    -3.4f,
+    14.0f,
+    -5.0f,
+    23.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_smallJump_c1 daAlinkHIO_smallJump_c0::m = {
+	{
+		8,
+        0.6f,
+        3.0f,
+        3.0f,
+        9.0f,
+	},
+	{
+		5,
+        1.0f,
+        0.0f,
+        2.0f,
+        6.0f,
+	},
+	{
+		29,
+        0.85f,
+        0.0f,
+        5.0f,
+        6.0f,
+	},
+    6.0f,
+    3.0f,
+    7.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wallCatch_c1 daAlinkHIO_wallCatch_c0::m = {
+	{
+		19,
+        1.0f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		7,
+        1.0f,
+        0.0f,
+        3.0f,
+        8.0f,
+	},
+	{
+		29,
+        1.0f,
+        0.0f,
+        3.0f,
+        26.0f,
+	},
+	{
+		13,
+        1.0f,
+        1.0f,
+        2.0f,
+        14.0f,
+	},
+    4.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wallFall_c1 daAlinkHIO_wallFall_c0::m = {
+	{
+		22,
+        0.8f,
+        0.0f,
+        3.0f,
+        23.0f,
+	},
+	{
+		12,
+        1.0f,
+        0.0f,
+        3.0f,
+        13.0f,
+	},
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wallMove_c1 daAlinkHIO_wallMove_c0::m = {
+    0.8f,
+	1.1f,
+	3.0f,
+	2.0f,
+	3.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wallHang_c1 daAlinkHIO_wallHang_c0::m = {
+    2,
+	3,
+	50.0f,
+	100.0f,
+	150.0f,
+	200.0f,
+	250.0f,
+	200.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_pushpull_c1 daAlinkHIO_pushpull_c0::m = {
+    0,
+	120,
+	7,
+	60,
+	80,
+	40,
+	2,
+	64,
+	1.0f,
+	5.0f,
+    1.0f,
+	3.0f,
+	1.0f,
+	3.0f,
+	1.0f,
+	0.25f,
+	1.0f,
+	0.15f,
+	0.75f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damNormal_c1 daAlinkHIO_damNormal_c0::m = {
+	{
+		22,
+        2.3f,
+        0.0f,
+        3.0f,
+        20.0f,
+	},
+	{
+		19,
+        2.3f,
+        0.0f,
+        3.0f,
+        17.0f,
+	},
+	{
+		19,
+        2.3f,
+        0.0f,
+        3.0f,
+        17.0f,
+	},
+	{
+		19,
+        2.3f,
+        0.0f,
+        3.0f,
+        17.0f,
+	},
+    2000,
+    5000,
+    10.0f,
+    0.02f,
+    1.0f,
+    0.5f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damLaHu_c1 daAlinkHIO_damLarge_c0::m = {
+	{
+		49,
+        0.8f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+		64,
+        1.0f,
+        0.0f,
+        3.0f,
+        50.0f,
+	},
+	{
+		39,
+        0.8f,
+        0.0f,
+        3.0f,
+        33.0f,
+	},
+	{
+		39,
+        0.8f,
+        0.0f,
+        3.0f,
+        33.0f,
+	},
+	{
+		2,
+        0.8f,
+        0.0f,
+        1.0f,
+        50.0f,
+	},
+	{
+		2,
+        1.0f,
+        0.0f,
+        1.0f,
+        40.0f,
+	},
+	{
+		2,
+        1.0f,
+        0.0f,
+        1.0f,
+        40.0f,
+	},
+	{
+		2,
+        1.0f,
+        0.0f,
+        1.0f,
+        40.0f,
+	},
+    1300,
+    -5.0f,
+    3.0f,
+    20.0f,
+    30.0f,
+    15.0f,
+    0.5f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damLaHu_c1 daAlinkHIO_damHuge_c0::m = {
+	{
+		49,
+        0.8f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+		64,
+        0.8f,
+        0.0f,
+        3.0f,
+        50.0f,
+	},
+	{
+		39,
+        0.8f,
+        0.0f,
+        3.0f,
+        33.0f,
+	},
+	{
+		39,
+        0.8f,
+        0.0f,
+        3.0f,
+        33.0f,
+	},
+	{
+		2,
+        1.0f,
+        0.0f,
+        1.0f,
+        50.0f,
+	},
+	{
+		2,
+        1.0f,
+        0.0f,
+        1.0f,
+        40.0f,
+	},
+	{
+		2,
+        1.0f,
+        0.0f,
+        1.0f,
+        40.0f,
+	},
+	{
+		2,
+        1.0f,
+        0.0f,
+        1.0f,
+        40.0f,
+	},
+    2000,
+    -7.5f,
+    3.0f,
+    80.0f,
+    40.0f,
+    15.0f,
+    0.5f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damHorse_c1 daAlinkHIO_damHorse_c0::m = {
+	{
+		9,
+        2.0f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		11,
+        1.0f,
+        0.0f,
+        3.0f,
+        12.0f,
+	},
+    2500,
+    5000,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damFall_c1 daAlinkHIO_damFall_c0::m = {
+	{
+		11,
+        1.2f,
+        2.0f,
+        3.0f,
+        12.0f,
+	},
+	{
+		17,
+        0.8f,
+        0.0f,
+        0.0f,
+        12.0f,
+	},
+    10,
+    25,
+    4.0f,
+    30.0f,
+    20.0f,
+    60.0f,
+    4.0f,
+    10.0f,
+    15.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damCaught_c1 daAlinkHIO_damCaught_c0::m = {
+	{
+		59,
+        1.5f,
+        0.0f,
+        3.0f,
+        35.0f,
+	},
+	300,
+	5,
+	0.7f,
+	3.0f,
+	1.3f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damSwim_c1 daAlinkHIO_damSwim_c0::m = {
+	{
+		22,
+        1.2f,
+        0.0f,
+        3.0f,
+        18.0f,
+	},
+	{
+		19,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		19,
+        1.2f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		19,
+        1.2f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		10,
+        1.0f,
+        0.0f,
+        3.0f,
+        11.0f,
+	},
+	{
+		11,
+        1.0f,
+        0.0f,
+        3.0f,
+        12.0f,
+	},
+    1500,
+    4000,
+    8.0f,
+    0.02f,
+    0.25f,
+    15.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_damage_c1 daAlinkHIO_damage_c0::m = {
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		9,
+        1.0f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+    0,
+    30,
+    30,
+    10,
+    3,
+    7,
+    10,
+    15,
+    0,
+    0,
+    10,
+    0,
+    0,
+    5,
+    0,
+    0,
+    25,
+    30,
+    40,
+    0.7f,
+    35.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_horse_c1 daAlinkHIO_horse_c0::m = {
+	{
+		18,
+        1.2f,
+        0.0f,
+        5.0f,
+        19.0f,
+	},
+	{
+		22,
+        1.2f,
+        0.0f,
+        3.0f,
+        23.0f,
+	},
+	{
+		43,
+        1.45f,
+        3.0f,
+        3.0f,
+        44.0f,
+	},
+	{
+		18,
+        1.2f,
+        0.0f,
+        3.0f,
+        23.0f,
+	},
+    100,
+    32767,
+    30,
+    25,
+    5500,
+    -13000,
+    1.2f,
+    8.0f,
+    8.0f,
+    5.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_canoe_c1 daAlinkHIO_canoe_c0::m = {
+	{
+		23,
+        1.3f,
+        0.0f,
+        3.0f,
+        24.0f,
+	},
+    150,
+    360,
+    1.0f,
+    1.5f,
+    9.0f,
+    15.0f,
+    0.2f,
+    1.5f,
+    2.0f,
+    6.0f,
+    10.0f,
+    40.0f,
+    30.0f,
+    0.2f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_bow_c1 daAlinkHIO_bow_c0::m = {
+	{
+		9,
+        1.0f,
+        0.0f,
+        3.0f,
+        5.0f,
+	},
+	{
+		6,
+        1.0f,
+        0.0f,
+        3.0f,
+        7.0f,
+	},
+    10,
+    30,
+    70,
+    5.0f,
+    300.0f,
+    5000.0f,
+    800.0f,
+    9000.0f,
+    50.0f,
+    200.0f,
+    3000.0f,
+    230.0f,
+    3500.0f,
+    600.0f,
+    9000.0f,
+    1000.0f,
+    4000.0f,
+    250.0f,
+    800.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_boom_c1 daAlinkHIO_boom_c0::m = {
+	{
+		21,
+        0.9f,
+        3.0f,
+        2.0f,
+        22.0f,
+	},
+	{
+		25,
+        1.0f,
+        3.0f,
+        1.0f,
+        10.0f,
+	},
+    40,
+    0,
+    1.0f,
+    3.0f,
+    60.0f,
+    60.0f,
+    2000.0f,
+    3000.0f,
+    3000.0f,
+    40.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_bomb_c1 daAlinkHIO_bomb_c0::m = {
+    160,
+	50,
+	50,
+	-4.2f,
+	-100.0f,
+	0.350f,
+	2.0f,
+	20.0f,
+	1.3f,
+	225.0f,
+    0.0f,
+	-0.8f,
+	-7.0f,
+	26.0f,
+	33.0f,
+	10.0f,
+	15.0f,
+	40.0f,
+	15.0f,
+	300.0f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_huLight_c1 daAlinkHIO_huLight_c0::m = {
+    0,
+    3,
+	0,
+	181,
+	112,
+	40,
+	-70,
+	1.0f,
+	50.0f,
+	350.0f,
+	0.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_kandelaar_c1 daAlinkHIO_kandelaar_c0::m = {
+	{
+		30,
+        1.1f,
+        2.0f,
+        3.0f,
+        17.0f,
+	},
+	{
+		11,
+        1.0f,
+        0.0f,
+        3.0f,
+        12.0f,
+	},
+	{
+		17,
+        1.0f,
+        0.0f,
+        3.0f,
+        18.0f,
+	},
+    80,
+    40,
+    20,
+    40,
+    30,
+    10,
+    3,
+    200,
+    0.5f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_fmChain_c1 daAlinkHIO_fmChain_c0::m = {
+	{
+		20,
+        1.2f,
+        0.0f,
+        3.0f,
+        16.0f,
+	},
+	{
+		20,
+        -1.1f,
+        0.0f,
+        3.0f,
+        5.0f,
+	},
+};
+
+DUSK_GAME_DATA const daAlinkHIO_magneBoots_c1 daAlinkHIO_magneBoots_c0::m = {
+	{
+		29,
+        1.1f,
+        0.0f,
+        3.0f,
+        23.0f,
+	},
+    0.4f,
+    1.0f,
+    1.8f,
+    0.7f,
+    0.75f,
+    0.45,
+    0.6f,
+    50.0f,
+    10.0f,
+    0.35f,
+    0.3f,
+    0.7f,
+    0.8f,
+    0.7f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_pickUp_c1 daAlinkHIO_pickUp_c0::m = {
+	{
+		18,
+        0.9f,
+        0.0f,
+        2.0f,
+        13.0f,
+	},
+	{
+		18,
+        -1.0f,
+        0.0f,
+        1.0f,
+        4.0f,
+	},
+    30.0f,
+    30.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_board_c1 daAlinkHIO_board_c0::m = {
+	{
+		9,
+        2.5f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		14,
+        0.7f,
+        0.0f,
+        8.0f,
+        15.0f,
+	},
+	{
+		24,
+        1.6f,
+        5.0f,
+        5.0f,
+        25.0f,
+	},
+	{
+		24,
+        0.8f,
+        0.0f,
+        3.0f,
+        25.0f,
+	},
+    70.0f,
+    4.0f,
+    22.0f,
+    35.0f,
+    1.0f,
+    4.0f,
+    1.0f,
+    3.0f,
+    2.0f,
+    30.0f,
+    0.9f,
+    55.0f,
+    4.0f,
+    3.0f,
+    1.0f,
+    20.0f,
+    24.0f,
+    35.0f,
+    50.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_bottle_c1 daAlinkHIO_bottle_c0::m = {
+	{
+		56,
+        1.15f,
+        0.0f,
+        3.0f,
+        57.0f,
+	},
+    {
+        39,
+        1.2f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+        44,
+        1.2f,
+        0.0f,
+        3.0f,
+        50.0f,
+	},
+	{
+		54,
+        1.1f,
+        0.0f,
+        3.0f,
+        55.0f,
+	},
+	{
+        24,
+        1.0f,
+        0.0f,
+        3.0f,
+        25.0f,
+	},
+	{
+        12,
+        0.6f,
+        1.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		47,
+        1.0f,
+        0.0f,
+        3.0f,
+        48.0f,
+	},
+	{
+        86,
+        1.0f,
+        0.0f,
+        3.0f,
+        87.0f,
+	},
+	{
+        29,
+        1.2f,
+        0.0f,
+        3.0f,
+        30.0f,
+	},
+};
+
+DUSK_GAME_DATA const daAlinkHIO_hookshot_c1 daAlinkHIO_hookshot_c0::m = {
+	{
+		12,
+        1.0f,
+        0.0f,
+        0.0f,
+        13.0f,
+	},
+	{
+		39,
+        1.0f,
+        0.0f,
+        1.0f,
+        11.0f,
+	},
+	{
+		28,
+        1.0f,
+        0.0f,
+        2.0f,
+        7.0f,
+	},
+    0,
+    1.0f,
+    3.0f,
+    2000.0f,
+    100.0f,
+    150.0f,
+    60.0f,
+    5.0f,
+    13.0f,
+    3000.0f,
+    150.0f,
+    225.0f,
+    90.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_spinner_c1 daAlinkHIO_spinner_c0::m = {
+	{
+		21,
+        0.8f,
+        0.0f,
+        3.0f,
+        13.0f,
+	},
+    30,
+    15,
+    360,
+    360,
+    150,
+    -3.7f,
+    -50.0f,
+    0.9f,
+    26.0f,
+    0.5f,
+    0.1f,
+    0.01f,
+    60.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_ironBall_c1 daAlinkHIO_ironBall_c0::m = {
+	{
+		19,
+        1.1f,
+        5.0f,
+        2.0f,
+        15.0f,
+	},
+    5,
+    5,
+    1.0f,
+    1.7f,
+    3.0f,
+    1.5f,
+    3.0f,
+    1.6f,
+    3.0f,
+    1.7f,
+    3.0f,
+    1.0f,
+    2.0f,
+    0.5f,
+    -3.0f,
+    7.0f,
+    0.5f,
+    30.0f,
+    5.0f,
+    -0.5f,
+    -5.5f,
+    -0.5f,
+    -150.0f,
+    3.0f,
+    60.0f,
+    5.0f,
+    -3.0f,
+    80.0f,
+    1.0f,
+    1.5f,
+    0.5f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_copyRod_c1 daAlinkHIO_copyRod_c0::m = {
+    19,
+	1.0f,
+	0.0f,
+	3.0f,
+	14.0f,
+	39,
+	1.0f,
+	0.0f,
+	3.0f,
+	30.0f,
+	80.0f,
+	1500.0f,
+	100.0f,
+	2000.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_zwLight_c1 daAlinkHIO_zwLight_c0::m = {
+    771,
+	0,
+	182,
+	225,
+	243,
+	-87,
+	1.0f,
+	70.75195f,
+	131.83594f,
+	0.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_item_c1 daAlinkHIO_item_c0::m = {
+	{
+		12,
+        1.0f,
+        0.0f,
+        3.0f,
+        13.0f,
+	},
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+    15,
+    10000,
+    -13000,
+    6000,
+    -9000,
+    1.3f,
+    1.3f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_ladder_c1 daAlinkHIO_ladder_c0::m = {
+	{
+		13,
+        0.8f,
+        2.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		47,
+        1.25f,
+        0.0f,
+        2.0f,
+        48.0f,
+	},
+    0.8f,
+    5.0f,
+    1.0f,
+    0.0f,
+    1.0f,
+    5.0f,
+    1.2f,
+    0.0f,
+    0.4f,
+    0.9f,
+    2.0f,
+    18.0f,
+    40.0f,
+    0.8f,
+    1.15f,
+    0.9f,
+    1.35f,
+    80.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_roofHang_c1 daAlinkHIO_roofHang_c0::m = {
+	{
+		34,
+        1.0f,
+        0.0f,
+        3.0f,
+        20.0f,
+	},
+    4,
+    100,
+    2400,
+    1.0f,
+    5.0f,
+    0.8f,
+    1.0f,
+    3.0f,
+    10.0f,
+    13.0f,
+    1.0f,
+    1.1f,
+    3.0f,
+    0.9f,
+    3.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_grab_c1 daAlinkHIO_grab_c0::m = {
+	{
+		4,
+        0.9f,
+        0.0f,
+        3.0f,
+        5.0f,
+	},
+	{
+		9,
+        0.65f,
+        0.0f,
+        3.0f,
+        8.0f,
+	},
+	{
+		4,
+        -0.8f,
+        1.0f,
+        3.0f,
+        2.0f,
+	},
+	{
+		39,
+        0.9f,
+        0.0f,
+        3.0f,
+        17.0f,
+	},
+	{
+		9,
+        -0.75f,
+        0.0f,
+        2.0f,
+        -1.0f,
+	},
+	{
+		19,
+        1.0f,
+        6.0f,
+        5.0f,
+        11.0f,
+	},
+	{
+		19,
+        0.9f,
+        2.0f,
+        4.0f,
+        10.0f,
+	},
+	{
+		39,
+        1.5f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+		30,
+        -1.3f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		12,
+        0.55f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		49,
+        0.8f,
+        0.0f,
+        3.0f,
+        35.0f,
+	},
+    0,
+    15,
+    0.55f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_swim_c1 daAlinkHIO_swim_c0::m = {
+	{
+		25,
+        1.0f,
+        0.0f,
+        3.0f,
+        -1.0f,
+	},
+	{
+		23,
+        1.0f,
+        0.0f,
+        3.0f,
+        24.0f,
+	},
+	{
+		12,
+        2.0f,
+        0.0f,
+        10.0f,
+        24.0f,
+	},
+	{
+		37,
+        1.0f,
+        3.0f,
+        5.0f,
+        38.0f,
+	},
+    15,
+    800,
+    5000,
+    15,
+    200,
+    5000,
+    90,
+    50,
+    140.0f,
+    50.0f,
+    8.0f,
+    8.0f,
+    6.0f,
+    12.0f,
+    8.0f,
+    5.0f,
+    0.5f,
+    -7.0f,
+    6.0f,
+    0.2f,
+    0.8f,
+    15.0f,
+    3.5f,
+    0.5f,
+    1.0f,
+    0.5f,
+    1.3f,
+    0.5f,
+    1.3f,
+    0.4f,
+    0.6f,
+    15.0f,
+    37.5f,
+    -37.5f,
+    3.0f,
+    -4.0f,
+    -20.0f,
+    250.0f,
+    0.0f,
+    10.0f,
+    0.9f,
+    -0.7f,
+    0.6f,
+    13.0f,
+    0.3f,
+    0.5f,
+    1.3f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlMove_c1 daAlinkHIO_wlMove_c0::m = {
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        12.0f,
+	},
+	{
+		8,
+        1.0f,
+        0.0f,
+        1.0f,
+        20.0f,
+	},
+	{
+		41,
+        1.0f,
+        0.0f,
+        3.0f,
+        20.0f,
+	},
+    9000,
+    100,
+    5,
+    90,
+    50,
+    60,
+    50,
+    45,
+    50,
+    40.0f,
+    4.0f,
+    3.0f,
+    1.6f,
+    1.1f,
+    2.2f,
+    1.2f,
+    1.3f,
+    0.1f,
+    0.4f,
+    0.4f,
+    0.5f,
+    5.0f,
+    5.0f,
+    0.3f,
+    0.85f,
+    0.9f,
+    2.5f,
+    40.0f,
+    5.0f,
+    22.0f,
+    1.0f,
+    5.0f,
+    100.0f,
+    10.0f,
+    45.0f,
+    1.3f,
+    6.0f,
+    65.0f,
+    20.0f,
+    15.0f,
+    33.0f,
+    35.0f,
+    1.2f,
+    3.0f,
+    25.0f,
+    35.0f,
+    1.1f,
+    0.5f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlMoveNoP_c1 daAlinkHIO_wlMoveNoP_c0::m = {
+    9000,
+	100,
+	5,
+	25.0f,
+	3.0f,
+	1.8f,
+	1.0f,
+	0.8f,
+	2.2f,
+	1.1f,
+    0.1f,
+	0.6f,
+	0.6f,
+	5.0f,
+	0.5f,
+	0.85f,
+	0.9f,
+	2.5f,
+	30.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtnMove_c1 daAlinkHIO_wlAtnMove_c0::m = {
+    9000,
+	100,
+	3,
+	0.8f,
+	1.8f,
+	0.2f,
+	0.6f,
+	18.0f,
+	2.0f,
+	2.0f,
+	1.7f,
+	0.4f,
+	12.0f,
+	3.0f,
+	2.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlSideStep_c1 daAlinkHIO_wlSideStep_c0::m = {
+	{
+		5,
+        1.0f,
+        0.0f,
+        3.0f,
+        6.0f,
+	},
+	{
+		23,
+        1.0f,
+        1.0f,
+        2.0f,
+        2.0f,
+	},
+	{
+		4,
+        0.9f,
+        0.0f,
+        3.0f,
+        5.0f,
+	},
+	{
+		23,
+        1.0f,
+        1.0f,
+        2.0f,
+        3.0f,
+	},
+    33.0f,
+    23.0f,
+    30.0f,
+    22.0f,
+    100.0f,
+    10.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlBackJump_c1 daAlinkHIO_wlBackJump_c0::m = {
+	{
+		11,
+        0.8f,
+        0.0f,
+        2.0f,
+        12.0f,
+	},
+	{
+        28,
+        1.0f,
+        0.0f,
+        3.0f,
+        1.0f,
+	},
+	30.0f,
+	20.0f,
+	100.0f,
+	10.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlHowl_c1 daAlinkHIO_wlHowl_c0::m = {
+	{
+		49,
+        1.0f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+		71,
+        1.0f,
+        0.0f,
+        3.0f,
+        72.0f,
+	},
+	{
+		14,
+        1.3f,
+        1.0f,
+        3.0f,
+        11.0f,
+	},
+	{
+		17,
+        0.9f,
+        0.0f,
+        3.0f,
+        18.0f,
+	},
+    3.0f,
+    8.0f,
+    1.7f,
+    0.7f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAutoJump_c1 daAlinkHIO_wlAutoJump_c0::m = {
+	{
+		3,
+        1.2f,
+        1.0f,
+        2.0f,
+        4.0f,
+	},
+	{
+		24,
+        1.0f,
+        1.0f,
+        2.0f,
+        2.0f,
+	},
+	{
+		5,
+        0.5f,
+        2.0f,
+        5.0f,
+        7.0f,
+	},
+    1,
+    0,
+    7500,
+    8200,
+    10.0f,
+    10.0f,
+    1.1f,
+    10.0f,
+    5.0f,
+    -3.6f,
+    -100.0f,
+    1.2f,
+    10.0f,
+    10.0f,
+    1.02f,
+    38.0f,
+    31.0f,
+    100.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlPush_c1 daAlinkHIO_wlPush_c0::m = {
+    1.0f,
+	3.0f,
+	1.0f,
+	3.0f,
+	0.75f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlLie_c1 daAlinkHIO_wlLie_c0::m = {
+	{
+		14,
+        1.5f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		11,
+        1.5f,
+        3.0f,
+        3.0f,
+        8.0f,
+	},
+    5,
+    500,
+    50,
+    3.0f,
+    8.0f,
+    1.7f,
+    0.7f,
+    5.0f,
+    0.8f,
+    3.0f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_wlLight_c1 daAlinkHIO_wlLight_c0::m = {
+    515,
+	0,
+	120,
+	120,
+	120,
+	-30,
+	3.0f,
+	20.0f,
+	512.0f,
+	-638.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_wlWallHang_c1 daAlinkHIO_wlWallHang_c0::m = {
+	{
+		13,
+        1.2f,
+        8.0f,
+        2.0f,
+        14.0f,
+	},
+	{
+		39,
+        1.1f,
+        0.0f,
+        3.0f,
+        31.0f,
+	},
+	{
+		39,
+        1.0f,
+        0.0f,
+        5.0f,
+        40.0f,
+	},
+	{
+		5,
+        1.0f,
+        0.0f,
+        3.0f,
+        6.0f,
+	},
+	{
+		6,
+        1.0f,
+        0.0f,
+        3.0f,
+        7.0f,
+	},
+	{
+		16,
+        1.0f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+    50.0f,
+    100.0f,
+    200.0f,
+    250.0f,
+    100.0f,
+    17.0f,
+    15.0f,
+    10.0f,
+    10.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlDamNormal_c1 daAlinkHIO_wlDamNormal_c0::m = {
+	{
+		9,
+        1.0f,
+        0.0f,
+        0.0f,
+        8.0f,
+	},
+	{
+		9,
+        1.0f,
+        0.0f,
+        0.0f,
+        8.0f,
+	},
+	{
+		9,
+        1.0f,
+        0.0f,
+        0.0f,
+        8.0f,
+	},
+	{
+		9,
+        1.0f,
+        0.0f,
+        0.0f,
+        8.0f,
+	},
+    10.0f,
+    0.01f,
+    1.0f,
+    0.25f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlDamLaHu_c1 daAlinkHIO_wlDamLarge_c0::m = {
+	{
+		49,
+        1.0f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+		39,
+        1.0f,
+        0.0f,
+        3.0f,
+        35.0f,
+	},
+	{
+		34,
+        1.1f,
+        0.0f,
+        3.0f,
+        32.0f,
+	},
+	{
+		34,
+        1.1f,
+        0.0f,
+        3.0f,
+        32.0f,
+	},
+    1300,
+    -5.2f,
+    3.0f,
+    10.0f,
+    15.0f,
+    15.0f,
+    0.5f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_wlDamLaHu_c1 daAlinkHIO_wlDamHuge_c0::m = {
+	{
+		49,
+        1.1f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+		39,
+        1.1f,
+        0.0f,
+        3.0f,
+        35.0f,
+	},
+	{
+		34,
+        1.2f,
+        0.0f,
+        3.0f,
+        30.0f,
+	},
+	{
+		34,
+        1.2f,
+        0.0f,
+        3.0f,
+        30.0f,
+	},
+    2000,
+    -7.5f,
+    3.0f,
+    85.0f,
+    45.0f,
+    15.0f,
+    0.5f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_wlDamFall_c1 daAlinkHIO_wlDamFall_c0::m = {
+	{
+		11,
+        1.0f,
+        0.0f,
+        3.0f,
+        12.0f,
+	},
+	{
+		17,
+        0.8f,
+        0.0f,
+        0.0f,
+        12.0f,
+	},
+    15,
+    35,
+    40.0f,
+    60.0f,
+    3.0f,
+    1.0f,
+    15.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlDamCaught_c1 daAlinkHIO_wlDamCaught_c0::m = {
+    300,
+	5,
+	1.2f,
+	3.0f,
+	1.5f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlDamage_c1 daAlinkHIO_wlDamage_c0::m = {
+	{
+		9,
+        1.1f,
+        0.0f,
+        3.0f,
+        10.0f,
+	},
+	{
+		9,
+        1.1f,
+        0.0f,
+        3.0f,
+        7.0f,
+	},
+    0.7f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlSlide_c1 daAlinkHIO_wlSlide_c0::m = {
+	{
+		20,
+        1.25f,
+        0.0f,
+        3.0f,
+        25.0f,
+	},
+	{
+		7,
+        1.0f,
+        0.0f,
+        3.0f,
+        8.0f,
+	},
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		29,
+        1.0f,
+        0.0f,
+        3.0f,
+        27.0f,
+	},
+    512,
+    64,
+    35.0f,
+    3.0f,
+    50.0f,
+    35.0f,
+    2.6f,
+    18.0f,
+    2.1f,
+    10.0f,
+    0.7f,
+    30.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlRope_c1 daAlinkHIO_wlRope_c0::m = {
+	{
+		16,
+        1.0f,
+        0.0f,
+        3.0f,
+        17.0f,
+	},
+	90,
+	30,
+	0.5f,
+	1.2f,
+	3.0f,
+	15.0f,
+	1.0f,
+	3.0f,
+	3.0f,
+	0.8f,
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_wlAtWait_c1 daAlinkHIO_wlAtWaLr_c0::m = {
+	{
+		41,
+        0.9f,
+        4.0f,
+        3.0f,
+        16.0f,
+	},
+    5,
+    3,
+    0.0f,
+    10.0f,
+    4.0f,
+    11.0f,
+    18.0f,
+    5.0f,
+    70.0f,
+    70.0f,
+    150.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_wlAtWait_c1 daAlinkHIO_wlAtWaSc_c0::m = {
+	{
+		15,
+        0.9f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+    5,
+    5,
+    10.0f,
+    3.0f,
+    5.0f,
+    11.0f,
+    18.0f,
+    0.0f,
+    100.0f,
+    85.0f,
+    150.0f,
+};
+#pragma pop
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_wlAtWait_c1 daAlinkHIO_wlAtWaTl_c0::m = {
+	{
+		42,
+        1.05f,
+        3.0f,
+        3.0f,
+        28.0f,
+	},
+    0,
+    3,
+    10.0f,
+    5.0f,
+    10.0f,
+    14.0f,
+    25.0f,
+    0.0f,
+    40.0f,
+    150.0f,
+    100.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtRoll_c1 daAlinkHIO_wlAtRoll_c0::m = {
+	{
+		40,
+        1.0f,
+        4.0f,
+        3.0f,
+        23.0f,
+	},
+    250.0f,
+    20.0f,
+    0.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtNjump_c1 daAlinkHIO_wlAtNjump_c0::m = {
+	{
+		6,
+        1.0f,
+        4.0f,
+        3.0f,
+        7.0f,
+	},
+    30.0f,
+    40.0f,
+    23.0f,
+    17.0f,
+    0.8f,
+    2.0f,
+    80.0f,
+    60.0f,
+    120.0f,
+    10.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtCjump_c1 daAlinkHIO_wlAtCjump_c0::m = {
+	{
+		3,
+        2.0f,
+        0.0f,
+        3.0f,
+        4.0f,
+	},
+	{
+		7,
+        1.2f,
+        2.0f,
+        1.0f,
+        8.0f,
+	},
+    26.0f,
+    45.0f,
+    35.0f,
+    20.0f,
+    1.0f,
+    3.0f,
+    5.0f,
+    0.8f,
+    80.0f,
+    60.0f,
+    120.0f,
+    26.0f,
+    0.5f,
+    10.0f,
+    0.1f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtLand_c1 daAlinkHIO_wlAtLand_c0::m = {
+	{
+		19,
+        0.9f,
+        0.0f,
+        2.0f,
+        2.0f,
+	},
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        1.0f,
+	},
+	{
+		19,
+        1.1f,
+        0.0f,
+        2.0f,
+        1.0f,
+	},
+    2.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtDown_c1 daAlinkHIO_wlAtDown_c0::m = {
+	{
+		3,
+        1.0f,
+        0.0f,
+        3.0f,
+        4.0f,
+	},
+	{
+		16,
+        1.0f,
+        0.0f,
+        3.0f,
+        17.0f,
+	},
+	{
+		21,
+        1.0f,
+        0.0f,
+        3.0f,
+        22.0f,
+	},
+	{
+		49,
+        1.0f,
+        0.0f,
+        3.0f,
+        50.0f,
+	},
+	{
+		11,
+        1.0f,
+        0.0f,
+        3.0f,
+        12.0f,
+	},
+	{
+		84,
+        0.85f,
+        0.0f,
+        3.0f,
+        60.0f,
+	},
+	{
+		6,
+        1.0f,
+        0.0f,
+        3.0f,
+        9.0f,
+	},
+    40,
+    3,
+    45.0f,
+    13.0f,
+    13.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtLock_c1 daAlinkHIO_wlAtLock_c0::m = {
+	{
+		6,
+        3.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		6,
+        2.0f,
+        0.0f,
+        2.0f,
+        20.0f,
+	},
+    120,
+    100.0f,
+    550.0f,
+    25.0f,
+    85.0f,
+    80.0f,
+    60.0f,
+    120.0f,
+    -8.0f,
+    700.0f,
+    1000.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAtBite_c1 daAlinkHIO_wlAtBite_c0::m = {
+	{
+		5,
+        1.0f,
+        1.0f,
+        0.0f,
+        6.0f,
+	},
+	{
+		20,
+        1.6f,
+        0.0f,
+        3.0f,
+        32.0f,
+	},
+    25,
+    15,
+    1.2f,
+    3.0f,
+    20.0f,
+    2.0f,
+    1.3f,
+    1.3f,
+    2.0f,
+    2.0f,
+    0.19f,
+    0.19f,
+    0.02f,
+    0.02f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlAttack_c1 daAlinkHIO_wlAttack_c0::m = {
+	{
+		59,
+        1.2f,
+        0.0f,
+        2.0f,
+        5.0f,
+	},
+	15,
+	5,
+	100.0f,
+	10.0f,
+	5.0f,
+	230.0f,
+	10.0f,
+	12.0f,
+	35.0f,
+	30.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlPoint_c1 daAlinkHIO_wlPoint_c0::m = {
+	{
+		6,
+        0.9f,
+        2.0f,
+        3.0f,
+        7.0f,
+	},
+	{
+		7,
+        1.0f,
+        0.0f,
+        3.0f,
+        8.0f,
+	},
+	{
+		11,
+        0.75f,
+        0.0f,
+        3.0f,
+        5.0f,
+	},
+	{
+		14,
+        1.0f,
+        0.0f,
+        3.0f,
+        3.0f,
+	},
+    20,
+    1.0f,
+    3.0f,
+    5.0f,
+    50.0f,
+    45.0f,
+    65.0f,
+    15.0f,
+    0.5f,
+    0.5f,
+    0.2f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlChain_c1 daAlinkHIO_wlChain_c0::m = {
+	{
+		39,
+        1.0f,
+        0.0f,
+        3.0f,
+        40.0f,
+	},
+	{
+		81,
+        1.0f,
+        0.0f,
+        3.0f,
+        82.0f,
+	},
+	{
+		47,
+        1.0f,
+        0.0f,
+        0.0f,
+        48.0f,
+	},
+    20,
+    5,
+    1.0f,
+    3.0f,
+    1.0f,
+    3.0f,
+    15.1f,
+    1.0f,
+    5.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlSwim_c1 daAlinkHIO_wlSwim_c0::m = {
+	{
+		25,
+        0.9f,
+        0.0f,
+        5.0f,
+        -1.0f,
+	},
+	{
+		45,
+        1.0f,
+        0.0f,
+        3.0f,
+        20.0f,
+	},
+	{
+		28,
+        1.1f,
+        0.0f,
+        1.0f,
+        32.0f,
+	},
+    5,
+    1000,
+    1600,
+    5,
+    2500,
+    1024,
+    90.0f,
+    50.0f,
+    20.0f,
+    0.35f,
+    -10.0f,
+    10.0f,
+    1.5f,
+    1.4f,
+    10.0f,
+    3.5f,
+    0.5f,
+    1.5f,
+    5.0f,
+    37.5f,
+    9.0f,
+    0.25f,
+    1.0f,
+    0.4f,
+    1.2f,
+    -37.5f,
+    8.0f,
+    0.2f,
+    -7.0f,
+    7.0f,
+};
+
+DUSK_GAME_DATA const daAlinkHIO_wlGrab_c1 daAlinkHIO_wlGrab_c0::m = {
+	{
+		20,
+        1.5f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+        20,
+        -1.3f,
+        0.0f,
+        3.0f,
+        5.0f,
+	},
+	{
+        14,
+        1.0f,
+        0.0f,
+        3.0f,
+        15.0f,
+	},
+	{
+		14,
+        -1.0f,
+        0.0f,
+        3.0f,
+        -1.0f,
+	},
+	{
+        19,
+        1.3f,
+        4.0f,
+        3.0f,
+        15.0f,
+	},
+};
+
+#pragma push
+#pragma force_active on
+DUSK_GAME_DATA const daAlinkHIO_wlBall_c1 daAlinkHIO_wlBall_c0::m = {
+	{
+		64,
+        1.0f,
+        0.0f,
+        3.0f,
+        35.0f,
+	},
+	{
+        54,
+        1.0f,
+        0.0f,
+        3.0f,
+        55.0f,
+	},
+	60,
+	-5.0f,
+	60.0f,
+	20.0f,
+};
+#pragma pop
+
+DUSK_GAME_DATA const daAlinkHIO_wolf_c1 daAlinkHIO_wolf_c0::m = {
+    13000,
+	-10000,
+	8000,
+	4000,
+	-2000,
+	8000,
+	150,
+	5,
+	35,
+	60,
+	0.7f,
+};
+
+// clang-format on

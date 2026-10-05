@@ -1,0 +1,206 @@
+/**
+ * d_a_tag_lv2prchk.cpp
+ * Boomerang Switch Puzzle Tag
+ */
+
+#include "d/dolzel_rel.h" // IWYU pragma: keep
+
+#include "d/actor/d_a_tag_lv2prchk.h"
+#include "d/d_com_inf_game.h"
+#include "f_pc/f_pc_name.h"
+
+int daTagLv2PrChk_c::Create() {
+    mSwbit2 = getSwbit2();
+    if (mSwbit2 == 0xFF) {
+        // "Boomerang puzzle monitoring tag: switch 2 is not specified"
+        OS_REPORT("\x1b[43;30mブーメランネタ監視タグ：スイッチ２の指定がありません\n\x1b[m");
+        return 0;
+    }
+
+    if (fopAcM_isSwitch(this, getSwbit())) {
+        mAction = ACTION_END_e;
+    } else {
+        mAction = ACTION_CHECK_e;
+    }
+
+    // "Boomerang puzzle monitoring tag: switch 1 <%d> switch 2 <%d>"
+    OS_REPORT("ブーメランネタ監視タグ：スイッチ１<%d>スイッチ２<%d>\n", getSwbit(), getSwbit2());
+
+    return 1;
+}
+
+int daTagLv2PrChk_c::create() {
+    fopAcM_ct(this, daTagLv2PrChk_c);
+
+    if (!Create()) {
+        return cPhs_ERROR_e;
+    }
+
+    return cPhs_COMPLEATE_e;
+}
+
+int daTagLv2PrChk_c::execute() {
+    action();
+    return 1;
+}
+
+void daTagLv2PrChk_c::action() {
+    typedef void (daTagLv2PrChk_c::*actionFunc)();
+    static actionFunc l_func[] = {&daTagLv2PrChk_c::actionCheck, &daTagLv2PrChk_c::actionEnd};
+
+    (this->*l_func[mAction])();
+}
+
+void daTagLv2PrChk_c::actionCheck() {
+    bool switch_1 = fopAcM_isSwitch(this, mSwbit2);
+    bool switch_2 = fopAcM_isSwitch(this, mSwbit2 + 1);
+    bool switch_3 = fopAcM_isSwitch(this, mSwbit2 + 2);
+    bool switch_4 = fopAcM_isSwitch(this, mSwbit2 + 3);
+    int active_switch_num = switch_1 + switch_2 + switch_3 + switch_4;
+
+    switch (mMode) {
+    case MODE_CHECK_FIRST_SW:
+        mPlayedSound = false;
+        if (switch_1 && !switch_2 && !switch_3 && !switch_4) {
+            mDirection = 1;
+            mMode = MODE_CHECK_SECOND_SW;
+        } else if (switch_4 && !switch_1 && !switch_2 && !switch_3) {
+            mDirection = -1;
+            mMode = MODE_CHECK_SECOND_SW;
+        } else if (switch_2 || switch_3) {
+            mMode = MODE_CHECK_WRONG_ORDER;
+        }
+        break;
+    case MODE_CHECK_SECOND_SW:
+        if (mDirection > 0) {
+            if (switch_1 && switch_2) {
+                mMode = MODE_CHECK_THIRD_SW;
+            } else if (!switch_1) {
+                mMode = MODE_CHECK_RESET;
+            } else if (switch_3 || switch_4) {
+                mMode = MODE_CHECK_WRONG_ORDER;
+            }
+        } else {
+            if (switch_4 && switch_3) {
+                mMode = MODE_CHECK_THIRD_SW;
+            } else if (!switch_4) {
+                mMode = MODE_CHECK_RESET;
+            } else if (switch_2 || switch_1) {
+                mMode = MODE_CHECK_WRONG_ORDER;
+            }
+        }
+        break;
+    case MODE_CHECK_THIRD_SW:
+        if (mDirection > 0) {
+            if (switch_1 && switch_2 && switch_3) {
+                mMode = MODE_CHECK_FOURTH_SW;
+            } else if (!switch_1 || !switch_2) {
+                field_0x56d = 1;
+                mMode = MODE_CHECK_RESET;
+            } else if (switch_4) {
+                mMode = MODE_CHECK_WRONG_ORDER;
+            }
+        } else {
+            if (switch_4 && switch_3 && switch_2) {
+                mMode = MODE_CHECK_FOURTH_SW;
+            } else if (!switch_4 || !switch_3) {
+                field_0x56d = 1;
+                mMode = MODE_CHECK_RESET;
+            } else if (switch_1) {
+                mMode = MODE_CHECK_WRONG_ORDER;
+            }
+        }
+        break;
+    case MODE_CHECK_FOURTH_SW:
+        if (switch_1 && switch_2 && switch_3 && switch_4) {
+            mMode = MODE_PUZZLE_CLEAR;
+        } else if (mDirection > 0) {
+            if (!switch_1 || !switch_2 || !switch_3) {
+                mMode = MODE_CHECK_RESET;
+            }
+        } else if (!switch_4 || !switch_3 || !switch_2) {
+            mMode = MODE_CHECK_RESET;
+        }
+        break;
+    case MODE_PUZZLE_CLEAR:
+        fopAcM_onSwitch(this, getSwbit());
+        mAction = ACTION_END_e;
+        // "Boomerang puzzle monitoring tag: SW<%d> was turned on"
+        OS_REPORT("ブーメランネタ監視タグ：ＳＷ<%d>オンしました\n", getSwbit());
+        break;
+    case MODE_CHECK_RESET:
+        if (!switch_1 && !switch_2 && !switch_3 && !switch_4) {
+            mMode = MODE_CHECK_FIRST_SW;
+            field_0x56d = 0;
+        } else if (active_switch_num > 1 || field_0x56d == 1) {
+            fopAcM_onSwitch(this, getSwbit3());
+        }
+        break;
+    case MODE_CHECK_WRONG_ORDER:
+        if (switch_1 && switch_2 && switch_3 && switch_4) {
+            if (!mPlayedSound) {
+                seStartWrong();
+                mPlayedSound = true;
+            }
+        } else {
+            mMode = MODE_CHECK_RESET;
+        }
+        break;
+    case 150:
+        if (!switch_1 && !switch_2 && !switch_3 && !switch_4) {
+            mMode = MODE_CHECK_FIRST_SW;
+        }
+        break;
+    }
+}
+
+void daTagLv2PrChk_c::actionEnd() {}
+
+void daTagLv2PrChk_c::seStartWrong() {
+    Z2GetAudioMgr()->seStart(Z2SE_SYS_RESULT_WRONG, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    // "♪ Wrong answer!!!!"
+    OS_REPORT("♪ハズレ！！！！\n");
+}
+
+int daTagLv2PrChk_c::_delete() {
+    return 1;
+}
+
+static int daTagLv2PrChk_Execute(daTagLv2PrChk_c* i_this) {
+    return i_this->execute();
+}
+
+static int daTagLv2PrChk_Delete(daTagLv2PrChk_c* i_this) {
+    int id = fopAcM_GetID(i_this);
+    return i_this->_delete();
+}
+
+static int daTagLv2PrChk_Create(daTagLv2PrChk_c* i_this) {
+    int id = fopAcM_GetID(i_this);
+    return i_this->create();
+}
+
+static DUSK_CONST actor_method_class l_daTagLv2PrChk_Method = {
+    (process_method_func)daTagLv2PrChk_Create,
+    (process_method_func)daTagLv2PrChk_Delete,
+    (process_method_func)daTagLv2PrChk_Execute,
+    (process_method_func)NULL,
+    (process_method_func)NULL,
+};
+
+DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_Tag_Lv2PrChk = {
+    /* Layer ID     */ fpcLy_CURRENT_e,
+    /* List ID      */ 7,
+    /* List Prio    */ fpcPi_CURRENT_e,
+    /* Proc Name    */ fpcNm_Tag_Lv2PrChk_e,
+    /* Proc SubMtd  */ &g_fpcLf_Method.base,
+    /* Size         */ sizeof(daTagLv2PrChk_c),
+    /* Size Other   */ 0,
+    /* Parameters   */ 0,
+    /* Leaf SubMtd  */ &g_fopAc_Method.base,
+    /* Draw Prio    */ fpcDwPi_Tag_Lv2PrChk_e,
+    /* Actor SubMtd */ &l_daTagLv2PrChk_Method,
+    /* Status       */ fopAcStts_UNK_0x40000_e,
+    /* Group        */ fopAc_ACTOR_e,
+    /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
+};

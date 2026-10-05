@@ -1,0 +1,35 @@
+From: aleks2 (H37)
+Subject: [PATCH 3/3] pin dependencies by commit
+
+The three FetchContent dependencies were fetched by tag, which can move. Pinned to the
+commits the tags pointed at on 2026-10-02: yaml-cpp-0.9.0 (MIT), base64pp v0.2.0-rc0 (MIT),
+TwilitRealm/embed twilit-v2 (Apache-2.0, build-time embedding).
+---
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4bf6783..3b20894 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -29,20 +29,20 @@ message(STATUS "randomizer: Fetching yaml-cpp")
+ FetchContent_Declare(
+         yaml-cpp
+         GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+-        GIT_TAG yaml-cpp-0.9.0
++        GIT_TAG 56e3bb550c91fd7005566f19c079cb7a503223cf # yaml-cpp-0.9.0 (MIT); pinned by commit (aleks2, H37)
+ )
+ message(STATUS "randomizer: Fetching base64pp")
+ FetchContent_Declare(
+         base64pp
+         GIT_REPOSITORY https://github.com/matheusgomes28/base64pp.git
+-        GIT_TAG v0.2.0-rc0
++        GIT_TAG 736345896182b50babfe6eaa10b211b90d6abb0b # v0.2.0-rc0 (MIT); pinned by commit (aleks2, H37)
+ )
+ 
+ message(STATUS "randomizer: Fetching battery-embed")
+ FetchContent_Declare(
+         battery-embed
+         GIT_REPOSITORY https://github.com/TwilitRealm/embed.git
+-        GIT_TAG        twilit-v2
++        GIT_TAG        408567ae3eb296f3aa8d00e1c57d0b7d28ce992b # twilit-v2 (Apache-2.0); pinned by commit (aleks2, H37)
+ )
+ 
+ FetchContent_MakeAvailable(yaml-cpp base64pp battery-embed)

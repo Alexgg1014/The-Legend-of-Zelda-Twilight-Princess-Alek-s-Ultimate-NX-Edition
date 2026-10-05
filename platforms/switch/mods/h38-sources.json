@@ -1,0 +1,65 @@
+{
+  "schema": "dusklight-aleks-switch-mod-sources",
+  "version": 1,
+  "comment": "Native mods compiled from pinned sources with devkitA64 into lib/switch-arm64/mod.so (build_switch_mods.py). Each source is a commit AND the git tree object that commit must have: a tree mismatch means the checkout is not the pinned source. Adding a mod is adding an entry here and its patches under platforms/switch/patches/<dir>; no script changes.",
+  "mods": {
+    "randomizer": {
+      "mod_id": "dev.twilitrealm.randomizer",
+      "tier": "required",
+      "source": {
+        "url": "https://github.com/TwilitRealm/dusklight-randomizer.git",
+        "commit": "1f24e81303536db4b77f49d057a8ec1f11162000",
+        "tree": "ee69809bf758c515781c2c82a4435dd6c322bff0",
+        "checkout": "mods/randomizer"
+      },
+      "patches": "platforms/switch/patches/randomizer",
+      "build": {
+        "package_target": "randomizer_package",
+        "package_file": "mods/randomizer.dusk",
+        "cmake_args": ["-DRANDOMIZER_SOURCE_PATH_PREFIX={tree}"],
+        "dependency_sources": {
+          "FMT_SRC": "FETCHCONTENT_SOURCE_DIR_FMT",
+          "YAML_CPP_SRC": "FETCHCONTENT_SOURCE_DIR_YAML-CPP",
+          "BASE64PP_SRC": "FETCHCONTENT_SOURCE_DIR_BASE64PP",
+          "BATTERY_EMBED_SRC": "FETCHCONTENT_SOURCE_DIR_BATTERY-EMBED"
+        }
+      }
+    },
+    "twilit_essentials": {
+      "mod_id": "com.dusklight.twilit_essentials",
+      "tier": "h38-catalog",
+      "mod_json_version": "2.5.0",
+      "source": {
+        "url": "https://github.com/F1mmel/dusklight-twilit-essentials",
+        "env": "TWILIT_SRC",
+        "commit": "7682060c20e2e3757b2888a27bbd958506ccb4f7",
+        "tree": "193b15b7ac28f49d395b9462f381288e8d66a8d9"
+      },
+      "patches": "platforms/switch/patches/twilit_essentials",
+      "build": {
+        "package_target": "twilit_essentials_package",
+        "package_file": "mods/twilit_essentials.dusk",
+        "cmake_args": [],
+        "dependency_sources": {}
+      }
+    },
+    "albw": {
+      "mod_id": "dev.albt.albw",
+      "tier": "h38-optional",
+      "mod_json_version": "0.3.0",
+      "comment": "A Link Between Twilight, from the author's modular port albt-dusks (NOT the full game fork A-Link-Between-Twilight). Its CMake takes the SDK from DUSKLIGHT_DIR, which the pipeline sets to this checkout.",
+      "source": {
+        "url": "https://github.com/WadeWinningWilson/albt-dusks",
+        "commit": "5cf4a362b128834199baaaecf8ab56aca9130769",
+        "tree": "77fb2d415d59df9cf19da61ffa5b7508393907fc"
+      },
+      "patches": "platforms/switch/patches/albw",
+      "build": {
+        "package_target": "albt_full_plugin_package",
+        "package_file": "mods/albt_full_plugin.dusk",
+        "cmake_args": [],
+        "dependency_sources": {}
+      }
+    }
+  }
+}

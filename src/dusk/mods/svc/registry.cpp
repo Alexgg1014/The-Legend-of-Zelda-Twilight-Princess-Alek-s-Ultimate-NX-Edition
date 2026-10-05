@@ -1,0 +1,413 @@
+#include "registry.hpp"
+
+#include "dusk/app_info.hpp"
+#include "dusk/logging.h"
+#include "dusk/mods/loader/loader.hpp"
+#include "dusk/utilities.hpp"
+
+#include <fmt/format.h>
+
+#include <algorithm>
+#include <optional>
+#include <ranges>
+#include <string_view>
+#include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace dusk::mods::svc {
+namespace {
+
+uint64_t s_serviceGeneration = 0;
+std::unordered_map<std::string, ServiceRecord> s_services;
+std::unordered_set<std::string> s_unavailableServices;
+std::vector<const ServiceModule*> s_modules;
+
+const char* mod_id(const LoadedMod* mod) {
+    return mod != nullptr ? mod->metadata.id.c_str() : AppName;
+}
+
+bool validate_service_header(const ServiceHeader* header, const char* serviceId,
+    const uint16_t majorVersion, const uint16_t minorVersion, LoadedMod* provider) {
+    if (header == nullptr) {
+        DuskLog.error("[{}] service '{}' has null header", mod_id(provider), serviceId);
+        return false;
+    }
+    if (header->struct_size < sizeof(ServiceHeader)) {
+        DuskLog.error("[{}] service '{}' has invalid header size {}", mod_id(provider), serviceId,
+            header->struct_size);
+        return false;
+    }
+    if (header->major_version != majorVersion || header->minor_version != minorVersion) {
+        DuskLog.error("[{}] service '{}' header version {}.{} does not match export {}.{}",
+            mod_id(provider), serviceId, header->major_version, header->minor_version, majorVersion,
+            minorVersion);
+        return false;
+    }
+    return true;
+}
+
+void clear_services() {
+    ++s_serviceGeneration;
+    s_services.clear();
+    s_unavailableServices.clear();
+    s_modules.clear();
+}
+
+}  // namespace
+
+uint64_t services_generation() noexcept {
+    return s_serviceGeneration;
+}
+
+std::vector<ServiceExport> list_services() {
+    std::vector<ServiceExport> services;
+    for (const auto& [key, record] : s_services) {
+        if (record.service == nullptr ||
+            (record.provider != nullptr && !record.provider->is_enabled()))
+        {
+            continue;
+        }
+        services.push_back({record.id, record.majorVersion, record.minorVersion,
+            record.provider != nullptr ? record.provider->metadata.id : std::string{}});
+    }
+    std::ranges::sort(
+        services, {}, [](const auto& service) { return std::tie(service.id, service.major); });
+    return services;
+}
+
+ModResult register_service(const char* serviceId, const uint16_t majorVersion,
+    const uint16_t minorVersion, const void* service, LoadedMod* provider, const bool deferred) {
+    if (!utils::is_valid_name(serviceId)) {
+        DuskLog.error("[{}] attempted to register a service with no id", mod_id(provider));
+        return MOD_INVALID_ARGUMENT;
+    }
+
+    if (!deferred && !validate_service_header(static_cast<const ServiceHeader*>(service), serviceId,
+                         majorVersion, minorVersion, provider))
+    {
+        return MOD_INVALID_ARGUMENT;
+    }
+
+    const auto key = service_key(serviceId, majorVersion);
+    if (s_services.contains(key)) {
+        DuskLog.error("[{}] duplicate service '{}@{}'", mod_id(provider), serviceId, majorVersion);
+        return MOD_CONFLICT;
+    }
+
+    ++s_serviceGeneration;
+    s_services.emplace(key, ServiceRecord{
+                                serviceId,
+                                majorVersion,
+                                minorVersion,
+                                service,
+                                provider,
+                                deferred,
+                            });
+    return MOD_OK;
+}
+
+ModResult publish_deferred_service(
+    LoadedMod& provider, const char* serviceId, const uint16_t majorVersion, const void* service) {
+    if (!utils::is_valid_name(serviceId) || service == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+
+    const auto it = s_services.find(service_key(serviceId, majorVersion));
+    if (it == s_services.end() || !it->second.deferred || it->second.provider != &provider) {
+        DuskLog.error("[{}] tried to publish undeclared service '{}@{}'", provider.metadata.id,
+            serviceId, majorVersion);
+        return MOD_UNSUPPORTED;
+    }
+    auto& record = it->second;
+    if (record.service != nullptr) {
+        return MOD_CONFLICT;
+    }
+
+    const auto* header = static_cast<const ServiceHeader*>(service);
+    if (!validate_service_header(header, serviceId, majorVersion, record.minorVersion, &provider)) {
+        return MOD_INVALID_ARGUMENT;
+    }
+
+    ++s_serviceGeneration;
+    record.service = service;
+    record.minorVersion = header->minor_version;
+    return MOD_OK;
+}
+
+void remove_services_for_provider(const LoadedMod& provider) {
+    ++s_serviceGeneration;
+    std::erase_if(
+        s_services, [&](const auto& entry) { return entry.second.provider == &provider; });
+}
+
+const ServiceRecord* find_service(
+    const char* serviceId, const uint16_t majorVersion, const uint16_t minMinorVersion) {
+    const auto* record = find_service_record(serviceId, majorVersion);
+    if (record == nullptr || record->service == nullptr || record->minorVersion < minMinorVersion) {
+        return nullptr;
+    }
+    return record;
+}
+
+const ServiceRecord* find_service_record(const char* serviceId, const uint16_t majorVersion) {
+    if (!utils::is_valid_name(serviceId)) {
+        return nullptr;
+    }
+
+    const auto it = s_services.find(service_key(serviceId, majorVersion));
+    return it != s_services.end() ? &it->second : nullptr;
+}
+
+std::string describe_missing_service(const char* serviceId, const uint16_t majorVersion,
+    const uint16_t minMinorVersion) {
+    const char* message = "Mod requires a service that is unavailable";
+    if (std::string_view{serviceId}.starts_with(DUSKLIGHT_SERVICE_ID_PREFIX) &&
+        !s_unavailableServices.contains(service_key(serviceId, majorVersion)))
+    {
+        if (const auto* record = find_service_record(serviceId, majorVersion)) {
+            if (record->provider == nullptr && record->service != nullptr &&
+                record->minorVersion < minMinorVersion)
+            {
+                message = "Mod requires a newer Dusklight version";
+            }
+        } else {
+            std::optional<uint16_t> highestMajor;
+            for (const auto& [key, record] : s_services) {
+                if (record.provider == nullptr && record.service != nullptr && record.id == serviceId) {
+                    highestMajor = std::max(highestMajor.value_or(0), record.majorVersion);
+                }
+            }
+            if (highestMajor) {
+                message = majorVersion > *highestMajor ?
+                    "Mod requires a newer Dusklight version" :
+                    "Mod must be updated for the current Dusklight version";
+            }
+        }
+    }
+    return fmt::format("{} (missing: {})", message, serviceId);
+}
+
+ModResult register_module(const ServiceModule& module) {
+    if (module.available != nullptr && !module.available()) {
+        s_unavailableServices.insert(service_key(module.id, module.majorVersion));
+        return MOD_UNAVAILABLE;
+    }
+    const auto result = register_service(
+        module.id, module.majorVersion, module.minorVersion, module.service, nullptr, false);
+    if (result != MOD_OK) {
+        return result;
+    }
+    s_unavailableServices.erase(service_key(module.id, module.majorVersion));
+    s_modules.push_back(&module);
+    if (module.initialize != nullptr) {
+        module.initialize();
+    }
+    return MOD_OK;
+}
+
+void modules_mod_deactivating(LoadedMod& mod) {
+    for (const auto* module : s_modules | std::views::reverse) {
+        if (module->modDeactivating != nullptr) {
+            module->modDeactivating(mod);
+        }
+    }
+}
+
+void modules_mod_detached(LoadedMod& mod) {
+    for (const auto* module : s_modules | std::views::reverse) {
+        if (module->modDetached != nullptr) {
+            module->modDetached(mod);
+        }
+    }
+}
+
+void modules_lifecycle_applied() {
+    for (const auto* module : s_modules) {
+        if (module->lifecycleApplied != nullptr) {
+            module->lifecycleApplied();
+        }
+    }
+}
+
+void modules_frame_begin() {
+    for (const auto* module : s_modules) {
+        if (module->frameBegin != nullptr) {
+            module->frameBegin();
+        }
+    }
+}
+
+void modules_frame_end() {
+    for (const auto* module : s_modules) {
+        if (module->frameEnd != nullptr) {
+            module->frameEnd();
+        }
+    }
+}
+
+void modules_shutdown() {
+    for (const auto* module : s_modules | std::views::reverse) {
+        if (module->shutdown != nullptr) {
+            module->shutdown();
+        }
+    }
+    clear_services();
+}
+
+// aleks2 (H37-c4): the one list of the game's own services. init_services registers it; the native
+// loader's Dry Run reads it (host_service_versions) to say, before a mod activates, whether the
+// services it imports exist on this build.
+std::span<const ServiceModule* const> host_modules() {
+    static const ServiceModule* const modules[] = {
+        &g_hostModule,
+        &g_logModule,
+        &g_resourceModule,
+        &g_fileModule,
+        &g_interpModule,
+        &g_httpModule,
+        &g_netModule,
+        &g_websocketModule,
+        &g_hookModule,
+        &g_overlayModule,
+        &g_textureModule,
+        &g_configModule,
+        &g_uiModule_v1,
+        &g_uiModule,
+        &g_gameModule,
+        &g_cameraModule,
+        &g_windowModule,
+        &g_gfxModule,
+        &g_audioResModule,
+        &g_saveModule,
+        &g_stageModule,
+        &g_itemModule,
+        &g_flowModule,
+        &g_messageModule,
+        &g_gamemodeModule,
+        &g_actorModule,
+    };
+    return modules;
+}
+
+std::vector<HostServiceVersion> host_service_versions(std::string_view id) {
+    std::vector<HostServiceVersion> versions;
+    for (const auto* module : host_modules()) {
+        if (std::string_view{module->id} != id) {
+            continue;
+        }
+        versions.push_back({module->majorVersion, module->minorVersion,
+            module->available == nullptr || module->available()});
+    }
+    return versions;
+}
+
+}  // namespace dusk::mods::svc
+
+namespace dusk::mods {
+
+void ModLoader::init_services() {
+    svc::clear_services();
+    for (const auto* module : svc::host_modules()) {
+        svc::register_module(*module);
+    }
+}
+
+bool ModLoader::register_static_service_exports(LoadedMod& mod) {
+    if (!mod.native) {
+        return true;
+    }
+
+    for (const auto* serviceExport : mod.native->parsed.exports) {
+        if (!utils::is_valid_name(serviceExport->service_id.chars)) {
+            fail_mod(mod, MOD_INVALID_ARGUMENT, "Invalid service export descriptor");
+            return false;
+        }
+
+        const bool deferred = (serviceExport->rec.flags & SERVICE_EXPORT_DEFERRED) != 0;
+        if (!deferred && serviceExport->service == nullptr) {
+            fail_mod(mod, MOD_INVALID_ARGUMENT, "Static service export has null service pointer");
+            return false;
+        }
+
+        const auto result =
+            svc::register_service(serviceExport->service_id.chars, serviceExport->major_version,
+                serviceExport->minor_version, serviceExport->service, &mod, deferred);
+        if (result != MOD_OK) {
+            fail_mod(mod, result, "Service export registration failed");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::string ModLoader::describe_missing_import(
+    const char* serviceId, const uint16_t majorVersion, const uint16_t minMinorVersion) const {
+    if (std::string_view{serviceId}.starts_with(DUSKLIGHT_SERVICE_ID_PREFIX)) {
+        return svc::describe_missing_service(serviceId, majorVersion, minMinorVersion);
+    }
+    if (const auto* record = svc::find_service_record(serviceId, majorVersion)) {
+        if (record->service == nullptr) {
+            return fmt::format("Required service {}@{} was never published by provider '{}'",
+                serviceId, majorVersion, svc::mod_id(record->provider));
+        }
+        return fmt::format("Required service {}@{} only provides minor version {} (need >= {})",
+            serviceId, majorVersion, record->minorVersion, minMinorVersion);
+    }
+
+    // No record can also mean the provider failed or is disabled and its services were removed.
+    for (const auto& other : mods()) {
+        if ((other.active && !other.loadFailed) || !other.native) {
+            continue;
+        }
+        for (const auto* serviceExport : other.native->parsed.exports) {
+            if (utils::is_valid_name(serviceExport->service_id.chars) &&
+                std::string_view{serviceExport->service_id.chars} == serviceId &&
+                serviceExport->major_version == majorVersion)
+            {
+                return fmt::format("Required service {}@{} unavailable: provider '{}' {}",
+                    serviceId, majorVersion, other.metadata.id,
+                    other.loadFailed ? "failed to load" : "is disabled");
+            }
+        }
+    }
+
+    return svc::describe_missing_service(serviceId, majorVersion, minMinorVersion);
+}
+
+bool ModLoader::resolve_service_imports(LoadedMod& mod) {
+    if (!mod.native) {
+        return true;
+    }
+
+    for (const auto* serviceImport : mod.native->parsed.imports) {
+        if (!utils::is_valid_name(serviceImport->service_id.chars) ||
+            serviceImport->slot == nullptr)
+        {
+            fail_mod(mod, MOD_INVALID_ARGUMENT, "Invalid service import descriptor");
+            return false;
+        }
+
+        const auto* service = svc::find_service(serviceImport->service_id.chars,
+            serviceImport->major_version, serviceImport->min_minor_version);
+        if (service == nullptr) {
+            *static_cast<const void**>(serviceImport->slot) = nullptr;
+            if ((serviceImport->rec.flags & SERVICE_IMPORT_OPTIONAL) != 0) {
+                continue;
+            }
+
+            fail_mod(mod, MOD_UNAVAILABLE,
+                describe_missing_import(serviceImport->service_id.chars,
+                    serviceImport->major_version, serviceImport->min_minor_version));
+            return false;
+        }
+
+        *static_cast<const void**>(serviceImport->slot) = service->service;
+    }
+
+    return true;
+}
+
+}  // namespace dusk::mods
