@@ -150,4 +150,49 @@ Result delete_backup(const Storage& storage, const std::filesystem::path& path);
 std::string format_gc_time(uint32_t value);
 void remove_temporary_export(const ExportArtifact& artifact);
 
+// aleks2 (cross-save): the pieces the Saves window is built from, public so the save snapshot
+// service (mods/svc/save_snapshot.cpp) reuses them instead of duplicating parser, backup,
+// compatibility and atomic writes.
+
+// The save's GCI bytes; empty when there is no save.
+ValueResult<std::vector<uint8_t>> read_save_gci(const Storage& storage, const SaveIdentity& identity);
+// The save's mod sidecars, by mod ID.
+ValueResult<std::map<std::string, std::vector<uint8_t>>> read_save_mod_files(
+    const Storage& storage, const SaveIdentity& identity);
+// Packs a .dusksave (version 1) and publishes it atomically at destination.
+Result write_dusksave(const std::filesystem::path& destination, const std::vector<uint8_t>& gci,
+    const std::map<std::string, std::vector<uint8_t>>& modFiles);
+// Backs up the current save into the backups directory. An empty path means there was no save.
+ValueResult<std::filesystem::path> backup_save(const Storage& storage, const SaveIdentity& identity);
+// Fails while the game is reading or writing the mounted card.
+Result ensure_card_idle(const Storage& storage);
+// SHA-256 (hex) over the exact save content: the GCI bytes and every sidecar, framed with sizes and
+// sorted by mod ID. The .dusksave container is not hashed: its metadata carries a timestamp.
+std::string snapshot_digest(
+    const std::vector<uint8_t>& gci, const std::map<std::string, std::vector<uint8_t>>& modFiles);
+
+enum class ApplyStage {
+    None,
+    Busy,
+    Validate,
+    Backup,
+    Write,
+    ModData,
+    Remount,
+};
+
+struct ApplyOutcome {
+    Result result;
+    ApplyStage failedStage = ApplyStage::None;
+    std::filesystem::path backup;
+    // Region/platform conversion the artifact needed (Exact when none).
+    DiscCompatibility compatibility = DiscCompatibility::Exact;
+};
+
+// What import_artifact does for a .gci/.dusksave, with the stage that failed and the backup made.
+// Refuses conversions unless allowConversion. If the mod data cannot be replaced, the previous GCI
+// is put back: a failed apply leaves the previous save, never half of each.
+ApplyOutcome apply_snapshot(const Storage& storage, const SaveIdentity& identity,
+    const Artifact& artifact, bool allowConversion);
+
 }  // namespace dusk::save_manager

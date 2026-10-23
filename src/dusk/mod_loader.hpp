@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -297,6 +298,15 @@ public:
     [[nodiscard]] const LoadedMod* find_mod(std::string_view id) const;
 
     [[nodiscard]] bool initialized() const noexcept { return m_startupComplete; }
+    // aleks2 (DM1-b): native code changes (enable, disable, install, update) wait for a restart
+    // (mods/loader/update_journal.hpp). The ids with a change waiting, and why.
+    [[nodiscard]] bool restart_required(std::string_view id) const;
+    [[nodiscard]] const std::vector<std::pair<std::string, std::string>>& pending_restarts() const noexcept {
+        return m_restartRequired;
+    }
+    // aleks2 (DM1-c): the version a deferred install put on the card this session, which runs after the
+    // restart; empty if none. metadata.version stays the running one until then.
+    [[nodiscard]] std::string_view staged_version(std::string_view id) const;
     [[nodiscard]] uint64_t generation() const noexcept { return m_generation; }
 
     [[nodiscard]] auto mods() const {
@@ -363,6 +373,19 @@ private:
     // native loader only; unconditional so every translation unit sees one layout).
     static constexpr uint32_t kBootTicks = 600;
     uint32_t m_bootTicks = 0;
+    // V1-rc5: the boot also ends this long after the mods started, whatever the frame rate: at 0-17 fps on the
+    // Preparing shaders screen 600 frames took over a minute, and quitting there counted as a crash (the next
+    // start ran without mods).
+    static constexpr double kBootSeconds = 20.0;
+    double m_startupCompleteAt = 0.0;
+    // aleks2 (DM1-b): mod id -> what waits for the restart. Unconditional, one layout everywhere.
+    std::vector<std::pair<std::string, std::string>> m_restartRequired;
+    // aleks2 (DM1-c): mod id -> version installed for the next start (staged_version()).
+    std::vector<std::pair<std::string, std::string>> m_stagedVersions;
+    void require_restart(std::string_view id, std::string reason);
+    void clear_restart(std::string_view id);
+    [[nodiscard]] bool code_change_needs_restart(const LoadedMod& mod) const;
+    void settle_update_journal();
 
     LoadedMod* try_load_mod(const std::filesystem::path& modPath, bool fromDir,
         uint32_t searchDirIndex, std::unique_ptr<ModBundle> bundle = {});

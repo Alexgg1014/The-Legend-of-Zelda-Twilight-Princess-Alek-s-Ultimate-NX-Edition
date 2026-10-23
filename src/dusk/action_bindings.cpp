@@ -135,7 +135,7 @@ bool getActionBindTrig(ActionBinds action, u32 port) {
           !actionPressData[port][static_cast<int>(action)].pressedPrevFrame;
 }
 
-bool getActionBindHold(ActionBinds action, u32 port) {
+DUSK_NOINLINE bool getActionBindHold(ActionBinds action, u32 port) {
     return actionPressData[port][static_cast<int>(action)].pressedCurFrame &&
            actionPressData[port][static_cast<int>(action)].pressedPrevFrame;
 }

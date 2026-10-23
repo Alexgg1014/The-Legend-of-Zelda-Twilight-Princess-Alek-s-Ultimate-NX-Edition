@@ -301,7 +301,7 @@ std::vector<Start> Cache::take_starts() {
     };
     std::vector<Candidate> candidates;
     for (const auto& [source, entry] : mEntries) {
-        if (entry.state != State::Unrequested) {
+        if (entry.state != State::Unrequested || entry.retryAt > mNow) {
             continue;
         }
         const auto priority = priority_locked(source);
@@ -323,6 +323,7 @@ std::vector<Start> Cache::take_starts() {
         auto& entry = mEntries.at(*candidate.source);
         entry.state = State::Pending;
         entry.ticket = ++mTickets;
+        ++entry.attempts;
         ++mPending;
         ++mStats.started;
         const auto info = parse_source(*candidate.source, 0);
@@ -387,6 +388,11 @@ void Cache::trim_tracked() {
     }
 }
 
+std::uint32_t Cache::attempts_of(std::string_view source) const {
+    const auto it = mEntries.find(std::string{source});
+    return it == mEntries.end() ? 0 : it->second.attempts;
+}
+
 Cache::Completion Cache::complete(
     const std::string& source, std::uint64_t ticket, FetchOutcome outcome) {
     const auto it = mEntries.find(source);
@@ -399,6 +405,20 @@ Cache::Completion Cache::complete(
     entry.ticket = 0;
     mStats.networkMsTotal += outcome.networkMs;
     mStats.networkMsMax = std::max(mStats.networkMsMax, outcome.networkMs);
+
+    // V1-rc5: transient failures are requested again, later, up to maxAttempts.
+    const bool retryable =
+        outcome.kind == FetchOutcome::Kind::NetworkError || outcome.kind == FetchOutcome::Kind::DecodeError ||
+        (outcome.kind == FetchOutcome::Kind::HttpError &&
+            (outcome.httpStatus == 0 || outcome.httpStatus == 408 || outcome.httpStatus == 429 ||
+                outcome.httpStatus >= 500));
+    if (retryable && entry.attempts < mLimits.maxAttempts) {
+        static constexpr double kBackoffSeconds[] = {1.0, 3.0, 8.0};
+        const std::size_t step = std::min<std::size_t>(entry.attempts, std::size(kBackoffSeconds)) - 1;
+        entry.state = State::Unrequested;
+        entry.retryAt = mNow + kBackoffSeconds[step];
+        return Completion::Retry;
+    }
 
     switch (outcome.kind) {
     case FetchOutcome::Kind::Ok:

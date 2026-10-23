@@ -1843,7 +1843,7 @@ int daTbox_c::Execute(Mtx** param_0) {
     return true;
 }
 
-int daTbox_c::Draw() {
+DUSK_NOINLINE int daTbox_c::Draw() {
     if (flagCheck(0x40)) {
         return true;
     }

@@ -140,6 +140,7 @@ std::string_view stage_code(Stage s) {
 struct BootGuard::State {
     uint64_t boots = 0;
     uint32_t unattributedCrashes = 0;
+    std::string loadStop;  // V1-rc12: the mod the previous boot stopped loading (once; see Startup::stoppedOnce)
     std::map<std::string, Incident> quarantine;
     std::vector<Incident> incidents;
 };
@@ -154,6 +155,7 @@ BootGuard::State BootGuard::load() const {
     }
     s.boots = j->value("boots", uint64_t{0});
     s.unattributedCrashes = j->value("unattributed_crashes", uint32_t{0});
+    s.loadStop = j->value("load_stop", std::string{});
     if (const auto it = j->find("quarantine"); it != j->end() && it->is_array()) {
         for (const auto& q : *it) {
             if (auto i = from_json(q)) {
@@ -173,7 +175,7 @@ BootGuard::State BootGuard::load() const {
 
 void BootGuard::save(const State& s) const {
     json j = {{"schema", "dusklight-aleks-mod-guard"}, {"version", 1}, {"boots", s.boots},
-        {"unattributed_crashes", s.unattributedCrashes}, {"quarantine", json::array()},
+        {"unattributed_crashes", s.unattributedCrashes}, {"load_stop", s.loadStop}, {"quarantine", json::array()},
         {"incidents", json::array()}};
     for (const auto& [id, i] : s.quarantine) {
         j["quarantine"].push_back(to_json(i));
@@ -201,7 +203,18 @@ BootGuard::Startup BootGuard::begin_boot() {
         i.category = i.stage == stage_code(Stage::Constructors) ? Category::ConstructorFailure :
                                                                    Category::CrashDuringInit;
         i.message = "the game stopped during this mod's " + i.stage + " step";
-        if (!i.modId.empty()) {
+        const bool loadStep = i.stage == stage_code(Stage::Load);
+        if (!i.modId.empty() && loadStep && s.loadStop != i.modId) {
+            // V1-rc12: once, in the load step: closed or crashed cannot be told apart; tried again.
+            i.message = "the game stopped while this mod was loading (closed, or a crash); it is tried once more";
+            s.loadStop = i.modId;
+            s.incidents.push_back(i);
+            out.stoppedOnce = i;
+        } else if (!i.modId.empty()) {
+            if (loadStep) {
+                i.message = "the game stopped twice in a row while this mod was loading";
+            }
+            s.loadStop.clear();
             s.quarantine[i.modId] = i;
             s.incidents.push_back(i);
             out.crashed = i;
@@ -237,8 +250,9 @@ void BootGuard::end_boot() {
     std::error_code ec;
     fs::remove(m_dir / kBootMarker, ec);
     State s = load();
-    if (s.unattributedCrashes != 0) {
+    if (s.unattributedCrashes != 0 || !s.loadStop.empty()) {
         s.unattributedCrashes = 0;
+        s.loadStop.clear();  // V1-rc12: this boot got past every load: a later stop counts as a first one
         save(s);
     }
 }

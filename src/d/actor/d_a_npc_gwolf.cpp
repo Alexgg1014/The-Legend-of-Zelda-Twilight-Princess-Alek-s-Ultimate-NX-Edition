@@ -398,11 +398,11 @@ int daNpc_GWolf_c::Delete() {
     return 1;
 }
 
-int daNpc_GWolf_c::Execute() {
+DUSK_NOINLINE int daNpc_GWolf_c::Execute() {
     return execute();
 }
 
-int daNpc_GWolf_c::Draw() {
+DUSK_NOINLINE int daNpc_GWolf_c::Draw() {
     J3DModelData* mdlData_p = mAnm_p->getModel()->getModelData();
     mdlData_p->getMaterialNodePointer(2)->setMaterialAnm(mpMatAnm);
 
@@ -875,7 +875,7 @@ int daNpc_GWolf_c::getModeFromParam() {
     return -1;
 }
 
-BOOL daNpc_GWolf_c::isDelete() {
+DUSK_NOINLINE BOOL daNpc_GWolf_c::isDelete() {
     static s16 l_delFlag[7] = {
         0x0153, 0x01EC, 0x01ED, 0x01EE, 0x01EF, 0x01F0, 0x01F1,
     };

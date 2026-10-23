@@ -126,7 +126,7 @@ int daObjZraMark_c::CreateHeap() {
     return TRUE;
 }
 
-int daObjZraMark_c::Execute() {
+DUSK_NOINLINE int daObjZraMark_c::Execute() {
     if (is_blasted()) {
         if (is_branch_pat()) {
             setBaseMtx();

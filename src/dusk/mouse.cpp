@@ -12,6 +12,12 @@
 
 #include <chrono>
 
+#if defined(__SWITCH__)
+#define ALEKS2_MOUSE_HOOKABLE __attribute__((noinline))
+#else
+#define ALEKS2_MOUSE_HOOKABLE
+#endif
+
 namespace dusk::mouse {
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -54,7 +60,9 @@ bool imgui_windows_visible() {
     return ImGui::GetIO().MetricsRenderWindows > 0;
 }
 
-bool should_capture_mouse(SDL_Window* window) {
+// aleks2 (DM2-c): out of line on Switch, where -O3 inlined it away: TPTracker hooks it by name
+// ("src/dusk/mouse.cpp#dusk::mouse::should_capture_mouse"). Same body; nothing else changes.
+ALEKS2_MOUSE_HOOKABLE bool should_capture_mouse(SDL_Window* window) {
     if (window == nullptr || ui::any_document_visible() || imgui_windows_visible() ||
         menu_pointer::active())
     {
@@ -133,7 +141,8 @@ bool cursor_idle() {
     return Clock::now() - s_last_cursor_motion >= kCursorIdleDuration;
 }
 
-bool should_show_cursor(bool captured) {
+// aleks2 (DM2-c): out of line on Switch, as should_capture_mouse (TPTracker hooks it by name).
+ALEKS2_MOUSE_HOOKABLE bool should_show_cursor(bool captured) {
     if (captured) {
         return false;
     }

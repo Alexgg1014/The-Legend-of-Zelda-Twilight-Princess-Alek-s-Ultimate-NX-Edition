@@ -145,3 +145,6 @@ void funchook_switch_fix_entry(const funchook_entry_t *executable, funchook_entr
 ${_tail}")
     file(WRITE "${SOURCE_DIR}/src/funchook.c" "${_content}")
 endif ()
+
+# aleks2 (DM2-a): several trampolines to a page, the 12-byte patch (PatchFunchookSlots.cmake).
+include("${CMAKE_CURRENT_LIST_DIR}/PatchFunchookSlots.cmake")

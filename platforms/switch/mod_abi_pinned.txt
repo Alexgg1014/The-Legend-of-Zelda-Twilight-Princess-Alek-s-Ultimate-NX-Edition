@@ -35,3 +35,51 @@ sincos
 sincosf
 srandom
 system
+# DM1-b: Hyrule Hide & Seek 0.4.1 (catalog 2026-10-14); in devkitA64 libm / libstdc++.
+llroundf
+_ZnwmSt11align_val_tRKSt9nothrow_t
+# DM1-c: what the 2026-10-14 catalog still missed on DM1B-c1 (research/dm1b/audit-dm1b-c1), when the
+# name means the same in newlib/devkitA64 as in glibc. Twilit Essentials 2.8.4, TPTracker 0.4.43,
+# Hide & Seek 0.4.1, Dusklight Item Tracker 1.2.2. readdir and closedir are exported for switch-arm64
+# modules; a Linux module gets the loader's glibc-layout struct dirent instead (elf_runtime_policy.cpp).
+opendir
+readdir
+closedir
+lround
+_ZdlPvSt11align_val_t
+_ZnwmSt11align_val_t
+_ZNSt10filesystem7__cxx114path9_M_appendESt17basic_string_viewIcSt11char_traitsIcEE
+_ZNSt10filesystem7__cxx114path9_M_concatESt17basic_string_viewIcSt11char_traitsIcEE
+_ZNKSt10filesystem7__cxx114path12has_filenameEv
+_ZNSt10filesystem7__cxx1118directory_iteratorC2ERKNS0_4pathENS_17directory_optionsEPSt10error_code
+_ZNKSt10filesystem7__cxx1128recursive_directory_iterator5depthEv
+_ZNSt10filesystem7__cxx1128recursive_directory_iterator25disable_recursion_pendingEv
+# Same, from the other catalog mods (Ragdoll 0.3.25, which TLS still blocks): plain C with one meaning
+# on both C libraries. Not the locale (_l), multibyte-state, sysconf, socket or open() families.
+strtoull
+strtof
+strtold
+wcslen
+wmemchr
+wcstol
+wcstoll
+wcstoul
+wcstoull
+wcstod
+wcstof
+wcstold
+remove
+rename
+setbuf
+vfprintf
+vasprintf
+aligned_alloc
+posix_memalign
+fseeko
+ftello
+gettimeofday
+# Cross-save: mkdir (the Cloud Save mod creates its backup folder) and ferror; plain C, one
+# meaning on both C libraries (mode_t is 32-bit on both). Useful to any mod that makes folders
+# or checks a stream.
+mkdir
+ferror

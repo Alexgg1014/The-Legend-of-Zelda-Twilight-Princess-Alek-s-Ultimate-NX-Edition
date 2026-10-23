@@ -20,10 +20,19 @@ PREFIX = "dev.twilitrealm.dusklight."
 
 # Services registered with available() false on a Switch build, and the source that says so
 # (test-host-services.sh checks each line still says it). The file service is NOT here since H37-c4:
-# file_availability.hpp makes it exist without a picker.
-UNAVAILABLE_ON_SWITCH = {
+# file_availability.hpp makes it exist without a picker. net and websocket are NOT here since DM3: the
+# Switch build has a real borealis::net (source/borealis_net_platform_switch.cpp) and borealis::ws
+# (source/ws_transport_switch.cpp); a build with ALEKS2_SWITCH_NET=OFF is back on the stubs and would need
+# OFF_BUILD_UNAVAILABLE here.
+UNAVAILABLE_ON_SWITCH = {}
+OFF_BUILD_UNAVAILABLE = {
     "net": "platforms/switch/source/borealis_net_switch.cpp",
     "websocket": "platforms/switch/source/borealis_ws_switch.cpp",
+}
+# DM3: where availability comes from now (test-host-services.sh checks it is not a constant false).
+SWITCH_TRANSPORTS = {
+    "net": "platforms/switch/source/borealis_net_platform_switch.cpp",
+    "websocket": "platforms/switch/source/ws_transport_switch.cpp",
 }
 
 _ID = re.compile(r'#define\s+(\w+)_SERVICE_ID\s+(?:DUSKLIGHT_SERVICE_ID_PREFIX\s+"([a-z_0-9]+)"|"([a-z_0-9.]+)")')

@@ -1734,7 +1734,7 @@ static DUSK_NOINLINE s8 e_kr_damage(e_kr_class* i_this) {
     return retVal;
 }
 
-static void damage_check(e_kr_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_kr_class* i_this) {
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     fopAc_ac_c* actor = &i_this->enemy;
 

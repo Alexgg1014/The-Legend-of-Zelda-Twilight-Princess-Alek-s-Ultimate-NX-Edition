@@ -73,6 +73,7 @@ UserSettings g_userSettings = {
         // Preferences
         .enableMirrorMode {"game.enableMirrorMode", false},
         .minimalHUD {"game.minimalHUD", false},
+        .showMinimap {"game.showMinimap", true},
         .hudScale {"game.hudScale", 1.0f},
         .pauseOnFocusLost {"game.pauseOnFocusLost", false},
         .enableLinkDollRotation {"game.enableLinkDollRotation", false},
@@ -112,6 +113,13 @@ UserSettings g_userSettings = {
         .wiiGyroThresholdRad {"game.wiiGyroThresholdRad", 3.0f},
         .wiiDirectionDominance {"game.wiiDirectionDominance", 1.5f},
         .wiiMinYawRad {"game.wiiMinYawRad", 0.25f},
+        .wiiGyroWeight {"game.wiiGyroWeight", 0.5f},
+        .wiiCooldownS {"game.wiiCooldownS", 0.12f},
+        .wiiWindupFilter {"game.wiiWindupFilter", true},
+        .wiiWindupMaxG {"game.wiiWindupMaxG", 4.0f},
+        .wiiWindupMaxGyroRad {"game.wiiWindupMaxGyroRad", 12.0f},
+        .wiiThrustMaxGyroRad {"game.wiiThrustMaxGyroRad", 4.0f},
+        .wiiThrustAxis {"game.wiiThrustAxis", -1},
         .wiiAxisLateralLeft {"game.wiiAxisLateralLeft", -1},
         .wiiAxisForwardLeft {"game.wiiAxisForwardLeft", -1},
         .wiiForwardSignLeft {"game.wiiForwardSignLeft", 0},
@@ -202,8 +210,11 @@ UserSettings g_userSettings = {
         // headline setup. Flip Grip + Functional HUD were Aleks' defaults too.
         .dualScreen {"game.dualScreen", true},
         .dualScreenHudMode {"game.dualScreenHudMode", kDualHudFunctional},
-        .dualScreenLayout {"game.dualScreenLayout", kDualLayoutFlip},
+        .dualScreenLayout {"game.dualScreenLayout", kDualLayoutNormal},
+        .dualScreenRestoreMinimalHud {"game.dualScreenRestoreMinimalHud", false},
         .dualScreenRedrawDivisor {"game.dualScreenRedrawDivisor", 3},
+        .minimapRedrawDivisor {"game.minimapRedrawDivisor", 1},
+        .shaderSceneWaitMs {"game.shaderSceneWaitMs", 2500},  // V1-rc9: was 400
         .dualScreenResolution {"game.dualScreenResolution", 640},
         .dualScreenSwap {"game.dualScreenSwap", false},
         .dualScreenDisplay {"game.dualScreenDisplay", -1},
@@ -223,6 +234,9 @@ UserSettings g_userSettings = {
 #endif
         .pipelineMemo {"game.pipelineMemo", true},
         .autoResolutionPolicy {"game.autoResolutionPolicy", respol::kPolicyLegacy},
+        .hdRumble {"game.hdRumble", true},
+        .rumbleIntensity {"game.rumbleIntensity", 70},
+        .gpuBoost {"game.gpuBoost", false},
     },
 
     .backend = {
@@ -399,7 +413,10 @@ void registerSettings() {
     Register(g_userSettings.game.dualScreen);
     Register(g_userSettings.game.dualScreenHudMode);
     Register(g_userSettings.game.dualScreenLayout);
+    Register(g_userSettings.game.dualScreenRestoreMinimalHud);
     Register(g_userSettings.game.dualScreenRedrawDivisor);
+    Register(g_userSettings.game.minimapRedrawDivisor);
+    Register(g_userSettings.game.shaderSceneWaitMs);
     Register(g_userSettings.game.dualScreenResolution);
     Register(g_userSettings.game.dualScreenSwap);
     Register(g_userSettings.game.dualScreenDisplay);
@@ -429,6 +446,7 @@ void registerSettings() {
     Register(g_userSettings.game.touchCameraXSensitivity);
     Register(g_userSettings.game.touchCameraYSensitivity);
     Register(g_userSettings.game.minimalHUD);
+    Register(g_userSettings.game.showMinimap);
     Register(g_userSettings.game.hudScale);
     Register(g_userSettings.game.pauseOnFocusLost,
         [](const bool& value, const bool&) { aurora_set_pause_on_focus_lost(value); });
@@ -453,6 +471,9 @@ void registerSettings() {
     Register(g_userSettings.game.autoResolutionPolicy, [](const int&, const int&) {
         applyInternalResolutionScale(g_userSettings.game.internalResolutionScale.getValue());
     });
+    Register(g_userSettings.game.hdRumble);         // V1-rc16
+    Register(g_userSettings.game.rumbleIntensity);  // V1-rc16
+    Register(g_userSettings.game.gpuBoost);         // V1-rc16
     Register(g_userSettings.game.enableMapBackground);
     Register(g_userSettings.game.disableCutscenePillarboxing);
     Register(g_userSettings.game.disableLetterboxing);
@@ -509,6 +530,13 @@ void registerSettings() {
     Register(g_userSettings.game.wiiGyroThresholdRad);
     Register(g_userSettings.game.wiiDirectionDominance);
     Register(g_userSettings.game.wiiMinYawRad);
+    Register(g_userSettings.game.wiiGyroWeight);
+    Register(g_userSettings.game.wiiCooldownS);
+    Register(g_userSettings.game.wiiWindupFilter);
+    Register(g_userSettings.game.wiiWindupMaxG);
+    Register(g_userSettings.game.wiiWindupMaxGyroRad);
+    Register(g_userSettings.game.wiiThrustMaxGyroRad);
+    Register(g_userSettings.game.wiiThrustAxis);
     Register(g_userSettings.game.wiiAxisLateralLeft);
     Register(g_userSettings.game.wiiAxisForwardLeft);
     Register(g_userSettings.game.wiiForwardSignLeft);

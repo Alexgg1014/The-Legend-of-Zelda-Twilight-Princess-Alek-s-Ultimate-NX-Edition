@@ -13,11 +13,13 @@
 #include "dusk/speedrun.h"
 #ifdef __SWITCH__
 #include "dusk/benchmark.hpp"
+#include "dusk/director.hpp"
 #endif
 
 #include "m_Do/m_Do_main.h"
 
 #include <aurora/gfx.h>
+#include <aurora/shader_cache.h>
 #include <borealis/log.hpp>
 #include <dolphin/pad.h>
 #include <fmt/format.h>
@@ -286,7 +288,10 @@ void Overlay::update() {
         const int cornerIdx = getSettings().video.fpsOverlayCorner.getValue();
         const bool drawnOnCompanion =
             cornerIdx == dusk::kFpsCornerCompanion && dusk::dualscreen::hudOnCompanion();
-        if (getSettings().video.enableFpsOverlay.getValue() && !drawnOnCompanion) {
+        // V1: Recording Mode (Interface > Game) is a clean picture -- no counter either.
+        if (getSettings().video.enableFpsOverlay.getValue() && !drawnOnCompanion &&
+            !getSettings().game.recordingMode)
+        {
             const int idx = cornerIdx >= 0 && cornerIdx < static_cast<int>(kFpsCorners.size())
                 ? cornerIdx : 0;
             mFpsCounter->SetAttribute("open", "");
@@ -329,8 +334,11 @@ void Overlay::update() {
 #ifdef __SWITCH__
     // aleks2 (H28): what the benchmark is doing, while it is doing it.
     if (auto* bench = mDocument->GetElementById("bench-status")) {
-        const auto text = dusk::benchmark::status_text();
+        auto text = dusk::benchmark::status_text();
         if (text.empty()) {
+            text = dusk::director::check_status_text();  // V1-rc12
+        }
+        if (text.empty() || getSettings().game.recordingMode) {  // V1: not in Recording Mode
             bench->RemoveAttribute("open");
         } else {
             bench->SetAttribute("open", "");
@@ -504,7 +512,10 @@ void Overlay::update_pipeline_progress() {
     }
 
     const auto* stats = aurora_get_stats();
+    // V1-rc6: the scoped background warmup (normal starts, scene changes) shows too, as "Preparing shaders", and
+    // only while it has work queued; what the game is waiting for shows as "Compiling".
     const uint32_t queuedPipelines = stats != nullptr ? stats->queuedPipelines : 0;
+    const uint32_t backgroundPipelines = std::min(queuedPipelines, aurora_scoped_warmup_pending());
     if (queuedPipelines == 0) {
         mPipelineProgress->RemoveAttribute("open");
         mPipelineProgressActive = false;
@@ -530,12 +541,13 @@ void Overlay::update_pipeline_progress() {
     if (queuedPipelines != mLastQueuedPipelines) {
         mLastQueuedPipelines = queuedPipelines;
         const auto noun = queuedPipelines == 1 ? "shader" : "shaders";
-        set_text_content(
-            mPipelineProgressLabel, fmt::format("Compiling {} {}", queuedPipelines, noun));
+        set_text_content(mPipelineProgressLabel,
+            backgroundPipelines == queuedPipelines ? fmt::format("Preparing shaders ({})", queuedPipelines) :
+                                                     fmt::format("Compiling {} {}", queuedPipelines, noun));
     }
     mPipelineProgressBar->SetAttribute("value", progress);
 
-    if (getSettings().backend.showPipelineCompilation.getValue() &&
+    if (getSettings().backend.showPipelineCompilation.getValue() && !getSettings().game.recordingMode &&
         clock::now() >= mPipelineProgressStartTime + kPipelineProgressOpenDelay)
     {
         mPipelineProgress->SetAttribute("open", "");

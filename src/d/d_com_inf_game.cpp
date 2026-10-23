@@ -146,7 +146,7 @@ u32 dComIfG_play_c::getNowVibration() {
     return mItemInfo.mNowVibration;
 }
 
-void dComIfG_play_c::setStartStage(dStage_startStage_c* i_startStage) {
+DUSK_NOINLINE void dComIfG_play_c::setStartStage(dStage_startStage_c* i_startStage) {
     mLayerOld = mStartStage.getLayer();
     mStartStage = *i_startStage;
 }
@@ -1977,7 +1977,7 @@ void dComIfGs_onGetMagicUseFlag() {
     }
 }
 
-void dComIfGs_setSelectItemIndex(int i_no, u8 i_slotNo) {
+DUSK_NOINLINE void dComIfGs_setSelectItemIndex(int i_no, u8 i_slotNo) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().setSelectItemIndex(i_no, i_slotNo);
     dComIfGp_setSelectItem(i_no);
 }
@@ -2005,7 +2005,7 @@ u8 dComIfGs_getMixItemIndex(int i_no) {
     return g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().getMixItemIndex(i_no);
 }
 
-void dComIfGp_setSelectItem(int i_selItemIdx) {
+DUSK_NOINLINE void dComIfGp_setSelectItem(int i_selItemIdx) {
 #if TARGET_PC
     // Index 2 is a normal item button on PC (companion slot I) — the Wii
     // branch below stores the RAW SLOT NUMBER there for the wolf down-button
@@ -2036,7 +2036,7 @@ void dComIfGp_setSelectItem(int i_selItemIdx) {
     }
 }
 
-u8 dComIfGp_getSelectItem(int i_selItemIdx) {
+DUSK_NOINLINE u8 dComIfGp_getSelectItem(int i_selItemIdx) {
     u8 playItem = g_dComIfG_gameInfo.play.getSelectItem(i_selItemIdx);
 
 #if TARGET_PC
@@ -2691,7 +2691,7 @@ void dComIfGs_setSelectEquipShield(u8 i_itemNo) {
     g_dComIfG_gameInfo.info.getPlayer().getPlayerStatusA().setSelectEquip(COLLECT_SHIELD, i_itemNo);
 }
 
-void dComIfGs_setKeyNum(int i_stageNo, u8 i_keyNum) {
+DUSK_NOINLINE void dComIfGs_setKeyNum(int i_stageNo, u8 i_keyNum) {
     if (dComIfGp_getStageStagInfo()) {
         if (i_stageNo == dStage_stagInfo_GetSaveTbl(dComIfGp_getStageStagInfo())) {
             dComIfGs_setKeyNum(i_keyNum);

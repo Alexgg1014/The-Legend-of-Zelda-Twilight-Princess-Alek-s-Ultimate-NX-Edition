@@ -143,7 +143,7 @@ static BOOL pl_check(e_bu_class* i_this, f32 i_range, s16 i_angle) {
     return FALSE;
 }
 
-static void damage_check(e_bu_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_bu_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     

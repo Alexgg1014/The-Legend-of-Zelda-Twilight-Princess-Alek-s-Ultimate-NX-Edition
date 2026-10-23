@@ -10,9 +10,10 @@
 // layout, so those ten are implementable directly, and this file does that.
 // Aurora's own sources are untouched.
 //
-// Scope, deliberately: **uncompressed .iso only**. No RVZ, no WIA, no Wii
-// partitions, no encryption. A compressed image is refused at open with
-// NOD_RESULT_UNSUPPORTED rather than half-read.
+// Scope: GameCube images in any container disc_container.hpp reads, and (aleks2, rc17) Wii images: their game
+// (DATA) partition, decrypted and without hashes, through open_wii_data_partition. The disc handle reads the image
+// as it is; the partition and file handles read the partition. A Wii partition stores its DOL/FST offsets and the
+// FST's file offsets divided by 4, which is undone here.
 //
 // Layout (Yet Another GameCube Documentation, and Dolphin's DiscIO):
 //   0x000  disc header ("boot.bin", 0x440 bytes)
@@ -34,9 +35,11 @@
 #include <nod.h>
 
 #include "switch/disc_container.hpp"
+#include "switch/wii_crypto.hpp"
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -46,6 +49,7 @@
 namespace {
 
 constexpr uint32_t kGamecubeMagic = 0xC2339F3D;
+constexpr uint32_t kWiiMagic = 0x5D1C9EA3;
 constexpr int64_t kBootSize = 0x440;
 constexpr int64_t kBi2Offset = 0x440;
 constexpr int64_t kBi2Size = 0x2000;
@@ -70,6 +74,14 @@ struct Disc {
     // file reads -- is written against disc offsets and never learns which.
     std::unique_ptr<dusk::sw::disc::Container> container;
     int64_t length = 0;
+    // aleks2 (rc17): what the partition and file handles read. For a GameCube disc it is `container`; for a Wii
+    // disc it is the game partition, decrypted and without hashes (owned by `partition`, which reads through
+    // `container` and so is declared after it, to go first).
+    std::unique_ptr<dusk::sw::disc::Container> partition;
+    dusk::sw::disc::Container* data = nullptr;
+    int64_t dataLength = 0;
+    bool wii = false;
+    std::vector<uint8_t> discBoot;    // the image's own header (nod_disc_header); a Wii partition has its own
 
     std::vector<uint8_t> boot;        // 0x440
     std::vector<uint8_t> bi2;         // 0x2000
@@ -81,11 +93,13 @@ struct Disc {
     const uint8_t* fstStrings = nullptr;
     size_t fstStringsSize = 0;
 
-    int64_t read_at(void* buf, size_t len, int64_t offset) const {
-        if (container == nullptr || offset < 0) {
+    // `whole`: the image itself (the disc handle) rather than the game partition.
+    int64_t read_at(void* buf, size_t len, int64_t offset, bool whole = false) const {
+        dusk::sw::disc::Container* from = whole ? container.get() : data;
+        if (from == nullptr || offset < 0) {
             return -1;
         }
-        if (!container->read(static_cast<uint64_t>(offset), buf, len)) {
+        if (!from->read(static_cast<uint64_t>(offset), buf, len)) {
             return -1;
         }
         return static_cast<int64_t>(len);
@@ -175,13 +189,18 @@ bool load_metadata(Disc& d) {
     if (!d.read_exact(d.boot.data(), d.boot.size(), 0)) {
         return false;
     }
-    if (read_be32(d.boot.data() + 0x1C) != kGamecubeMagic) {
+    if (d.wii ? read_be32(d.boot.data() + 0x18) != kWiiMagic : read_be32(d.boot.data() + 0x1C) != kGamecubeMagic) {
         return false;
     }
 
-    const uint32_t dolOffset = read_be32(d.boot.data() + 0x420);
-    const uint32_t fstOffset = read_be32(d.boot.data() + 0x424);
-    const uint32_t fstSize = read_be32(d.boot.data() + 0x428);
+    // A Wii partition stores these divided by 4.
+    const int shift = d.wii ? 2 : 0;
+    const uint64_t dolOffset = uint64_t{read_be32(d.boot.data() + 0x420)} << shift;
+    const uint64_t fstOffset = uint64_t{read_be32(d.boot.data() + 0x424)} << shift;
+    const uint64_t fstSize = uint64_t{read_be32(d.boot.data() + 0x428)} << shift;
+    if (fstSize > (64u << 20)) {
+        return false;
+    }
     if (fstOffset == 0 || fstSize < kFstEntrySize) {
         return false;
     }
@@ -202,7 +221,7 @@ bool load_metadata(Disc& d) {
         uint8_t dolHeader[0x100];
         if (d.read_exact(dolHeader, sizeof dolHeader, dolOffset)) {
             const uint32_t size = dol_size(dolHeader);
-            if (size > 0 && static_cast<int64_t>(dolOffset) + size <= d.length) {
+            if (size > 0 && static_cast<int64_t>(dolOffset) + size <= d.dataLength) {
                 d.dol.resize(size);
                 if (!d.read_exact(d.dol.data(), d.dol.size(), dolOffset)) {
                     d.dol.clear();
@@ -269,9 +288,40 @@ NodResult nod_disc_open_stream(const NodDiscStream* stream, const NodDiscOptions
     if (disc->length <= kApploaderOffset) {
         return fail("disc image too small");
     }
+    disc->data = disc->container.get();
+    disc->dataLength = disc->length;
+    disc->discBoot.resize(kBootSize);
+    if (!disc->read_exact(disc->discBoot.data(), disc->discBoot.size(), 0)) {
+        return fail("could not read the disc header");
+    }
+
+    // aleks2 (rc17): a Wii disc. The game is in its DATA partition; an encrypted image needs the player's own
+    // common key (wii_crypto.hpp), read from the data directory -- never part of this program.
+    if (dusk::sw::disc::is_wii_disc(*disc->container)) {
+        dusk::sw::disc::WiiKeys keys;
+#ifdef __SWITCH__
+        const std::string keyDir = "sdmc:/switch/dusklight";
+#else
+        const char* env = std::getenv("DUSK_WII_KEY_DIR");
+        const std::string keyDir = env != nullptr ? env : ".";
+#endif
+        std::string keySource;
+        std::string keyProblem;
+        keys.hasCommonKey = dusk::sw::disc::load_wii_common_key(keyDir, keys.commonKey, keySource, keyProblem);
+        std::string error;
+        disc->partition = dusk::sw::disc::open_wii_data_partition(*disc->container, keys, error);
+        if (disc->partition == nullptr) {
+            t_lastError = keyProblem.empty() ? error : error + " (" + keyProblem + ")";
+            return NOD_RESULT_ERR_FORMAT;
+        }
+        disc->wii = true;
+        disc->data = disc->partition.get();
+        disc->dataLength = static_cast<int64_t>(disc->partition->size());
+    }
+
     if (!load_metadata(*disc)) {
-        t_lastError = std::string("the ") + dusk::sw::disc::format_name(opened.format) +
-                      " image opened, but it is not a GameCube disc";
+        t_lastError = std::string("the ") + dusk::sw::disc::format_name(opened.format) + " image opened, but it is " +
+                      (disc->wii ? "not a readable Wii game partition" : "not a GameCube disc");
         return NOD_RESULT_ERR_FORMAT;
     }
     auto* handle = new NodHandle{};
@@ -289,7 +339,7 @@ NodResult nod_disc_header(const NodHandle* disc, NodDiscHeader* out) {
     // not a parse. Only the first 0x400 are described by it; the rest of
     // boot.bin (the offsets Aurora reads through nod_partition_meta) stays in
     // raw_boot.
-    const auto& boot = disc->disc->boot;
+    const auto& boot = disc->disc->discBoot;
     std::memset(out, 0, sizeof *out);
     const size_t n = std::min(sizeof *out, boot.size());
     std::memcpy(out, boot.data(), n);
@@ -303,9 +353,10 @@ NodResult nod_disc_open_partition_kind(NodHandle* disc, uint32_t kind, const Nod
         return fail("null disc handle");
     }
     // A GameCube disc has no partition table: the whole image is the data
-    // partition, so any kind but DATA is genuinely absent.
+    // partition, so any kind but DATA is genuinely absent. A Wii disc's other
+    // partitions (the system update) are never needed by the game.
     if (kind != NOD_PARTITION_KIND_DATA) {
-        t_lastError = "GameCube images have only a data partition";
+        t_lastError = "only the game (data) partition is available";
         return NOD_RESULT_ERR_NOT_FOUND;
     }
     auto* handle = new NodHandle{};
@@ -326,7 +377,7 @@ NodResult nod_partition_meta(const NodHandle* partition, NodPartitionMeta* out) 
     out->raw_apploader = blob(d.apploader);
     out->raw_dol = blob(d.dol);
     out->raw_fst = blob(d.fst);
-    // Ticket, TMD, certificate chain and H3 table are Wii-only and stay null.
+    // Ticket, TMD, certificate chain and H3 table stay null: Aurora reads only the DOL from here.
     return NOD_RESULT_OK;
 }
 
@@ -368,7 +419,7 @@ NodResult nod_partition_open_file(NodHandle* partition, uint32_t fst_index, NodH
     auto* handle = new NodHandle{};
     handle->kind = HandleKind::File;
     handle->disc = partition->disc;
-    handle->file.offset = read_be32(e + 4);
+    handle->file.offset = static_cast<int64_t>(uint64_t{read_be32(e + 4)} << (d.wii ? 2 : 0));  // Wii: >> 2 on disc
     handle->file.size = read_be32(e + 8);
     handle->file.pos = 0;
     *out = handle;
@@ -380,8 +431,10 @@ int64_t nod_read(NodHandle* handle, uint8_t* buf, size_t len) {
         return -1;
     }
     const auto& d = *handle->disc;
+    // The disc handle reads the image as it is; the partition and its files read the game partition.
+    const bool whole = handle->kind == HandleKind::Disc;
     int64_t base = 0;
-    int64_t limit = d.length;
+    int64_t limit = whole ? d.length : d.dataLength;
     if (handle->kind == HandleKind::File) {
         base = handle->file.offset;
         limit = handle->file.size;
@@ -390,7 +443,7 @@ int64_t nod_read(NodHandle* handle, uint8_t* buf, size_t len) {
         return 0;  // EOF, not an error
     }
     const int64_t want = std::min<int64_t>(static_cast<int64_t>(len), limit - handle->file.pos);
-    const int64_t got = d.read_at(buf, static_cast<size_t>(want), base + handle->file.pos);
+    const int64_t got = d.read_at(buf, static_cast<size_t>(want), base + handle->file.pos, whole);
     if (got > 0) {
         handle->file.pos += got;
     }
@@ -401,8 +454,9 @@ int64_t nod_seek(NodHandle* handle, int64_t offset, int32_t whence) {
     if (handle == nullptr || handle->disc == nullptr) {
         return -1;
     }
-    const int64_t size =
-        handle->kind == HandleKind::File ? handle->file.size : handle->disc->length;
+    const int64_t size = handle->kind == HandleKind::File        ? handle->file.size
+                         : handle->kind == HandleKind::Partition ? handle->disc->dataLength
+                                                                 : handle->disc->length;
     int64_t target = offset;
     if (whence == SEEK_CUR) {
         target = handle->file.pos + offset;

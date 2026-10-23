@@ -886,7 +886,7 @@ static u8 hio_set;
 
 static daE_RDB_HIO_c l_HIO;
 
-static void action(e_rdb_class* i_this) {
+static DUSK_NOINLINE void action(e_rdb_class* i_this) {
     fopEn_enemy_c* a_this = (fopEn_enemy_c*)&i_this->enemy;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     cXyz sp44, sp50;

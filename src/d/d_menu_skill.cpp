@@ -145,7 +145,7 @@ void dMenu_Skill_c::_move() {
     mDoExt_setCurrentHeap(heap);
 }
 
-void dMenu_Skill_c::_draw() {
+DUSK_NOINLINE void dMenu_Skill_c::_draw() {
     if (mpArchive != NULL) {
         IF_DUSK(presentAnims());
         J2DGrafContext* context = dComIfGp_getCurrentGrafPort();
@@ -674,7 +674,7 @@ void dMenu_Skill_c::screenSetDoIcon() {
     }
 }
 
-void dMenu_Skill_c::setCursorPos() {
+DUSK_NOINLINE void dMenu_Skill_c::setCursorPos() {
     Vec pos = mpLetterParent[mIndex]->getGlobalVtxCenter(mpLetterParent[mIndex]->mPane, false, 0);
     mpDrawCursor->setPos(pos.x, pos.y, mpLetterParent[mIndex]->getPanePtr(), false);
 }
@@ -750,7 +750,7 @@ void dMenu_Skill_c::setNameString(u16 i_stringID) {
     }
 }
 
-u8 dMenu_Skill_c::getSkillNum() {
+DUSK_NOINLINE u8 dMenu_Skill_c::getSkillNum() {
     static u32 evt_id[7] = {
         339, /* dSv_event_flag_c::F_0339 - Secret techniques - Obtained 2 secret techinques */
         338, /* dSv_event_flag_c::F_0338 - Secret techniques - Obtained 1 secret techinques - Shield attack */

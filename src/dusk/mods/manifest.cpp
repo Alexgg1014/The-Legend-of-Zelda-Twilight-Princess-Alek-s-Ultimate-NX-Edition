@@ -437,7 +437,7 @@ void load_switch_manifest() {
         Log.error("no NRO header to take the build id from; by-name resolution unavailable");
         return;
     }
-    std::FILE* file = std::fopen("romfs:/dusklight.symdb", "rb");
+    const auto bootSymT = dusk::boot_timing::now(); std::FILE* file = std::fopen("romfs:/dusklight.symdb", "rb");
     if (file == nullptr) {
         Log.warn("no romfs:/dusklight.symdb in this NRO (built with ALEKS2_SYMBOL_MANIFEST=OFF?); "
                  "native mods cannot hook by name");
@@ -449,7 +449,7 @@ void load_switch_manifest() {
         blob.insert(blob.end(), chunk, chunk + n);
     }
     std::fclose(file);
-    adopt(blob.data(), blob.size(), imageId, imageBase);
+    adopt(blob.data(), blob.size(), imageId, imageBase); dusk::boot_timing::symbol_manifest(bootSymT);
 }
 #endif
 
@@ -529,6 +529,28 @@ bool has_inline_sites(const void* addr, const char** outName) {
         *outName = s_state.strings + it->second;
     }
     return true;
+}
+
+// V1-rc16: the name of the code symbol at exactly `addr`, for reports (the hook statistics print game targets hooked
+// by address as names instead of raw pointers): a display name when the address has one. A linear scan with no table
+// kept -- a few lookups every 30 s cost far less than a sorted copy of the manifest held in memory.
+const char* name_at(const void* addr) {
+    if (!s_state.loaded) {
+        return nullptr;
+    }
+    const auto rva = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(addr) - s_state.imageBase);
+    const char* found = nullptr;
+    for (uint32_t i = 0; i < s_state.entryCount; ++i) {
+        const Entry& e = s_state.entries[i];
+        if (e.rva != rva || (e.flags & kFlagCode) == 0 || e.nameOff >= s_state.stringsLen) {
+            continue;
+        }
+        found = s_state.strings + e.nameOff;
+        if ((e.flags & kFlagDisplay) != 0) {
+            break;
+        }
+    }
+    return found;
 }
 
 }  // namespace dusk::mods::manifest

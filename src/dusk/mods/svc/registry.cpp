@@ -281,6 +281,7 @@ std::span<const ServiceModule* const> host_modules() {
         &g_gfxModule,
         &g_audioResModule,
         &g_saveModule,
+        &g_saveSnapshotModule,
         &g_stageModule,
         &g_itemModule,
         &g_flowModule,

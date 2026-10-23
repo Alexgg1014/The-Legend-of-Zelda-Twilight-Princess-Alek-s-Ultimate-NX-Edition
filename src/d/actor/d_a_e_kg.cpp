@@ -476,7 +476,8 @@ static void e_kg_roof(e_kg_class* i_this) {
     }
 }
 
-static void action(e_kg_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE void action(e_kg_class* i_this) {
     fopAc_ac_c* actor_this = i_this;
     cXyz my_vec_0;
     cXyz my_vec_1;

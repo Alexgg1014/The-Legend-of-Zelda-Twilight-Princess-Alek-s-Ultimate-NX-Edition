@@ -147,15 +147,15 @@ private:
 #endif
 };
 
-BOOL dMw_UP_TRIGGER() {
+DUSK_NOINLINE BOOL dMw_UP_TRIGGER() {
     return mDoCPd_c::getTrigUp(PAD_1) != 0;
 }
 
-BOOL dMw_DOWN_TRIGGER() {
+DUSK_NOINLINE BOOL dMw_DOWN_TRIGGER() {
     return mDoCPd_c::getTrigDown(PAD_1) != 0;
 }
 
-BOOL dMw_LEFT_TRIGGER() {
+DUSK_NOINLINE BOOL dMw_LEFT_TRIGGER() {
     if (mDoCPd_c::getTrigLeft(PAD_1) && !dMw_UP_TRIGGER()) {
         return true;
     } else {
@@ -163,7 +163,7 @@ BOOL dMw_LEFT_TRIGGER() {
     }
 }
 
-BOOL dMw_RIGHT_TRIGGER() {
+DUSK_NOINLINE BOOL dMw_RIGHT_TRIGGER() {
     if (mDoCPd_c::getTrigRight(PAD_1) && !dMw_UP_TRIGGER()) {
         return true;
     } else {
@@ -1108,7 +1108,7 @@ void dMw_c::dMw_ring_create(u8 i_origin) {
     mpCapture->setCaptureFlag();
 }
 
-bool dMw_c::dMw_ring_delete() {
+DUSK_NOINLINE bool dMw_c::dMw_ring_delete() {  // aleks2 (rc17): a catalog hook target (albw), inlined by the PGO build
     if (mpMenuRing != NULL) {
         mpMenuRing->_delete();
         JKR_DELETE(mpMenuRing);
@@ -1473,12 +1473,12 @@ bool dMw_c::isPauseReady() {
     return true;
 }
 
-void dMw_c::dMw_fade_out() {
+DUSK_NOINLINE void dMw_c::dMw_fade_out() {
     mDoGph_gInf_c::startFadeOut(13);
     mDoGph_gInf_c::setFadeColor(static_cast<JUtility::TColor&>(g_blackColor));
 }
 
-void dMw_c::dMw_fade_in() {
+DUSK_NOINLINE void dMw_c::dMw_fade_in() {
     mDoGph_gInf_c::startFadeIn(13);
     mDoGph_gInf_c::setFadeColor(static_cast<JUtility::TColor&>(g_blackColor));
 }
@@ -1603,7 +1603,7 @@ int dMw_c::_create() {
     return cPhs_COMPLEATE_e;
 }
 
-int dMw_c::_execute() {
+DUSK_NOINLINE int dMw_c::_execute() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, albw, twilit_essentials), inlined by the PGO build
 #if TARGET_PC
     if (mpMenuRing != NULL) {
         mpMenuRing->advanceSelectItem();
@@ -1702,7 +1702,7 @@ int dMw_c::_draw() {
     return 1;
 }
 
-int dMw_c::_delete() {
+DUSK_NOINLINE int dMw_c::_delete() {
     JKRHeap* heap = mDoExt_getCurrentHeap();
 
     JKR_DELETE(mpStick);

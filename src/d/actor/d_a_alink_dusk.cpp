@@ -156,7 +156,7 @@ void daAlink_c::handleQuickTransform() {
     tryQuickTransform();
 }
 
-bool daAlink_c::checkAimContext() {
+DUSK_NOINLINE bool daAlink_c::checkAimContext() {
     switch (mProcID) {
     case PROC_SUBJECTIVITY:
     case PROC_SWIM_SUBJECTIVITY:

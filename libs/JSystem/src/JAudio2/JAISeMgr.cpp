@@ -247,7 +247,7 @@ void JAISeMgr::resetSeqDataMgr() {
     }
 }
 
-JAISe* JAISeMgr::newSe_(int category, u32 priority) {
+DUSK_NOINLINE JAISe* JAISeMgr::newSe_(int category, u32 priority) {  // aleks2 (rc17): a catalog hook target (coop_mod), inlined by the PGO build
     JUT_ASSERT(396, category < NUM_CATEGORIES);
 
     if (category < 0) {

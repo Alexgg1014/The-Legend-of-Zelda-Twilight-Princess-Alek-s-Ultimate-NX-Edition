@@ -29,6 +29,9 @@ std::vector<RawState> queue(uint64_t newest, uint64_t oldest, uint64_t delta = 5
         s.accel[1] = -1.0f;
         s.accel[2] = static_cast<float>(n) * 0.001f;
         s.gyro[0] = 0.5f;
+        for (int k = 0; k < 9; ++k) {
+            s.dir[k] = static_cast<float>(n) + 0.1f * static_cast<float>(k);  // V1-rc12: attitude passes through
+        }
         q.push_back(s);
         if (n == 0) break;
     }
@@ -51,6 +54,7 @@ int main() {
         CHECK(out[0].samplingNumber == 31 && out[1].samplingNumber == 32 && out[2].samplingNumber == 33);
         CHECK(std::fabs(out[0].accel[1] - (-9.80665f)) < 1e-4f && std::fabs(out[0].gyro[0] - 0.5f * kRevToRad) < 1e-4f);
         CHECK(out[0].deltaUs == 5000 && out[0].flags == 0 && out[2].flags == 0);
+        CHECK(std::fabs(out[0].dir[0] - 31.0f) < 1e-4f && std::fabs(out[2].dir[8] - 33.8f) < 1e-4f);  // V1-rc12
         CHECK(c.dropped == 0 && c.gaps == 0);
         // nothing new: nothing handed out, and not handed out twice
         CHECK(read(c, queue(33, 17), out) == 0);

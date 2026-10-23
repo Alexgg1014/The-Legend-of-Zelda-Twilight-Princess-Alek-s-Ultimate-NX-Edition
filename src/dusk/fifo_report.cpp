@@ -66,6 +66,12 @@ Window window(const Snapshot& start, const Snapshot& end, std::uint64_t frames) 
     w.stagingWaitMs = ns_to_ms(end.waits.staging_wait_ns - start.waits.staging_wait_ns);
     w.renderItems = end.waits.render_items - start.waits.render_items;
     w.renderWorkMs = ns_to_ms(end.waits.render_work_ns - start.waits.render_work_ns);
+    w.deko3d = end.render.deko3d;
+    w.renderCpuMs = ns_to_ms(end.render.thread_cpu_ns - start.render.thread_cpu_ns);
+    w.encodedFrames = end.render.frames - start.render.frames;
+    w.encodedDraws = end.render.draws - start.render.draws;
+    w.dkGpuMs = ns_to_ms(end.render.gpu_ns - start.render.gpu_ns);
+    w.dkGpuFrames = end.render.gpu_frames - start.render.gpu_frames;
     return w;
 }
 
@@ -173,6 +179,20 @@ void write_frame_waits(benchmark::JsonWriter& j, const Window& w) {
     j.num("staging_wait_ms_per_frame", per_frame(w.stagingWaitMs, f), 3);
     j.integer("render_items", static_cast<std::int64_t>(w.renderItems));
     j.num("render_work_ms_per_frame", per_frame(w.renderWorkMs, f), 3);
+    j.end_object();
+    // aleks2 (deko3d P1): the same zone with either backend (Settings > Graphics Backend)
+    j.begin_object("render_cpu");
+    j.str("note", "render worker THREAD time (kernel tick count of that thread), not wall time; draws = draw "
+                  "commands encoded (drawCallCount summed); us_per_draw = thread time / draws. gpu_ms_per_frame: "
+                  "deko3d's timestamps (deko3d only; with Dawn see gpu_timing)");
+    j.str("backend", w.deko3d ? "deko3d" : "dawn_nvk");
+    j.integer("encoded_frames", static_cast<std::int64_t>(w.encodedFrames));
+    j.num("thread_cpu_ms_per_frame", per_frame(w.renderCpuMs, w.encodedFrames), 3);
+    j.num("draws_per_frame", per_frame(static_cast<double>(w.encodedDraws), w.encodedFrames), 1);
+    j.num("us_per_draw", w.encodedDraws > 0 ? w.renderCpuMs * 1000.0 / static_cast<double>(w.encodedDraws) : 0.0, 3);
+    if (w.deko3d) {
+        j.num("gpu_ms_per_frame", per_frame(w.dkGpuMs, w.dkGpuFrames), 3);
+    }
     j.end_object();
 }
 

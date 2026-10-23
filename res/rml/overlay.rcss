@@ -33,6 +33,8 @@ toast {
     border-color: var(--toast-border-color);
     top: 40dp;
     right: 40dp;
+    /* aleks2 (V1-rc12): anchored right, a long message grew it past the left edge (rc11 console): wrap instead. */
+    max-width: 50%;
     display: flex;
     flex-flow: column;
     border-radius: var(--radius-window);

@@ -3,7 +3,7 @@
 	url = https://github.com/Alexgg1014/aurora-aleks-nx.git
 [submodule "extern/borealis"]
 	path = extern/borealis
-	url = https://github.com/encounter/borealis.git
+	url = https://github.com/Alexgg1014/borealis-aleks-nx.git
 [submodule "mods/randomizer"]
 	path = mods/randomizer
 	url = https://github.com/TwilitRealm/dusklight-randomizer.git

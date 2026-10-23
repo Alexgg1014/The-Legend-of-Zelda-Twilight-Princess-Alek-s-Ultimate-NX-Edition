@@ -35,12 +35,16 @@ FrameSummary summarize_frames(std::vector<float> frameMs) {
         out.judderPct =
             100.0 * static_cast<double>(out.judderPairs) / static_cast<double>(frameMs.size() - 1);
     }
+    for (const float ms : frameMs) {
+        const auto v = static_cast<long>(std::lround(ms / kVblankMs));
+        ++out.vblanks[std::clamp<long>(v, 1, 4)];
+    }
     std::sort(frameMs.begin(), frameMs.end());
 
     double total = 0.0;
     for (const float ms : frameMs) {
         total += static_cast<double>(ms);
-        if (ms > 33.3f) {
+        if (ms > kMissedFrameMs) {
             ++out.over33;
         }
         if (ms > 50.0f) {

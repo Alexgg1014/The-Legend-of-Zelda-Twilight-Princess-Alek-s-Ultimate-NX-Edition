@@ -555,7 +555,7 @@ int dMsgObject_c::_execute() {
     return 1;
 }
 
-int dMsgObject_c::_draw() {
+DUSK_NOINLINE int dMsgObject_c::_draw() {
     u16 sVar7 = getStatusLocal();
     if (sVar7 != 0 && sVar7 != 1 && sVar7 != 0xb) {
         if (isDraw()) {
@@ -2546,7 +2546,7 @@ u16 dMsgObject_c::getSmellTypeMessageIDLocal() {
     return msgId;
 }
 
-void dMsgObject_c::setSmellTypeLocal(u8 smellType) {
+DUSK_NOINLINE void dMsgObject_c::setSmellTypeLocal(u8 smellType) {
     mSmellType = smellType;
     dComIfGs_onItemFirstBit(smellType);
     dComIfGs_setCollectSmell(mSmellType);

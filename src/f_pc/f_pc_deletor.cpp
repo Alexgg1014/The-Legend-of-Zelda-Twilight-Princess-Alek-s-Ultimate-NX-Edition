@@ -42,7 +42,7 @@ void fpcDt_Handler() {
     cLsIt_Method(&g_fpcDtTg_Queue, (cNdIt_MethodFunc)fpcDtTg_Do, (void*)fpcDt_deleteMethod);
 }
 
-int fpcDt_ToQueue(base_process_class* i_proc) {
+DUSK_NOINLINE int fpcDt_ToQueue(base_process_class* i_proc) {
     if (i_proc->unk_0xA != 1 && fpcBs_IsDelete(i_proc) == 1) {
         if (fpcPi_IsInQueue(&i_proc->priority) == 1) {
             fpcPi_Delete(&i_proc->priority);

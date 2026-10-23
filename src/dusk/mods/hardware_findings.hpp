@@ -23,22 +23,51 @@ struct Finding {
     std::string_view reason;
 };
 
+// aleks2 (V1-rc5): a mod this build ships its own Switch build of, and that build's version. A catalog version up to
+// that one is refused with `note` (it would replace a Switch build with an older Linux one); a newer one installs
+// and updates normally, through the linux-aarch64 compatibility layer, as any other catalog mod.
 struct SwitchVariant {
     std::string_view id;
+    std::string_view version;
     std::string_view note;
 };
+
+// a.b.c... compared numerically part by part; a non-digit ends a part (1.0.6-rc1 compares as 1.0.6).
+constexpr int compare_versions(std::string_view a, std::string_view b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() || j < b.size()) {
+        unsigned long x = 0, y = 0;
+        while (i < a.size() && a[i] >= '0' && a[i] <= '9') {
+            x = x * 10 + static_cast<unsigned long>(a[i++] - '0');
+        }
+        while (j < b.size() && b[j] >= '0' && b[j] <= '9') {
+            y = y * 10 + static_cast<unsigned long>(b[j++] - '0');
+        }
+        if (x != y) {
+            return x < y ? -1 : 1;
+        }
+        const bool moreA = i < a.size() && a[i] == '.';
+        const bool moreB = j < b.size() && b[j] == '.';
+        if (!moreA && !moreB) {
+            break;
+        }
+        i += moreA ? 1 : a.size();
+        j += moreB ? 1 : b.size();
+    }
+    return 0;
+}
 
 namespace detail {
 using enum Status;
 #define DUSK_MOD_HARDWARE(id, version, sha256, status, reason) Finding{id, version, sha256, status, reason},
-#define DUSK_MOD_SWITCH_VARIANT(id, note)
+#define DUSK_MOD_SWITCH_VARIANT(id, version, note)
 inline constexpr Finding kFindings[] = {
 #include "hardware_findings.inc"
 };
 #undef DUSK_MOD_HARDWARE
 #undef DUSK_MOD_SWITCH_VARIANT
 #define DUSK_MOD_HARDWARE(id, version, sha256, status, reason)
-#define DUSK_MOD_SWITCH_VARIANT(id, note) SwitchVariant{id, note},
+#define DUSK_MOD_SWITCH_VARIANT(id, version, note) SwitchVariant{id, version, note},
 inline constexpr SwitchVariant kSwitchVariants[] = {
 #include "hardware_findings.inc"
 };
@@ -80,10 +109,25 @@ constexpr Verdict verdict(std::string_view id, std::string_view version, std::st
 }
 
 /* The note for a mod H38 delivers as its own switch-arm64 build, or empty. */
-constexpr std::string_view switch_variant(std::string_view id) {
+// The note when the catalog's `version` of `id` must not replace this build's Switch package; empty otherwise.
+// `installed` is the version of `id` on the card (empty: none). V1-rc5: only an installed copy is protected:
+// with nothing installed the catalog's compatible version installs (Randomizer was not installable at all), and
+// a catalog version newer than our Switch package replaces it.
+constexpr std::string_view switch_variant(std::string_view id, std::string_view version, std::string_view installed) {
     for (const auto& variant : detail::kSwitchVariants) {
         if (variant.id == id) {
-            return variant.note;
+            return !installed.empty() && compare_versions(version, variant.version) <= 0 ? variant.note
+                                                                                        : std::string_view{};
+        }
+    }
+    return {};
+}
+
+// This build's Switch package version of `id`, or empty.
+constexpr std::string_view switch_variant_version(std::string_view id) {
+    for (const auto& variant : detail::kSwitchVariants) {
+        if (variant.id == id) {
+            return variant.version;
         }
     }
     return {};
@@ -94,8 +138,8 @@ constexpr std::string_view switch_variant(std::string_view id) {
  * incompatible, or H38 delivers its own Switch build of that mod -- or empty when nothing forbids it.
  */
 constexpr std::string_view catalog_block_reason(
-    std::string_view id, std::string_view version, std::string_view sha256 = {}) {
-    if (const auto note = switch_variant(id); !note.empty()) {
+    std::string_view id, std::string_view version, std::string_view sha256, std::string_view installed) {
+    if (const auto note = switch_variant(id, version, installed); !note.empty()) {
         return note;
     }
     if (const auto found = verdict(id, version, sha256); found.status == Status::Incompatible) {

@@ -34,6 +34,7 @@
 #include <switch.h>
 
 #include "funchook_internal.h"
+#include "own_process_handle.h"
 
 /* Room for the two instructions funchook writes over an arm64 entry, with
  * margin. A patch bigger than this is not something this was designed for. */
@@ -49,7 +50,7 @@ static int mapping_permitted(void)
     if (!checked) {
         checked = 1;
         permitted = envIsSyscallHinted(0x74) && envIsSyscallHinted(0x75) &&
-                    envGetOwnProcessHandle() != INVALID_HANDLE;
+                    aleks2_own_process_handle() != INVALID_HANDLE;  /* DM1-c: IPC fallback off hbloader */
     }
     return permitted;
 }
@@ -70,7 +71,7 @@ int commit_code_patch(void *target, const void *expected, const void *replacemen
     const u64 address = (u64)target;
     const u64 page = address & ~(u64)0xFFF;
     const u64 span = ((address + size + 0xFFF) & ~(u64)0xFFF) - page;
-    const Handle self = envGetOwnProcessHandle();
+    const Handle self = aleks2_own_process_handle();
 
     /* Somewhere to put the second mapping. Any free address will do -- nothing
      * executes through it -- so libnx's own search is the right tool here,

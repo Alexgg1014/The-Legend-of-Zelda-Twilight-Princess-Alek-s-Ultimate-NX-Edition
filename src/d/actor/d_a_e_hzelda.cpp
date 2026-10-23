@@ -373,7 +373,7 @@ static int e_hzelda_attack_a(e_hzelda_class* i_this) {
     return ret;
 }
 
-static void e_hzelda_attack_b(e_hzelda_class* i_this) {
+static DUSK_NOINLINE void e_hzelda_attack_b(e_hzelda_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     cXyz sp18;
@@ -646,7 +646,8 @@ static void e_hzelda_damage(e_hzelda_class* i_this) {
     }
 }
 
-static void action(e_hzelda_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE void action(e_hzelda_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     cXyz sp50;
@@ -820,7 +821,7 @@ static BOOL ball_bg_check(e_hzelda_class* i_this) {
     return FALSE;
 }
 
-static void demo_camera(e_hzelda_class* i_this) {
+static DUSK_NOINLINE void demo_camera(e_hzelda_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
     camera_process_class* unused = dComIfGp_getCamera(0);

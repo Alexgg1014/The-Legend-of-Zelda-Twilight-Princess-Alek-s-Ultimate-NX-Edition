@@ -246,6 +246,15 @@ bool J2DPane::insertChild(J2DPane* p_prev, J2DPane* p_child) {
     return result;
 }
 
+#if TARGET_PC
+// aleks2 (V1-rc10): 2D panes drawn, and how many with an effective alpha of 0 (faded out, not hidden), for the
+// heartbeat (session_log.cpp). hud_cull_alpha0 (perf-lab.ini, off) skips those panes' own draw; their children
+// are still visited. Not safe for every material (an opaque blend ignores alpha), hence off until measured.
+unsigned long long g_duskPanesDrawn = 0;
+unsigned long long g_duskPanesAlpha0 = 0;
+bool g_duskHudCullAlpha0 = false;
+#endif
+
 void J2DPane::draw(f32 x, f32 y, J2DGrafContext const* p_grafCtx, bool isOrthoGraf, bool param_4) {
     param_4 = param_4 && mVisible;
     if (p_grafCtx->getGrafType() != 1) {
@@ -336,8 +345,19 @@ void J2DPane::draw(f32 x, f32 y, J2DGrafContext const* p_grafCtx, bool isOrthoGr
                 tmpGraf.scissor(scissorBounds);
                 tmpGraf.setScissor();
             }
+#if TARGET_PC
+            ++g_duskPanesDrawn;
+            if (mColorAlpha == 0) {
+                ++g_duskPanesAlpha0;
+            }
+            if (!(g_duskHudCullAlpha0 && mColorAlpha == 0)) {
+                GXSetCullMode((GXCullMode)mCullMode);
+                drawSelf(x, y, &tmpGraf.mPosMtx);
+            }
+#else
             GXSetCullMode((GXCullMode)mCullMode);
             drawSelf(x, y, &tmpGraf.mPosMtx);
+#endif
         }
 
         for (JSUTreeIterator<J2DPane> iter = mPaneTree.getFirstChild(); iter != mPaneTree.getEndChild(); ++iter) {

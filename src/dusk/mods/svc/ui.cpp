@@ -4,6 +4,7 @@
 #include "internal.hpp"
 #include "registry.hpp"
 #include "ui_v1.hpp"
+#include "hook.hpp"
 
 #include "dusk/mod_loader.hpp"
 #include "dusk/mods/loader/loader.hpp"
@@ -255,11 +256,30 @@ void track_element(uint64_t handle, UiSlot& slot, Rml::Element& element) {
     element.AddEventListener(Rml::EventId::Click, new SlotDetachListener{handle});
 }
 
+// V1-rc7: every call from the Dusklight UI into a mod's code (its panels, buttons, getters) is timed: it counts in
+// the per-mod CPU line, and one over 100 ms is named in the log. On the rc7 console the Mods window froze 11-20 s
+// on Crests of Courage, and the per-mod line (hooks and mod_update only) could not say whose code it was.
+struct ModUiTimer {
+    LoadedMod& mod;
+    const char* what;
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    ~ModUiTimer() {
+        const auto ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
+        cpu_profile_add(mod.context.get(), ns);
+        if (ns > 100'000'000ull) {
+            Log.warn("{}: {} took {} ms on the game thread (the mod's own code)", mod.metadata.id, what,
+                ns / 1'000'000ull);
+        }
+    }
+};
+
 template <typename T, typename Fn>
 T guarded_call(LoadedMod& mod, const char* what, T fallback, Fn&& fn) {
     if (!mod.active) {
         return fallback;
     }
+    const ModUiTimer timer{mod, what};
     try {
         return fn();
     } catch (const std::exception& e) {
@@ -275,6 +295,7 @@ void guarded_call(LoadedMod& mod, const char* what, Fn&& fn) {
     if (!mod.active) {
         return;
     }
+    const ModUiTimer timer{mod, what};
     try {
         fn();
     } catch (const std::exception& e) {
@@ -1444,6 +1465,11 @@ ModResult ui_register_styles(
         break;
     default:
         return MOD_INVALID_ARGUMENT;
+    }
+    // aleks2 (DM2-b): parsing RCSS needs RmlUi, as window_push and dialog_push check; without it (the loader-only
+    // lab mode starts no UI) Dawnlight's styles crashed in Rml::StyleSheetParser::ReadProperties.
+    if (!aurora::rmlui::is_initialized()) {
+        return MOD_UNAVAILABLE;
     }
 
     uint64_t handle = 0;

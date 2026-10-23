@@ -304,7 +304,7 @@ bool daE_OC_c::setWatchMode() {
     return false;
 }
 
-bool daE_OC_c::searchPlayer() {
+DUSK_NOINLINE bool daE_OC_c::searchPlayer() {
     if (fopAcM_searchPlayerDistance(this) < mPlayerRange) {
         s16 diff = shape_angle.y - fopAcM_searchPlayerAngleY(this);
         if (fopAcM_searchPlayerDistance(this) < l_HIO.plyr_srch_min_radius) {
@@ -581,7 +581,7 @@ void daE_OC_c::setGroundAngle() {
     }
 }
 
-void daE_OC_c::setActionMode(int i_action, int i_state) {
+DUSK_NOINLINE void daE_OC_c::setActionMode(int i_action, int i_state) {
     mOldActionMode = mActionMode;
     mActionMode = i_action;
     mOcState = i_state;
@@ -2548,7 +2548,7 @@ void daE_OC_c::mtx_set() {
     }
 }
 
-void daE_OC_c::cc_set() {
+DUSK_NOINLINE void daE_OC_c::cc_set() {  // aleks2 (rc17): a catalog hook target (dawnlight), inlined by the PGO build
     cXyz my_vec_lhs;
     cXyz my_vec_rhs;
     J3DModel *model = mpMorf->getModel();
@@ -2647,7 +2647,7 @@ static int daE_OC_IsDelete(daE_OC_c* param_0) {
     return 1;
 }
 
-int daE_OC_c::_delete() {
+DUSK_NOINLINE int daE_OC_c::_delete() {
     dComIfG_resDelete(&mPhaseReqs[0], mName);
     dComIfG_resDelete(&mPhaseReqs[1], "E_ocb");
     if (field_0xe84) {

@@ -13,6 +13,9 @@
 #include "dusk/config.hpp"
 #include "dusk/mods/queue.hpp"
 #include "dusk/mods/updates.hpp"
+#ifdef __SWITCH__
+#include "dusk/self_update.hpp"
+#endif
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/ElementText.h>
@@ -469,6 +472,9 @@ void update() noexcept {
     ZoneScopedN("Dusk UI update");
     mods::queue::update();
     mods::updates::update();
+#ifdef __SWITCH__
+    self_update::update();  // V1-rc8: the in-app updater
+#endif
     if (!aurora::rmlui::is_initialized()) {
         return;
     }

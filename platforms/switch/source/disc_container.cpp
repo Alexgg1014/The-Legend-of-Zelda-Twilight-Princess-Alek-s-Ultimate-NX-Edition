@@ -13,6 +13,7 @@
 // and it has two details that are easy to get wrong and impossible to notice:
 // see JunkGenerator.
 #include "switch/disc_container.hpp"
+#include "switch/wii_crypto.hpp"
 
 #include <algorithm>
 #include <array>
@@ -276,6 +277,9 @@ protected:
     virtual bool produce(std::uint64_t index, std::vector<std::uint8_t>& out) = 0;
 
     std::uint64_t m_discSize = 0;
+    // aleks2 (rc17): how many blocks to keep. Wii clusters are 31 KiB and a cache miss costs an AES pass over one,
+    // so those keep more (a few MiB) than the default.
+    std::size_t m_cacheBlocks = kCachedBlocks;
 
 private:
     struct Entry {
@@ -299,7 +303,7 @@ private:
         if (!produce(index, entry.data)) {
             return nullptr;
         }
-        if (m_cache.size() >= kCachedBlocks) {
+        if (m_cache.size() >= m_cacheBlocks) {
             m_cache.pop_back();
         }
         m_cache.insert(m_cache.begin(), std::move(entry));
@@ -435,7 +439,24 @@ protected:
 
     bool produce(std::uint64_t index, std::vector<std::uint8_t>& out) override;
 
+public:
+    std::unique_ptr<Container> stored_wii_partition(std::uint64_t dataStart, std::string& error) override;
+
 private:
+    friend class WiaPartitionData;
+
+    // aleks2 (rc17): a Wii partition as WIA/RVZ keep it -- decrypted, 0x7C00 bytes per 0x8000-byte sector.
+    struct PartData {
+        std::uint32_t firstSector = 0;
+        std::uint32_t sectors = 0;
+        std::uint32_t groupIndex = 0;
+        std::uint32_t groupCount = 0;
+    };
+    struct Partition {
+        std::array<std::uint8_t, 16> titleKey{};  // in the clear; not needed to read
+        PartData pd[2];
+    };
+
     struct RawData {
         std::uint64_t offset = 0;
         std::uint64_t size = 0;
@@ -458,6 +479,7 @@ private:
     std::vector<RawData> m_rawData;
     std::vector<std::uint8_t> m_groups;
     std::size_t m_groupEntrySize = 0;
+    std::vector<Partition> m_partitions;  // aleks2 (rc17): Wii only
 };
 
 bool WiaContainer::read_table(std::uint64_t offset, std::uint32_t storedSize, std::size_t plainSize,
@@ -494,16 +516,47 @@ std::unique_ptr<WiaContainer> WiaContainer::open(
         return nullptr;
     }
 
+    // aleks2 (rc17): Wii images too. Their partitions are stored decrypted and without hashes, in groups of their
+    // own; everything else (the disc header, the partition table, each partition's ticket/TMD area) is raw data
+    // like a GameCube disc's, so the disc view below still works and the partitions are read through
+    // stored_wii_partition.
     const std::uint32_t discType = be32(disc.data() + 0x00);
-    if (discType != 1) {
-        // Honest refusal: a Wii image needs partition decryption and hash
-        // reinsertion, and this game is not on one.
-        error = "this is a Wii image; Twilight Princess on Switch runs the GameCube version";
+    if (discType != 1 && discType != 2) {
+        error = "the image says neither GameCube nor Wii";
         return nullptr;
     }
-    if (be32(disc.data() + 0x90) != 0) {
-        error = "the image has Wii partitions, which this reader does not decrypt";
+    const std::uint32_t partCount = be32(disc.data() + 0x90);
+    if (discType == 1 && partCount != 0) {
+        error = "a GameCube image with Wii partitions is not one this reader understands";
         return nullptr;
+    }
+    if (partCount > 64) {
+        error = "the partition table is implausibly large";
+        return nullptr;
+    }
+    if (partCount != 0) {
+        // Stored uncompressed. An entry shorter than the struct is padded with zeroes.
+        const std::uint32_t entrySize = be32(disc.data() + 0x94);
+        if (entrySize == 0 || entrySize > 0x1000) {
+            error = "the partition entries have an implausible size";
+            return nullptr;
+        }
+        std::vector<std::uint8_t> table(std::size_t{partCount} * entrySize);
+        if (!read_exact(stream, be64(disc.data() + 0x98), table.data(), table.size())) {
+            error = "could not read the partition entries";
+            return nullptr;
+        }
+        for (std::uint32_t i = 0; i < partCount; ++i) {
+            std::uint8_t e[48] = {};
+            std::memcpy(e, table.data() + std::size_t{i} * entrySize, std::min<std::size_t>(entrySize, sizeof e));
+            Partition p;
+            std::memcpy(p.titleKey.data(), e, 16);
+            for (int k = 0; k < 2; ++k) {
+                const std::uint8_t* d = e + 16 + k * 16;
+                p.pd[k] = {be32(d), be32(d + 4), be32(d + 8), be32(d + 12)};
+            }
+            wia->m_partitions.push_back(p);
+        }
     }
 
     switch (be32(disc.data() + 0x04)) {
@@ -597,7 +650,7 @@ bool WiaContainer::produce(std::uint64_t index, std::vector<std::uint8_t>& out) 
     if (start >= m_discSize) {
         return false;
     }
-    const std::size_t expected = static_cast<std::size_t>(end - start);
+    std::size_t expected = static_cast<std::size_t>(end - start);
 
     // The first 0x80 bytes of the disc are not in any group: a copy lives in
     // the disc structure, so a tool can name the game without decompressing
@@ -627,6 +680,13 @@ bool WiaContainer::produce(std::uint64_t index, std::vector<std::uint8_t>& out) 
         return false;
     }
 
+    // aleks2 (rc17): on a Wii image a raw-data entry ends where a partition's (stored separately) data begins,
+    // which need not be on a chunk boundary, and its last group holds only the bytes up to the entry's end. The
+    // rest of this block reads as zeroes; the partition itself is read through stored_wii_partition. A GameCube
+    // image's one entry runs to the end of the disc, so for it nothing changes.
+    const std::size_t blockSize = expected;
+    expected = static_cast<std::size_t>(std::min(end, entry->offset + entry->size) - start);
+
     const std::uint8_t* e = m_groups.data() + static_cast<std::size_t>(group) * m_groupEntrySize;
     const std::uint64_t dataOffset = std::uint64_t{be32(e)} * 4;
     const std::uint32_t sizeWord = be32(e + 4);
@@ -638,7 +698,7 @@ bool WiaContainer::produce(std::uint64_t index, std::vector<std::uint8_t>& out) 
     // Nothing stored means the whole group is zeroes; it is how a blank
     // stretch of disc costs twelve bytes.
     if (storedSize == 0) {
-        out.assign(expected, 0);
+        out.assign(blockSize, 0);
         return true;
     }
 
@@ -681,10 +741,452 @@ bool WiaContainer::produce(std::uint64_t index, std::vector<std::uint8_t>& out) 
         return false;
     }
     out.resize(expected);
+    out.resize(blockSize, 0);  // past a Wii raw-data entry's end (see above)
     return true;
 }
 
+// ------------------------------------------------------------------ Wii --
+//
+// aleks2 (rc17). Layout from wiibrew's "Wii disc" page; the WIA/RVZ partition groups from the format's public
+// description (Dolphin's docs/WiaAndRvz.md, used as a format reference). Our own code.
+
+constexpr std::uint64_t kWiiPartitionTable = 0x40000;  // 4 x {u32 count, u32 table offset >> 2}
+constexpr std::uint32_t kWiiDataPartition = 0;
+constexpr std::uint64_t kWiiCluster = 0x8000;          // as stored: 0x400 of hashes, then data
+constexpr std::uint64_t kWiiClusterData = 0x7C00;
+constexpr std::uint64_t kWiiClusterHashes = 0x400;
+constexpr std::size_t kWiiCachedClusters = 128;        // ~4 MiB of decrypted data
+
+/// Reads a codec's output a piece at a time. A Wii partition group starts with exception lists whose length is
+/// only known by reading them, and ends with data whose RVZ-packed length is only known by unpacking it; reading
+/// exactly what is needed avoids having to know either total up front (or whether a raw LZMA stream carries an end
+/// marker).
+class PullReader {
+public:
+    PullReader(Codec codec, const std::uint8_t* in, std::size_t size, const std::uint8_t* props,
+        std::size_t propsSize)
+        : m_codec(codec), m_in(in), m_size(size) {
+        switch (codec) {
+        case Codec::None:
+            m_ok = true;
+            break;
+        case Codec::Zstd:
+            m_zstd = ZSTD_createDStream();
+            m_ok = m_zstd != nullptr && !ZSTD_isError(ZSTD_initDStream(m_zstd));
+            m_zin = {in, size, 0};
+            break;
+        case Codec::Bzip2:
+            m_ok = BZ2_bzDecompressInit(&m_bz, 0, 0) == BZ_OK;
+            m_bzInit = m_ok;
+            m_bz.next_in = const_cast<char*>(reinterpret_cast<const char*>(in));
+            m_bz.avail_in = static_cast<unsigned int>(size);
+            break;
+        case Codec::Lzma:
+        case Codec::Lzma2: {
+            lzma_filter filters[2];
+            filters[0].id = codec == Codec::Lzma ? LZMA_FILTER_LZMA1 : LZMA_FILTER_LZMA2;
+            filters[0].options = nullptr;
+            filters[1].id = LZMA_VLI_UNKNOWN;
+            filters[1].options = nullptr;
+            if (lzma_properties_decode(&filters[0], nullptr, props, propsSize) != LZMA_OK) {
+                break;
+            }
+            m_ok = lzma_raw_decoder(&m_lzma, filters) == LZMA_OK;
+            m_lzmaInit = m_ok;
+            lzma_filters_free(filters, nullptr);
+            m_lzma.next_in = in;
+            m_lzma.avail_in = size;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    ~PullReader() {
+        if (m_zstd != nullptr) ZSTD_freeDStream(m_zstd);
+        if (m_bzInit) BZ2_bzDecompressEnd(&m_bz);
+        if (m_lzmaInit) lzma_end(&m_lzma);
+    }
+
+    PullReader(const PullReader&) = delete;
+    PullReader& operator=(const PullReader&) = delete;
+
+    bool ok() const { return m_ok; }
+
+    /// Exactly `n` bytes, or false.
+    bool read(std::uint8_t* out, std::size_t n) {
+        if (!m_ok) {
+            return false;
+        }
+        bool done = false;
+        switch (m_codec) {
+        case Codec::None:
+            done = m_pos + n <= m_size;
+            if (done) {
+                std::memcpy(out, m_in + m_pos, n);
+                m_pos += n;
+            }
+            break;
+        case Codec::Zstd: {
+            ZSTD_outBuffer zout{out, n, 0};
+            while (zout.pos < n) {
+                const std::size_t before = zout.pos;
+                const std::size_t inBefore = m_zin.pos;
+                const std::size_t r = ZSTD_decompressStream(m_zstd, &zout, &m_zin);
+                if (ZSTD_isError(r) || (zout.pos == before && m_zin.pos == inBefore)) {
+                    break;
+                }
+            }
+            done = zout.pos == n;
+            break;
+        }
+        case Codec::Bzip2:
+            m_bz.next_out = reinterpret_cast<char*>(out);
+            m_bz.avail_out = static_cast<unsigned int>(n);
+            while (m_bz.avail_out > 0) {
+                const int r = BZ2_bzDecompress(&m_bz);
+                if (r == BZ_STREAM_END || r != BZ_OK) {
+                    break;
+                }
+            }
+            done = m_bz.avail_out == 0;
+            break;
+        case Codec::Lzma:
+        case Codec::Lzma2:
+            m_lzma.next_out = out;
+            m_lzma.avail_out = n;
+            while (m_lzma.avail_out > 0) {
+                const std::size_t before = m_lzma.avail_out;
+                const lzma_ret r = lzma_code(&m_lzma, m_lzma.avail_in == 0 ? LZMA_FINISH : LZMA_RUN);
+                if (r == LZMA_STREAM_END || (r != LZMA_OK) || m_lzma.avail_out == before) {
+                    break;
+                }
+            }
+            done = m_lzma.avail_out == 0;
+            break;
+        default:
+            break;
+        }
+        if (done) {
+            m_produced += n;
+        } else {
+            m_ok = false;
+        }
+        return done;
+    }
+
+    bool skip(std::size_t n) {
+        std::uint8_t scratch[256];
+        while (n > 0) {
+            const std::size_t take = std::min(n, sizeof scratch);
+            if (!read(scratch, take)) {
+                return false;
+            }
+            n -= take;
+        }
+        return true;
+    }
+
+    /// Bytes handed out so far: the position in the decoded stream.
+    std::size_t produced() const { return m_produced; }
+
+private:
+    Codec m_codec;
+    const std::uint8_t* m_in;
+    std::size_t m_size;
+    std::size_t m_pos = 0;
+    std::size_t m_produced = 0;
+    bool m_ok = false;
+    ZSTD_DStream* m_zstd = nullptr;
+    ZSTD_inBuffer m_zin{};
+    bz_stream m_bz{};
+    bool m_bzInit = false;
+    lzma_stream m_lzma = LZMA_STREAM_INIT;
+    bool m_lzmaInit = false;
+};
+
+/// RVZ packing read from a PullReader until `expected` bytes are out. `offset` is where the first byte goes in the
+/// address space the junk seed is relative to (here: the partition's data, without hashes).
+bool unpack_pulled(PullReader& in, std::size_t expected, std::uint64_t offset, std::vector<std::uint8_t>& out) {
+    out.clear();
+    out.reserve(expected);
+    while (out.size() < expected) {
+        std::uint8_t word[4];
+        if (!in.read(word, sizeof word)) {
+            return false;
+        }
+        const std::uint32_t w = be32(word);
+        const std::size_t run = w & 0x7FFFFFFFu;
+        if (run == 0 || out.size() + run > expected) {
+            return false;
+        }
+        const std::size_t at = out.size();
+        out.resize(at + run);
+        if (w & 0x80000000u) {
+            std::uint8_t seed[68];
+            if (!in.read(seed, sizeof seed)) {
+                return false;
+            }
+            JunkGenerator generator(seed);
+            generator.skip(static_cast<std::size_t>((offset + at) % kSectorSize));
+            generator.generate(out.data() + at, run);
+        } else if (!in.read(out.data() + at, run)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// A Wii partition's data as WIA/RVZ store it: decrypted and without hashes, 0x7C00 bytes per disc sector, in the
+/// partition's own groups. The two pd[] runs are contiguous on the disc; the second starts a fresh group.
+class WiaPartitionData : public BlockContainer {
+public:
+    WiaPartitionData(WiaContainer& wia, const WiaContainer::Partition& part) : m_wia(wia), m_part(part) {
+        m_sectorsPerGroup = std::max<std::uint64_t>(1, wia.m_chunkSize / kWiiCluster);
+        m_firstRunGroups = (part.pd[0].sectors + m_sectorsPerGroup - 1) / m_sectorsPerGroup;
+        m_discSize = (std::uint64_t{part.pd[0].sectors} + part.pd[1].sectors) * kWiiClusterData;
+        m_cacheBlocks = kCachedBlocks;
+    }
+
+    Format format() const override { return m_wia.format(); }
+
+protected:
+    std::uint64_t first_run_bytes() const { return std::uint64_t{m_part.pd[0].sectors} * kWiiClusterData; }
+    std::uint64_t group_bytes() const { return m_sectorsPerGroup * kWiiClusterData; }
+
+    std::uint64_t block_index(std::uint64_t offset) const override {
+        if (offset < first_run_bytes()) {
+            return offset / group_bytes();
+        }
+        return m_firstRunGroups + (offset - first_run_bytes()) / group_bytes();
+    }
+
+    std::uint64_t block_start(std::uint64_t index) const override {
+        if (index < m_firstRunGroups) {
+            return index * group_bytes();
+        }
+        return first_run_bytes() + (index - m_firstRunGroups) * group_bytes();
+    }
+
+    bool produce(std::uint64_t index, std::vector<std::uint8_t>& out) override {
+        const int run = index < m_firstRunGroups ? 0 : 1;
+        const WiaContainer::PartData& pd = m_part.pd[run];
+        const std::uint64_t groupInRun = run == 0 ? index : index - m_firstRunGroups;
+        if (groupInRun >= pd.groupCount) {
+            return false;
+        }
+        const std::uint64_t firstSector = groupInRun * m_sectorsPerGroup;
+        if (firstSector >= pd.sectors) {
+            return false;
+        }
+        const std::uint64_t sectors = std::min<std::uint64_t>(m_sectorsPerGroup, pd.sectors - firstSector);
+        const std::size_t expected = static_cast<std::size_t>(sectors * kWiiClusterData);
+
+        const std::uint64_t group = pd.groupIndex + groupInRun;
+        if (group >= m_wia.m_groups.size() / m_wia.m_groupEntrySize) {
+            return false;
+        }
+        const std::uint8_t* e = m_wia.m_groups.data() + static_cast<std::size_t>(group) * m_wia.m_groupEntrySize;
+        const std::uint64_t dataOffset = std::uint64_t{be32(e)} * 4;
+        const std::uint32_t sizeWord = be32(e + 4);
+        const std::uint32_t packedSize = m_wia.m_rvz ? be32(e + 8) : 0;
+        const bool compressed = m_wia.m_rvz ? (sizeWord & 0x80000000u) != 0 : m_wia.m_codec != Codec::None;
+        const std::size_t storedSize = m_wia.m_rvz ? (sizeWord & 0x7FFFFFFFu) : sizeWord;
+        if (storedSize == 0) {
+            out.assign(expected, 0);  // all zeroes, and no exceptions
+            return true;
+        }
+        std::vector<std::uint8_t> stored(storedSize);
+        if (!read_exact(m_wia.m_stream, dataOffset, stored.data(), stored.size())) {
+            return false;
+        }
+
+        PullReader in(compressed ? m_wia.m_codec : Codec::None, stored.data(), stored.size(),
+            m_wia.m_codecProps.data(), m_wia.m_codecPropsSize);
+        // The exception lists (hash corrections, which this view has no use for) come first: one per 2 MiB of
+        // chunk, or exactly one for RVZ's smaller chunks. Stored as-is they are padded to 4 bytes.
+        const std::uint64_t lists = std::max<std::uint64_t>(1, m_wia.m_chunkSize / 0x200000);
+        for (std::uint64_t i = 0; i < lists; ++i) {
+            std::uint8_t count[2];
+            if (!in.read(count, sizeof count) || !in.skip(std::size_t{(std::uint32_t{count[0]} << 8) | count[1]} * 22)) {
+                return false;
+            }
+        }
+        if (!compressed && (in.produced() % 4) != 0 && !in.skip(4 - in.produced() % 4)) {
+            return false;
+        }
+
+        if (packedSize != 0) {
+            return unpack_pulled(in, expected, block_start(index), out);
+        }
+        out.resize(expected);
+        return in.read(out.data(), expected);
+    }
+
+private:
+    WiaContainer& m_wia;
+    WiaContainer::Partition m_part;
+    std::uint64_t m_sectorsPerGroup = 1;
+    std::uint64_t m_firstRunGroups = 0;
+};
+
+std::unique_ptr<Container> WiaContainer::stored_wii_partition(std::uint64_t dataStart, std::string& error) {
+    for (const Partition& p : m_partitions) {
+        if (std::uint64_t{p.pd[0].firstSector} * kWiiCluster != dataStart) {
+            continue;
+        }
+        if (p.pd[1].sectors != 0 && p.pd[1].firstSector != p.pd[0].firstSector + p.pd[0].sectors) {
+            error = "the image stores this partition in two pieces that are not contiguous";
+            return nullptr;
+        }
+        return std::make_unique<WiaPartitionData>(*this, p);
+    }
+    if (!m_partitions.empty()) {
+        error = "the image does not store the partition its partition table points at";
+    }
+    return nullptr;
+}
+
+/// A Wii partition read from an encrypted (.iso) image: each 0x8000-byte cluster is decrypted with the
+/// partition's title key -- the 0x7C00 data bytes with the IV the cluster carries at 0x3D0 of its (encrypted)
+/// hash block -- and the hashes dropped.
+class WiiCryptPartition : public BlockContainer {
+public:
+    WiiCryptPartition(Container& disc, std::uint64_t dataStart, std::uint64_t dataSize, const std::uint8_t key[16])
+        : m_disc(disc), m_dataStart(dataStart) {
+        std::memcpy(m_key, key, sizeof m_key);
+        m_discSize = (dataSize / kWiiCluster) * kWiiClusterData;
+        m_cacheBlocks = kWiiCachedClusters;
+    }
+
+    Format format() const override { return m_disc.format(); }
+
+protected:
+    std::uint64_t block_index(std::uint64_t offset) const override { return offset / kWiiClusterData; }
+    std::uint64_t block_start(std::uint64_t index) const override { return index * kWiiClusterData; }
+
+    bool produce(std::uint64_t index, std::vector<std::uint8_t>& out) override {
+        std::vector<std::uint8_t> cluster(kWiiCluster);
+        if (!m_disc.read(m_dataStart + index * kWiiCluster, cluster.data(), cluster.size())) {
+            return false;
+        }
+        out.resize(kWiiClusterData);
+        aes128_cbc_decrypt(m_key, cluster.data() + 0x3D0, cluster.data() + kWiiClusterHashes, out.data(),
+            kWiiClusterData);
+        return true;
+    }
+
+private:
+    Container& m_disc;
+    std::uint64_t m_dataStart;
+    std::uint8_t m_key[16];
+};
+
 }  // namespace
+
+std::unique_ptr<Container> Container::stored_wii_partition(std::uint64_t, std::string&) {
+    return nullptr;
+}
+
+bool is_wii_disc(Container& disc) {
+    std::uint8_t magic[4];
+    return disc.read(0x18, magic, sizeof magic) && be32(magic) == kWiiMagic;
+}
+
+std::unique_ptr<Container> open_wii_data_partition(Container& disc, const WiiKeys& keys, std::string& error) {
+    if (!is_wii_disc(disc)) {
+        error = "this is not a Wii disc";
+        return nullptr;
+    }
+    std::uint8_t discId[6];
+    if (!disc.read(0, discId, sizeof discId)) {
+        error = "could not read the disc header";
+        return nullptr;
+    }
+
+    // The partition table: four groups, each a count and where its {offset >> 2, type} entries are.
+    std::uint8_t groups[32];
+    if (!disc.read(kWiiPartitionTable, groups, sizeof groups)) {
+        error = "could not read the Wii partition table";
+        return nullptr;
+    }
+    std::uint64_t partition = 0;
+    for (int g = 0; g < 4 && partition == 0; ++g) {
+        const std::uint32_t count = be32(groups + g * 8);
+        const std::uint64_t table = std::uint64_t{be32(groups + g * 8 + 4)} << 2;
+        if (count == 0 || count > 32) {
+            continue;
+        }
+        std::vector<std::uint8_t> entries(std::size_t{count} * 8);
+        if (!disc.read(table, entries.data(), entries.size())) {
+            continue;
+        }
+        for (std::uint32_t i = 0; i < count; ++i) {
+            if (be32(entries.data() + i * 8 + 4) == kWiiDataPartition) {
+                partition = std::uint64_t{be32(entries.data() + i * 8)} << 2;
+                break;
+            }
+        }
+    }
+    if (partition == 0) {
+        error = "the disc has no game (DATA) partition";
+        return nullptr;
+    }
+
+    // The partition header, unencrypted: the ticket (title key, title id, common key index), then where the
+    // encrypted data starts and how long it is.
+    std::uint8_t header[0x2C0];
+    if (!disc.read(partition, header, sizeof header)) {
+        error = "could not read the game partition's header";
+        return nullptr;
+    }
+    const std::uint64_t dataStart = partition + (std::uint64_t{be32(header + 0x2B8)} << 2);
+    const std::uint64_t dataSize = std::uint64_t{be32(header + 0x2BC)} << 2;
+    if (dataSize < kWiiCluster || dataStart + dataSize > disc.size() + kWiiCluster) {
+        error = "the game partition's header does not describe its data";
+        return nullptr;
+    }
+
+    std::string storedError;
+    std::unique_ptr<Container> data = disc.stored_wii_partition(dataStart, storedError);
+    const bool decrypting = data == nullptr;
+    if (data == nullptr && !storedError.empty()) {
+        error = storedError;
+        return nullptr;
+    }
+    if (data == nullptr) {
+        // Encrypted: decrypt the title key with the common key (IV = the title id, then zeroes).
+        if (header[0x1F1] != 0) {
+            error = "this disc's partition uses a different common key (a Korean or vWii disc); only the standard "
+                    "one is supported";
+            return nullptr;
+        }
+        if (!keys.hasCommonKey) {
+            error = "this Wii disc image is encrypted and needs your Wii's common key. Put BootMii's keys.bin from "
+                    "your own console (or the key as wii_common_key.bin / wii_common_key.txt) in "
+                    "/switch/dusklight/ on the SD card -- or convert the image to RVZ with Dolphin, which needs "
+                    "no key here.";
+            return nullptr;
+        }
+        std::uint8_t iv[16] = {};
+        std::memcpy(iv, header + 0x1DC, 8);
+        std::uint8_t titleKey[16];
+        aes128_cbc_decrypt(keys.commonKey, iv, header + 0x1BF, titleKey, sizeof titleKey);
+        data = std::make_unique<WiiCryptPartition>(disc, dataStart, dataSize, titleKey);
+    }
+
+    // A wrong key decrypts to noise: the partition's own header must say Wii and name the same game.
+    std::uint8_t inner[0x20];
+    if (!data->read(0, inner, sizeof inner) || be32(inner + 0x18) != kWiiMagic ||
+        std::memcmp(inner, discId, 4) != 0) {
+        error = decrypting
+                    ? "the Wii common key on the SD card does not decrypt this disc (a different key in the file?)"
+                    : "the game partition does not read back as this game";
+        return nullptr;
+    }
+    return data;
+}
 
 const char* format_name(Format format) {
     switch (format) {
@@ -714,9 +1216,10 @@ std::string format_advice(Format format) {
         return std::string(format_name(format)) + " is supported.";
     case Format::Ciso:
     case Format::Wbfs:
+        // aleks2 (rc17): Wii discs are read now, but not from these two containers.
         return std::string(format_name(format)) +
-               " is a Wii format, and this is the GameCube version of the game. Convert your "
-               "GameCube copy to ISO or RVZ with Dolphin (right-click the game, Convert File).";
+               " is a Wii format this reader does not open. Convert your copy to ISO or RVZ with Dolphin "
+               "(right-click the game, Convert File); RVZ also needs no Wii key on this console.";
     case Format::Nfs:
         return "NFS is the Wii U Virtual Console layout, not a GameCube disc.";
     case Format::Tgc:
@@ -762,7 +1265,7 @@ Format detect(const RawStream& stream) {
         return Format::Raw;
     }
     if (read_exact(stream, 0x18, magic, sizeof magic) && be32(magic) == kWiiMagic) {
-        return Format::Raw;  // a Wii disc; refused later, by name
+        return Format::Raw;  // a Wii disc (rc17: its game partition is opened by open_wii_data_partition)
     }
     return Format::Unknown;
 }

@@ -88,7 +88,7 @@ T cLib_getRndValue(T min, T range) {
 }
 
 template <typename T>
-T cLib_calcTimer(T* value) {
+DUSK_NOINLINE T cLib_calcTimer(T* value) {
     if (*(T*)value != 0) {
         --*value;
     }
@@ -103,5 +103,13 @@ void MtxPush(void);
 void MtxPull(void);
 
 DUSK_GAME_EXTERN Mtx* calc_mtx;
+
+#if defined(__SWITCH__)
+// aleks2 (DM2-c): template instances catalog mods hook by name, out of line
+// (platforms/switch/mod_compat_symbols.txt).
+#define ALEKS2_MOD_COMPAT_C_LIB_H
+#include "aleks2/mod_compat_templates.inc"
+#undef ALEKS2_MOD_COMPAT_C_LIB_H
+#endif
 
 #endif

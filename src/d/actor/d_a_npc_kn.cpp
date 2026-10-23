@@ -698,14 +698,14 @@ int daNpc_Kn_c::CreateHeap() {
     return 0;
 }
 
-int daNpc_Kn_c::Delete() {
+DUSK_NOINLINE int daNpc_Kn_c::Delete() {
     OS_REPORT("|%06d:%x|daNpc_Kn_c -> Delete\n", g_Counter.mCounter0, this);
     fopAcM_RegisterDeleteID(this, "NPC_KN");
     this->~daNpc_Kn_c();
     return 1;
 }
 
-int daNpc_Kn_c::Execute() {
+DUSK_NOINLINE int daNpc_Kn_c::Execute() {
     int rt = execute();
     setPrtcl();
     calcMagicBallPos();
@@ -714,7 +714,7 @@ int daNpc_Kn_c::Execute() {
     return rt;
 }
 
-int daNpc_Kn_c::Draw() {
+DUSK_NOINLINE int daNpc_Kn_c::Draw() {
     if (mpMatAnm) {
         J3DModelData* modelData = mpModelMorf[0]->getModel()->getModelData();
         modelData->getMaterialNodePointer(getEyeballMaterialNo())->setMaterialAnm(mpMatAnm);
@@ -782,7 +782,7 @@ u8 daNpc_Kn_c::getPath() {
     return (fopAcM_GetParam(this) & 0xFF00) >> 8;
 }
 
-BOOL daNpc_Kn_c::isDelete() {
+DUSK_NOINLINE BOOL daNpc_Kn_c::isDelete() {
     static DUSK_CONSTEXPR s16 l_appearFlag[7] = {
         -1, 0x0153, 0x0152, 0x0154, 0x0155, 0x0156, 0x0157,
     };
@@ -1106,13 +1106,13 @@ void daNpc_Kn_c::action() {
     }
 }
 
-void daNpc_Kn_c::beforeMove() {
+DUSK_NOINLINE void daNpc_Kn_c::beforeMove() {
     if (checkHide() || mNoDraw) {
         attention_info.flags = 0;
     }
 }
 
-void daNpc_Kn_c::afterMoved() {
+DUSK_NOINLINE void daNpc_Kn_c::afterMoved() {
     if (mGroundHeight != -G_CM3D_F_INF) {
         mTevStr.YukaCol = dComIfG_Bgsp().GetPolyColor(mGndChk);
         mTevStr.room_no = dComIfG_Bgsp().GetRoomId(mGndChk);

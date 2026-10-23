@@ -19,6 +19,18 @@
 //     braking cancel in a whole stroke) and not from the first peak (which can be the reaction).
 //   * The sword's gesture is Vertical, LeftToRight, RightToLeft or Generic (strong but ambiguous: it still attacks).
 //   * Everything that depends on the console's axes is a validated Tuning value, so it can be corrected from config.json.
+//
+// V1-rc7 (after the rc5/rc6 console tests): raising the controller to wind up fired the attack and the chop that followed
+// fell in the cooldown; the return stroke right after a sideways one was often lost; a gyro flick alone could open a
+// window; there was no thrust.
+//   * A window opens on acceleration: |dyn| >= half the threshold and |dyn|/thr + gyroWeight * |w|/gyroThr >= 1. The
+//     gyroscope helps, it never opens one by itself.
+//   * Wind-up filter: a vertical window whose first vertical peak is upward (raising the arm) is not an attack, and the
+//     detector re-arms at once so the chop that follows counts.
+//   * The cooldown is a Tuning value (0.12 s by default, was 0.25), and after a left/right stroke the detector re-arms as
+//     soon as it ends, without waiting for the hand to be still: the return stroke counts.
+//   * Thrust: horizontal energy with little rotation (gyro peak and swept yaw low) is a thrust (the game's stab), not a
+//     generic swing; optionally along one sensor axis.
 
 #include <algorithm>
 #include <cmath>
@@ -60,7 +72,7 @@ enum class Layout {
 };
 
 // How the sword was swung. Generic = strong enough to be an attack but not clearly one direction.
-enum class SwordGesture { None, Generic, Vertical, LeftToRight, RightToLeft };
+enum class SwordGesture { None, Generic, Vertical, LeftToRight, RightToLeft, Thrust };
 
 inline const char* gesture_name(SwordGesture g) {
     switch (g) {
@@ -68,11 +80,12 @@ inline const char* gesture_name(SwordGesture g) {
     case SwordGesture::Vertical: return "vertical";
     case SwordGesture::LeftToRight: return "left-to-right";
     case SwordGesture::RightToLeft: return "right-to-left";
+    case SwordGesture::Thrust: return "thrust";
     default: return "none";
     }
 }
 
-enum class RejectReason { None, Short, RotationOnly, Gap, Ambiguous };
+enum class RejectReason { None, Short, RotationOnly, Gap, Ambiguous, Windup, Rebound };
 
 inline const char* reject_name(RejectReason r) {
     switch (r) {
@@ -80,6 +93,8 @@ inline const char* reject_name(RejectReason r) {
     case RejectReason::RotationOnly: return "rotation-only";
     case RejectReason::Gap: return "gap";
     case RejectReason::Ambiguous: return "ambiguous";
+    case RejectReason::Windup: return "windup";
+    case RejectReason::Rebound: return "rebound";
     default: return "none";
     }
 }
@@ -118,6 +133,31 @@ constexpr float kDominance = 1.5f;  // amplitude ratio between the winning axis 
 constexpr float kDominanceMin = 1.1f, kDominanceMax = 3.0f;
 constexpr float kMinYawRad = 0.25f;  // swept angle about the vertical for a left/right call (about 14 degrees)
 constexpr float kMinYawMin = 0.05f, kMinYawMax = 1.5f;
+constexpr float kGyroWeight = 0.5f;  // V1-rc7: how much the gyroscope adds to the acceleration that opens a window
+constexpr float kGyroWeightMin = 0.0f, kGyroWeightMax = 1.0f;
+constexpr float kMinOpenAccelShare = 0.5f;  // a window never opens below this share of the acceleration threshold
+constexpr float kCooldownDefaultS = 0.12f;
+constexpr float kCooldownMinS = 0.05f, kCooldownMaxS = 0.5f;
+constexpr float kThrustMaxGyroRad = 4.0f;  // a thrust turns the controller less than this (V1-rc8: was 2.5;
+                                           // a jab "without moving" peaked at 2.6-4.9 rad/s on the console)
+constexpr float kThrustMaxGyroMin = 0.5f, kThrustMaxGyroMax = 12.0f;
+constexpr float kThrustAxisShare = 0.6f;   // with a thrust axis set: its share of the energy
+// V1-rc8 (rc7 console logs): raising the arm was often "generic" -- it rose first by 2-5 g, but its vertical energy
+// was only 1.05-1.46 times the horizontal, under the 1.5 dominance, so the wind-up rule (vertical windows only) never
+// saw it. A window that rises first by more than this, with vertical energy at least kWindupShare of the horizontal,
+// is a wind-up whatever dominates.
+constexpr float kWindupMinG = 1.0f;
+constexpr float kWindupShare = 0.6f;
+// V1-rc9 (rc8 console, log 111711): both wind-up rules ate real attacks -- the 19 windows rejected averaged 4.2 g and
+// 21.9 rad/s, 18 of them over 14. Raising the arm is a weak movement; only a window under both of these is a wind-up
+// (4 g: the synthetic rises of wii_gestures_test peak at 3 g; the gyro limit is what separates the console data).
+constexpr float kWindupMaxG = 4.0f, kWindupMaxGMin = 1.0f, kWindupMaxGMax = 8.0f;
+constexpr float kWindupMaxGyroRad = 12.0f, kWindupMaxGyroMin = 2.0f, kWindupMaxGyroMax = 40.0f;
+// V1-rc8: one swing gave two attacks: the arm coming back right after. A window closing within kReboundWindowS of an
+// accepted one, with less than kReboundRatio of its acceleration peak, is that rebound (a deliberate return stroke
+// is about as strong as the first).
+constexpr double kReboundWindowS = 0.35;
+constexpr float kReboundRatio = 0.6f;
 
 constexpr double kWindowMinS = 0.06;     // a window never closes before this
 constexpr double kWindowMaxS = 0.12;     // and always has by this
@@ -144,6 +184,13 @@ struct RawTuning {
     float gyroThresholdRad = tuning::kGyroThresholdRad;
     float dominance = tuning::kDominance;
     float minYawRad = tuning::kMinYawRad;
+    float gyroWeight = tuning::kGyroWeight;
+    float cooldownS = tuning::kCooldownDefaultS;
+    bool windupFilter = true;
+    float windupMaxG = tuning::kWindupMaxG;
+    float windupMaxGyroRad = tuning::kWindupMaxGyroRad;
+    float thrustMaxGyroRad = tuning::kThrustMaxGyroRad;
+    int thrustAxis = -1;  // -1: any horizontal direction; 0..2: the sensor axis a thrust runs along
     int lateralAxis[2] = {-1, -1};  // [0] left Joy-Con, [1] right Joy-Con; -1 = the built-in table
     int forwardAxis[2] = {-1, -1};
     int forwardSign[2] = {0, 0};
@@ -154,6 +201,13 @@ struct Tuning {
     float gyroThresholdRad = tuning::kGyroThresholdRad;
     float dominance = tuning::kDominance;
     float minYawRad = tuning::kMinYawRad;
+    float gyroWeight = tuning::kGyroWeight;
+    float cooldownS = tuning::kCooldownDefaultS;
+    bool windupFilter = true;
+    float windupMaxG = tuning::kWindupMaxG;
+    float windupMaxGyroRad = tuning::kWindupMaxGyroRad;
+    float thrustMaxGyroRad = tuning::kThrustMaxGyroRad;
+    int thrustAxis = -1;
     SideAxes axes[2];  // by physical side: [0] left Joy-Con, [1] right Joy-Con (the sensor acting as the Nunchuk)
 };
 
@@ -190,6 +244,22 @@ inline Tuning sanitize(const RawTuning& raw, std::string* notes = nullptr) {
     out.dominance = pick("wiiDirectionDominance", raw.dominance, tuning::kDominanceMin, tuning::kDominanceMax,
         tuning::kDominance);
     out.minYawRad = pick("wiiMinYawRad", raw.minYawRad, tuning::kMinYawMin, tuning::kMinYawMax, tuning::kMinYawRad);
+    out.gyroWeight = pick("wiiGyroWeight", raw.gyroWeight, tuning::kGyroWeightMin, tuning::kGyroWeightMax,
+        tuning::kGyroWeight);
+    out.cooldownS = pick("wiiCooldownS", raw.cooldownS, tuning::kCooldownMinS, tuning::kCooldownMaxS,
+        tuning::kCooldownDefaultS);
+    out.windupFilter = raw.windupFilter;
+    out.windupMaxG = pick("wiiWindupMaxG", raw.windupMaxG, tuning::kWindupMaxGMin, tuning::kWindupMaxGMax,
+        tuning::kWindupMaxG);
+    out.windupMaxGyroRad = pick("wiiWindupMaxGyroRad", raw.windupMaxGyroRad, tuning::kWindupMaxGyroMin,
+        tuning::kWindupMaxGyroMax, tuning::kWindupMaxGyroRad);
+    out.thrustMaxGyroRad = pick("wiiThrustMaxGyroRad", raw.thrustMaxGyroRad, tuning::kThrustMaxGyroMin,
+        tuning::kThrustMaxGyroMax, tuning::kThrustMaxGyroRad);
+    if (raw.thrustAxis >= -1 && raw.thrustAxis <= 2) {
+        out.thrustAxis = raw.thrustAxis;
+    } else if (notes != nullptr) {
+        *notes += "wiiThrustAxis=" + std::to_string(raw.thrustAxis) + " is outside -1..2, using -1; ";
+    }
     for (int side = 0; side < 2; ++side) {
         const char* label = side == 0 ? "left" : "right";
         SideAxes& a = out.axes[side];
@@ -303,6 +373,7 @@ struct Features {
     float energyHorizontal = 0.0f;  // integral of |dyn - (dyn . up) up|^2 dt
     float energyAxis[3] = {};       // integral of dyn[k]^2 dt, in the sensor's axes
     float firstPeak[3] = {};        // signed dyn[k] at its largest |.| in the first part of the window
+    float firstVert = 0.0f;         // V1-rc7: signed dyn . up at its largest |.| in the first part (> 0: it rose first)
     float vertPeakPos = 0.0f, vertPeakNeg = 0.0f;  // signed extremes along "up"
     float yaw = 0.0f;               // angle swept about the vertical, rad (counter-clockwise seen from above is positive)
     float yawPeak = 0.0f;           // signed angular speed about the vertical at its largest |.|
@@ -331,7 +402,18 @@ public:
         return p;
     }
 
-    Result feed(const Sample& s, float accelThrG, float gyroThrRad, Handedness& hand) {
+    // V1-rc7: re-arm now (a wind-up was rejected: the chop after it must count).
+    void rearm_now(double t) {
+        mArmed = true;
+        mCooldownUntil = t;
+        mQuietFor = 0.0;
+        mQuickRearm = false;
+    }
+    // V1-rc7: re-arm as soon as the cooldown ends, without waiting for stillness (after a left/right stroke).
+    void quick_rearm() { mQuickRearm = true; }
+
+    Result feed(const Sample& s, float accelThrG, float gyroThrRad, Handedness& hand, float gyroWeight = 0.0f,
+        double cooldownS = tuning::kCooldownS) {
         Result out;
         const Vec3 aG = s.accel * (1.0f / kGravity);
         if (!mSeeded) {
@@ -386,9 +468,16 @@ public:
             }
             if (!warming && s.t >= mHoldoffUntil) {
                 if (mArmed) {
-                    if (mag > accelThrG || gyroMag > gyroThrRad) {
+                    // V1-rc7: acceleration opens a window; the gyroscope only adds to it (see the top of the file).
+                    if (mag >= accelThrG * tuning::kMinOpenAccelShare &&
+                        mag / accelThrG + gyroWeight * gyroMag / gyroThrRad >= 1.0f)
+                    {
                         open_window(s.t);
                     }
+                } else if (s.t >= mCooldownUntil && mQuickRearm) {
+                    mArmed = true;
+                    mQuickRearm = false;
+                    mQuietFor = 0.0;
                 } else if (s.t >= mCooldownUntil) {
                     if (mag < accelThrG * 0.4f && gyroMag < gyroThrRad * 0.5f) {
                         mQuietFor += dt;
@@ -418,8 +507,9 @@ public:
             if (close) {
                 mPhase = Phase::Idle;
                 mArmed = false;
-                mCooldownUntil = s.t + tuning::kCooldownS;
+                mCooldownUntil = s.t + cooldownS;
                 mQuietFor = 0.0;
+                mQuickRearm = false;
                 out.closed = true;
                 out.f = mF;
                 out.f.handednessKnown = hand.sign() != 0;
@@ -484,6 +574,9 @@ private:
                 mF.firstPeak[k] = dyn[k];
             }
         }
+        if (mF.duration <= tuning::kStrokeWindowS && std::fabs(av) > std::fabs(mF.firstVert)) {
+            mF.firstVert = av;
+        }
         mF.vertPeakPos = std::max(mF.vertPeakPos, av);
         mF.vertPeakNeg = std::min(mF.vertPeakNeg, av);
         mF.accelPeakG = std::max(mF.accelPeakG, mag);
@@ -513,6 +606,7 @@ private:
     Phase mPhase = Phase::Idle;
     bool mSeeded = false;
     bool mArmed = true;
+    bool mQuickRearm = false;
 };
 
 // The sword's gesture from a closed window. Returns None with a reason for a window that is not an attack.
@@ -537,13 +631,35 @@ inline SwordVerdict classify_sword(const Features& f, const Tuning& t, float acc
     }
     const float sv = std::sqrt(f.energyVertical);
     const float sh = std::sqrt(f.energyHorizontal);
+    // V1-rc9: a wind-up is weak; a strong window is an attack whichever way it started.
+    const bool weak = f.accelPeakG < t.windupMaxG && f.gyroPeakRad < t.windupMaxGyroRad;
+    if (t.windupFilter && weak && f.firstVert > tuning::kWindupMinG && sv >= tuning::kWindupShare * sh) {
+        v.reason = RejectReason::Windup;  // V1-rc8: rising first, even when the vertical does not dominate
+        return v;
+    }
     v.gesture = SwordGesture::Generic;
+    const float total = f.energyAxis[0] + f.energyAxis[1] + f.energyAxis[2];
+    const bool thrustAxisOk =
+        t.thrustAxis < 0 || (total > 0.0f && f.energyAxis[t.thrustAxis] >= tuning::kThrustAxisShare * total);
     if (sv >= t.dominance * sh) {
         // Energy along gravity, whichever way the stroke ran: down, up, or down-up-down. The net integral of the
         // acceleration is not used (acceleration and braking cancel); the signed extremes only say it moved both ways.
+        // V1-rc7: one that rose first is the arm winding up, not an attack.
+        if (t.windupFilter && weak && f.firstVert > 0.0f) {
+            v.gesture = SwordGesture::None;
+            v.reason = RejectReason::Windup;
+            return v;
+        }
         v.gesture = SwordGesture::Vertical;
-    } else if (sh >= t.dominance * sv && f.handednessKnown && std::fabs(f.yaw) >= t.minYawRad &&
-               std::fabs(f.yawPeak) >= 0.35f * t.gyroThresholdRad) {
+    } else if (sh >= t.dominance * sv && f.gyroPeakRad < t.thrustMaxGyroRad && std::fabs(f.yaw) < t.minYawRad &&
+               thrustAxisOk) {
+        v.gesture = SwordGesture::Thrust;  // V1-rc7: straight ahead, the controller hardly turning
+    } else if (f.handednessKnown &&
+               ((sh >= t.dominance * sv && std::fabs(f.yaw) >= t.minYawRad &&
+                    std::fabs(f.yawPeak) >= 0.35f * t.gyroThresholdRad) ||
+                   // V1-rc9 (log 111711): a fast flick sweeps little net angle (0.12-0.2 rad at 5-7 rad/s), and a
+                   // diagonal has neither axis dominant; the yaw rate says which way the hand went.
+                   (std::fabs(f.yawPeak) >= t.gyroThresholdRad && std::fabs(f.yaw) >= 0.5f * t.minYawRad))) {
         const bool peakPositive = f.yawPeak > 0.0f;
         const bool netPositive = f.yaw > 0.0f;
         if (peakPositive == netPositive) {
@@ -655,6 +771,8 @@ public:
         mSword.reset();
         mNunchuk.reset();
         mLayout = Layout::None;
+        mLastSwordAt = 0.0;
+        mLastSwordPeak = 0.0f;
     }
     void reset_all() {
         reset();
@@ -687,12 +805,29 @@ public:
         const int swordHand = std::clamp(in.swordSide, 0, 2);
 
         for (std::size_t i = 0; i < sword.count; ++i) {
-            const auto r = mSword.feed(sword.data[i], accelThr, gyroThr, mHand[swordHand]);
+            const auto r = mSword.feed(sword.data[i], accelThr, gyroThr, mHand[swordHand], in.tuning.gyroWeight,
+                in.tuning.cooldownS);
             if (!r.closed) {
                 continue;
             }
-            const SwordVerdict v = r.aborted ? SwordVerdict{SwordGesture::None, RejectReason::Gap}
-                                             : classify_sword(r.f, in.tuning, accelThr);
+            SwordVerdict v = r.aborted ? SwordVerdict{SwordGesture::None, RejectReason::Gap}
+                                       : classify_sword(r.f, in.tuning, accelThr);
+            const double closedAt = sword.data[i].t;
+            if (v.gesture != SwordGesture::None && mLastSwordAt > 0.0 &&
+                closedAt - mLastSwordAt < tuning::kReboundWindowS &&
+                r.f.accelPeakG < tuning::kReboundRatio * mLastSwordPeak)
+            {
+                v = SwordVerdict{SwordGesture::None, RejectReason::Rebound};  // V1-rc8: the swing's own return
+            }
+            if (v.gesture != SwordGesture::None) {
+                mLastSwordAt = closedAt;
+                mLastSwordPeak = r.f.accelPeakG;
+            }
+            if (v.reason == RejectReason::Windup) {
+                mSword.rearm_now(sword.data[i].t);
+            } else if (v.gesture == SwordGesture::LeftToRight || v.gesture == SwordGesture::RightToLeft) {
+                mSword.quick_rearm();
+            }
             Report rep;
             rep.kind = Report::Kind::Sword;
             rep.accepted = v.gesture != SwordGesture::None;
@@ -711,7 +846,8 @@ public:
             const int nunHand = std::clamp(in.nunchukSide, 0, 1);
             const float nunThr = accelThr * 0.8f;  // a Nunchuk is moved with less force than a Remote is shaken with
             for (std::size_t i = 0; i < nunchuk.count; ++i) {
-                const auto r = mNunchuk.feed(nunchuk.data[i], nunThr, gyroThr, mHand[nunHand]);
+                const auto r = mNunchuk.feed(nunchuk.data[i], nunThr, gyroThr, mHand[nunHand], in.tuning.gyroWeight,
+                    in.tuning.cooldownS);
                 if (!r.closed) {
                     continue;
                 }
@@ -744,6 +880,8 @@ private:
     int mSwordSide = -1;
     int mNunchukSide = -1;
     std::uint32_t mSerial = 0;
+    double mLastSwordAt = 0.0;    // V1-rc8: when the last accepted sword window closed
+    float mLastSwordPeak = 0.0f;  // and its acceleration peak
 };
 
 }  // namespace dusk::wii

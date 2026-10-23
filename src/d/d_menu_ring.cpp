@@ -1279,7 +1279,7 @@ void dMenu_Ring_c::setNameString(u32 i_stringID) {
     }
 }
 
-void dMenu_Ring_c::setActiveCursor() {
+DUSK_NOINLINE void dMenu_Ring_c::setActiveCursor() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, albw, fire_arrows), inlined by the PGO build
     u8 item = dComIfGs_getItem(mItemSlots[mCurrentSlot], false);
     if (mStatus == STATUS_WAIT && mOldStatus != STATUS_EXPLAIN_FORCE && mOldStatus != STATUS_EXPLAIN && mpItemExplain->getStatus() == 0) {
         if (mDoCPd_c::getTrigR(PAD_1) && !mPlayerIsWolf && item != dItemNo_NONE_e) {
@@ -1711,7 +1711,7 @@ void dMenu_Ring_c::stick_explain_force_proc() {
     mpBlackTex->setAlpha((1.0f - alphaRatio) * 150.0f);
 }
 
-void dMenu_Ring_c::setSelectItem(int i_idx, u8 i_itemNo) {
+DUSK_NOINLINE void dMenu_Ring_c::setSelectItem(int i_idx, u8 i_itemNo) {  // aleks2 (rc17): a catalog hook target (twilit_essentials, twilit_essentials), inlined by the PGO build
     f32 texScale = 1.0f;
 
     if (i_itemNo != dItemNo_NONE_e) {
@@ -1825,7 +1825,7 @@ void dMenu_Ring_c::drawSelectItem() {
     }
 }
 
-void dMenu_Ring_c::setSelectItemForce(int i_idx) {
+DUSK_NOINLINE void dMenu_Ring_c::setSelectItemForce(int i_idx) {
     if (i_idx == 2) {
         if (field_0x674[i_idx] != 0) {
             dComIfGs_setSelectItemIndex(i_idx, field_0x6b4[i_idx]);
@@ -1857,7 +1857,7 @@ u8 dMenu_Ring_c::getCursorPos(u8 i_slotNo) {
  *  - Bow ammo
  *  - Slingshot ammo
 */
-u8 dMenu_Ring_c::getItemNum(u8 i_slotNo) {
+DUSK_NOINLINE u8 dMenu_Ring_c::getItemNum(u8 i_slotNo) {
     u8 item = dComIfGs_getItem(i_slotNo, false);
     u8 ret = 0;
 
@@ -1896,7 +1896,7 @@ u8 dMenu_Ring_c::getItemNum(u8 i_slotNo) {
  *  - Bow capacity
  *  - Slingshot capacity
 */
-u8 dMenu_Ring_c::getItemMaxNum(u8 i_slotNo) {
+DUSK_NOINLINE u8 dMenu_Ring_c::getItemMaxNum(u8 i_slotNo) {
     u8 item = dComIfGs_getItem(i_slotNo, false);
     u8 ret = 0;
 
@@ -2135,7 +2135,7 @@ void dMenu_Ring_c::setDoStatus(u8 i_doStatus) {
     dComIfGp_setDoStatusForce(mDoStatus, 0);
 }
 
-bool dMenu_Ring_c::isMixItemOn() {
+DUSK_NOINLINE bool dMenu_Ring_c::isMixItemOn() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, fire_arrows, dawnlight), inlined by the PGO build
     if (!mPlayerIsWolf && dComIfGs_getItem(mItemSlots[mCurrentSlot], false) != dItemNo_NONE_e) {
         u8 item = dComIfGs_getItem(mItemSlots[mCurrentSlot], false);
         switch (item) {
@@ -2159,7 +2159,7 @@ bool dMenu_Ring_c::isMixItemOn() {
     return false;
 }
 
-bool dMenu_Ring_c::isMixItemOff() {
+DUSK_NOINLINE bool dMenu_Ring_c::isMixItemOff() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, fire_arrows, dawnlight), inlined by the PGO build
     if ((!mPlayerIsWolf) && (dComIfGs_getItem(mItemSlots[mCurrentSlot], 0) != dItemNo_NONE_e)) {
         if ((dComIfGs_getMixItemIndex(0) == SLOT_4) &&
             (mItemSlots[mCurrentSlot] == dComIfGs_getSelectItemIndex(0)))

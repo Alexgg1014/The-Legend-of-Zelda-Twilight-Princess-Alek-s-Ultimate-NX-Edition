@@ -63,7 +63,7 @@ void dMsgStringBase_c::getResource() {
     }
 }
 
-f32 dMsgStringBase_c::getStringLocal(u32 param_1, J2DTextBox* param_2, J2DTextBox* param_3,
+DUSK_NOINLINE f32 dMsgStringBase_c::getStringLocal(u32 param_1, J2DTextBox* param_2, J2DTextBox* param_3,
                                           JUTFont* param_4, COutFont_c* param_5, u8 param_6) {
     if (dMeter2Info_getMsgResource() != NULL) {
         if (param_1 > 5000) {

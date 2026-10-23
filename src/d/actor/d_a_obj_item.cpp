@@ -846,7 +846,7 @@ void daItem_c::setTevStr() {
     g_env_light.setLightTevColorType_MAJI(mpModel, &tevStr);
 }
 
-void daItem_c::itemGetNextExecute() {
+DUSK_NOINLINE void daItem_c::itemGetNextExecute() {
     if (!checkFlag(FLAG_DELETE_ITEM_e) && !checkFlag(FLAG_INIT_GET_ITEM_e)) {
         setFlag(FLAG_INIT_GET_ITEM_e);
         BOOL haveItem = false;
@@ -918,7 +918,7 @@ void daItem_c::itemGetNextExecute() {
     }
 }
 
-void daItem_c::itemGet() {
+DUSK_NOINLINE void daItem_c::itemGet() {  // aleks2 (rc17): a catalog hook target (albw, randomizer, randomizer), inlined by the PGO build
 #if TARGET_PC
     const u8 displayItemNo = m_itemNo;
     const auto itemCheck = dusk::mods::item_check_commit(mItemGiveTag, mOriginalItemNo, this);
@@ -1089,7 +1089,7 @@ int daItem_c::itemActionForArrow() {
     return 1;
 }
 
-int daItem_c::itemActionForBoomerang() {
+DUSK_NOINLINE int daItem_c::itemActionForBoomerang() {
     mAcch.CrrPos(dComIfG_Bgsp());
     return 1;
 }

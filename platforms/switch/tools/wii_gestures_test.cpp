@@ -6,6 +6,7 @@
 // and optionally with a gyro frame of the opposite handedness (libnx does not say which it is). What must come out is
 // decided by the world: down is down and a stroke to the right is to the right, whatever way the Joy-Con is held.
 #include "dusk/wii_gesture_detector.hpp"
+#include "dusk/wii_sample_log.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -126,7 +127,7 @@ float bell(double u, float peak, double len = 0.1) {
     return peak * static_cast<float>(std::sin(kPi * u / len));
 }
 
-enum class Dir { Down, Up, LeftToRight, RightToLeft, Diagonal };
+enum class Dir { Down, Up, LeftToRight, RightToLeft, Diagonal, Forward };
 
 // A sword stroke at t0 in direction `dir`, strength `peakG`; the wrist turns with it (yaw for a sideways stroke, pitch for
 // a vertical one). Added onto whatever `base` already does.
@@ -142,6 +143,7 @@ void add_stroke(Motion& m, double t0, Dir dir, float peakG, float wrist = 6.0f) 
         case Dir::LeftToRight: a.x += s; break;
         case Dir::RightToLeft: a.x -= s; break;
         case Dir::Diagonal: a.x += 0.7f * s; a.z -= 0.7f * s; break;
+        case Dir::Forward: a.y += s; break;  // V1-rc7: a thrust, straight ahead
         }
         return a;
     };
@@ -154,6 +156,7 @@ void add_stroke(Motion& m, double t0, Dir dir, float peakG, float wrist = 6.0f) 
         case Dir::LeftToRight: w.z -= b; break;  // clockwise seen from above
         case Dir::RightToLeft: w.z += b; break;
         case Dir::Diagonal: w.z -= 0.3f * b; w.x -= 0.3f * b; break;
+        case Dir::Forward: w.x -= 0.1f * b; break;  // a thrust hardly turns the controller
         }
         return w;
     };
@@ -256,15 +259,20 @@ int main(int argc, char** argv) {
     for (int pi = 0; pi < 5; ++pi) {
         for (bool flip : {false, true}) {
             struct Case { Dir dir; SwordGesture want; };
-            const Case cases[] = {{Dir::Down, SwordGesture::Vertical}, {Dir::Up, SwordGesture::Vertical},
+            // V1-rc7: raising the controller (Up) is the wind-up, not an attack (wiiWindupFilter, on by default).
+            const Case cases[] = {{Dir::Down, SwordGesture::Vertical}, {Dir::Up, SwordGesture::None},
                 {Dir::LeftToRight, SwordGesture::LeftToRight}, {Dir::RightToLeft, SwordGesture::RightToLeft},
-                {Dir::Diagonal, SwordGesture::Generic}};
+                {Dir::Diagonal, SwordGesture::Generic}, {Dir::Forward, SwordGesture::Thrust}};
             for (const Case& c : cases) {
                 Rig r;
                 Motion m = warmed(pi, flip);
-                add_stroke(m, 2.6, c.dir, 3.0f);
+                add_stroke(m, 2.6, c.dir, 3.0f, c.dir == Dir::Forward ? 1.0f : 6.0f);
                 r.run(3.5, pair, [&](double t) { return m.at(t); }, quiet_signal());
-                const bool ok = r.sword == 1 && r.gestures.size() == 1 && r.gestures[0] == c.want;
+                bool windupSeen = false;
+                for (const auto& rep : r.reports) windupSeen |= rep.reason == RejectReason::Windup;
+                const bool ok = c.want == SwordGesture::None
+                                    ? (r.sword == 0 && windupSeen)
+                                    : (r.sword == 1 && r.gestures.size() == 1 && r.gestures[0] == c.want);
                 if (!ok) {
                     std::fprintf(stderr, "pose %d flip %d dir %d: %d pulses, got %s want %s\n", pi, flip, static_cast<int>(c.dir),
                         r.sword, r.gestures.empty() ? "-" : gesture_name(r.gestures[0]), gesture_name(c.want));
@@ -361,10 +369,7 @@ int main(int argc, char** argv) {
         auto w0 = flick.omega;
         flick.omega = [=](double t) { Vec3 w = w0(t); w.y += bell(t - 2.6, 9.0f, 0.09); return w; };
         f.run(4.0, pair, [&](double t) { return flick.at(t); }, quiet_signal());
-        CHECK(f.sword == 0);
-        bool sawRotationOnly = false;
-        for (const auto& rep : f.reports) sawRotationOnly |= rep.reason == RejectReason::RotationOnly;
-        CHECK(sawRotationOnly);
+        CHECK(f.sword == 0);  // V1-rc7: the gyroscope alone no longer even opens a window
         // walking: 0.35 g at 2 Hz up and down plus a sway
         Rig w;
         Motion walk = warmed(3, false);
@@ -383,6 +388,85 @@ int main(int argc, char** argv) {
         add_stroke(gentle, 2.6, Dir::LeftToRight, 0.6f, 1.0f);
         q.run(4.0, pair, [&](double t) { return gentle.at(t); }, quiet_signal());
         CHECK(q.sword == 0);
+    }
+
+    // --- V1-rc7: wind-up then chop, return strokes, the filter switched off -----------------------------------------------------
+    {
+        // raise (Up) then chop (Down) 0.18 s later: one vertical attack, the raise rejected as a wind-up
+        Rig r;
+        Motion m = warmed(3, false);
+        add_stroke(m, 2.6, Dir::Up, 2.0f, 4.0f);
+        add_stroke(m, 2.78, Dir::Down, 3.5f);
+        r.run(3.6, pair, [&](double t) { return m.at(t); }, quiet_signal());
+        bool windupSeen = false;
+        for (const auto& rep : r.reports) windupSeen |= rep.reason == RejectReason::Windup;
+        if (!(r.sword == 1 && !r.gestures.empty() && r.gestures[0] == SwordGesture::Vertical && windupSeen)) {
+            std::fprintf(stderr, "wind-up then chop: %d pulses, windup %d\n", r.sword, windupSeen);
+            for (const auto& rep : r.reports)
+                std::fprintf(stderr, "   accepted=%d verdict=%d reason=%s fv=%.2f Ev=%.3f Eh=%.3f\n", rep.accepted, rep.verdict,
+                    reject_name(rep.reason), rep.f.firstVert, rep.f.energyVertical, rep.f.energyHorizontal);
+        }
+        CHECK(r.sword == 1 && !r.gestures.empty() && r.gestures[0] == SwordGesture::Vertical && windupSeen);
+        // left-to-right, then right-to-left 0.3 s later, three times: six attacks, alternating
+        Rig b;
+        Motion back = warmed(3, false);
+        double at = 2.6;
+        for (int i = 0; i < 6; ++i) {
+            add_stroke(back, at, i % 2 ? Dir::RightToLeft : Dir::LeftToRight, 3.0f);
+            at += 0.3;
+        }
+        b.run(at + 0.6, pair, [&](double t) { return back.at(t); }, quiet_signal());
+        CHECK(b.sword == 6);
+        for (size_t i = 0; i < b.gestures.size(); ++i)
+            CHECK(b.gestures[i] == (i % 2 ? SwordGesture::RightToLeft : SwordGesture::LeftToRight));
+        // the filter off: raising is an attack again
+        Inputs noFilter = pair;
+        noFilter.tuning.windupFilter = false;
+        Rig u;
+        Motion up = warmed(3, false);
+        add_stroke(up, 2.6, Dir::Up, 3.0f);
+        u.run(3.5, noFilter, [&](double t) { return up.at(t); }, quiet_signal());
+        CHECK(u.sword == 1 && u.gestures[0] == SwordGesture::Vertical);
+        // a slow raise (0.5 g) is neither an attack nor a rejected window
+        Rig s;
+        Motion slow = warmed(3, false);
+        add_stroke(slow, 2.6, Dir::Up, 0.5f, 1.0f);
+        s.run(3.5, pair, [&](double t) { return slow.at(t); }, quiet_signal());
+        CHECK(s.sword == 0 && s.reports.empty());
+    }
+
+    // --- V1-rc8: from the rc7 console logs -------------------------------------------------------------------------------------
+    {
+        // raising the arm with a sideways component (vertical not dominant): a wind-up, not an attack
+        Rig r;
+        Motion m = warmed(3, false);
+        add_stroke(m, 2.6, Dir::Up, 3.0f, 4.0f);
+        add_stroke(m, 2.6, Dir::LeftToRight, 2.2f, 2.0f);
+        r.run(3.5, pair, [&](double t) { return m.at(t); }, quiet_signal());
+        bool windupSeen = false;
+        for (const auto& rep : r.reports) windupSeen |= rep.reason == RejectReason::Windup;
+        CHECK(r.sword == 0 && windupSeen);
+        // a chop, then a weak return of the arm 0.15 s after it closes: one attack, the return a rebound
+        Rig b;
+        Motion chop = warmed(3, false);
+        add_stroke(chop, 2.6, Dir::RightToLeft, 3.5f);
+        add_stroke(chop, 2.88, Dir::LeftToRight, 1.6f, 3.0f);
+        b.run(3.6, pair, [&](double t) { return chop.at(t); }, quiet_signal());
+        bool reboundSeen = false;
+        for (const auto& rep : b.reports) reboundSeen |= rep.reason == RejectReason::Rebound;
+        if (!(b.sword == 1 && reboundSeen)) {
+            std::fprintf(stderr, "rebound: %d pulses, rebound %d\n", b.sword, reboundSeen);
+            for (const auto& rep : b.reports)
+                std::fprintf(stderr, "   accepted=%d verdict=%d reason=%s aPeak=%.2f\n", rep.accepted, rep.verdict,
+                    reject_name(rep.reason), rep.f.accelPeakG);
+        }
+        CHECK(b.sword == 1 && reboundSeen);
+        // a jab that turns the controller at 3.5 rad/s (rc7 rejected it as generic): a thrust
+        Rig j;
+        Motion jab = warmed(3, false);
+        add_stroke(jab, 2.6, Dir::Forward, 2.0f, 35.0f);  // Dir::Forward turns at 0.1 x wrist
+        j.run(3.5, pair, [&](double t) { return jab.at(t); }, quiet_signal());
+        CHECK(j.sword == 1 && !j.gestures.empty() && j.gestures[0] == SwordGesture::Thrust);
     }
 
     // --- one oscillation is one attack ----------------------------------------------------------------------------------------
@@ -676,6 +760,49 @@ int main(int argc, char** argv) {
         add_stroke(m, 2.6, Dir::Diagonal, 3.0f);
         r.run(3.8, strict, [&](double t) { return m.at(t); }, quiet_signal());
         CHECK(r.sword == 1 && r.gestures[0] == SwordGesture::Generic);
+    }
+
+    // --- V1-rc12: the raw-sample log (wii_sample_log.hpp) replays to the same gestures ---------------------------------------
+    {
+        Motion m = warmed(3, false);
+        const Dir dirs[] = {Dir::Down, Dir::LeftToRight, Dir::RightToLeft, Dir::Diagonal};
+        double at = 2.4;
+        for (int i = 0; i < 8; ++i) {
+            add_stroke(m, at, dirs[i % 4], 2.4f + 0.4f * static_cast<float>(i % 3));
+            at += 0.75;
+        }
+        const auto through_log = [](const Sample& in) {
+            dusk::wii::LoggedSample l;
+            l.side = 1;
+            l.t = in.t;
+            l.accel = {in.accel.x, in.accel.y, in.accel.z};
+            l.gyro = {in.gyro.x, in.gyro.y, in.gyro.z};
+            l.flags = in.gap ? 1u : 0u;
+            const auto back = dusk::wii::parse_sample_line(dusk::wii::format_sample_line(l));
+            CHECK(back.has_value());
+            Sample out = in;
+            if (back) {
+                out.t = back->t;
+                out.accel = Vec3{back->accel[0], back->accel[1], back->accel[2]};
+                out.gyro = Vec3{back->gyro[0], back->gyro[1], back->gyro[2]};
+                out.gap = (back->flags & 1u) != 0;
+            }
+            return out;
+        };
+        Rig direct, replayed;
+        direct.run(at + 0.5, pair, [&](double t) { return m.at(t); }, quiet_signal());
+        replayed.run(at + 0.5, pair, [&](double t) { return through_log(m.at(t)); }, quiet_signal());
+        CHECK(direct.sword == 8 && replayed.sword == direct.sword);
+        CHECK(replayed.gestures == direct.gestures);
+        // comments and malformed lines are skipped; the attitude columns survive
+        CHECK(!dusk::wii::parse_sample_line("# header").has_value());
+        CHECK(!dusk::wii::parse_sample_line("1,2,3").has_value());
+        CHECK(!dusk::wii::parse_sample_line("5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0").has_value());
+        dusk::wii::LoggedSample a;
+        a.dir = {1.f, 0.f, 0.f, 0.f, 0.5f, -0.25f, 0.f, 0.25f, 0.5f};
+        a.flags = 2;
+        const auto b = dusk::wii::parse_sample_line(dusk::wii::format_sample_line(a));
+        CHECK(b && b->flags == 2 && b->dir[5] == -0.25f && b->dir[7] == 0.25f);
     }
 
     if (failures == 0) {

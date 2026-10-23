@@ -15,6 +15,7 @@
 #include "dusk/benchmark_report.hpp"
 #include "dusk/fifo_report.hpp"
 #include "dusk/interp_frames.hpp"
+#include "dusk/perf_report.hpp"
 #include "dusk/shader_prep.hpp"
 
 #include <cstddef>
@@ -37,8 +38,36 @@ using ZoneStatus = shader_prep::ZoneStatus;
 using Outcome = shader_prep::Outcome;
 
 /// Heavy, medium, light, in that order. Every entry is in the warp table
-/// (src/dusk/map_loader_definitions.h); docs/switch-h35-fifo-plan.md gives the evidence.
+/// (src/dusk/map_loader_definitions.h); docs/history/switch-h35-fifo-plan.md gives the evidence.
+/// V1-rc9: with a matrix set (set_plan), one entry per measurement of the matrix instead.
 std::span<const Zone> zones();
+std::span<const Zone> base_zones();  ///< the four zones, whatever the plan
+
+/// V1-rc9: perf-lab.ini tour_matrix = "key:v1,v2; key:v1,v2" -- one toggle per axis, its values in order, the first
+/// being the baseline. Malformed axes are left out and named in `notes`.
+struct MatrixAxis {
+    std::string key;
+    std::vector<std::string> values;
+};
+/// V1-rc10: axes are separated by ';' or '|'.
+std::vector<MatrixAxis> parse_matrix(std::string_view spec, std::string& notes);
+/// V1-rc10: "hud_fast[1,0] swap_interval[2,1]" -- what the tour logs it understood.
+std::string describe_axes(const std::vector<MatrixAxis>& axes);
+
+/// One measurement: a zone (index into base_zones()) and every axis' value for it.
+struct PlanStep {
+    std::size_t zone = 0;
+    std::vector<std::pair<std::string, std::string>> values;
+    std::string label;  ///< "hud_fast=1 swap_interval=2"
+};
+/// One factor at a time, grouped by zone so a zone loads once: each zone measured with the baseline (every axis at
+/// its first value); the heavy zones (class "heavy...") also once per other value of each axis, the rest at baseline.
+/// Without axes: one step per zone, no values.
+std::vector<PlanStep> build_plan(std::span<const Zone> base, const std::vector<MatrixAxis>& axes);
+/// The plan zones() follows (empty: the plain tour) and the spec the report names.
+void set_plan(std::vector<PlanStep> plan, std::string spec);
+const PlanStep* plan_step(std::size_t index);  ///< nullptr without a matrix
+const std::string& plan_spec();
 
 struct Timing {
     double loadTimeoutSeconds = 120.0;
@@ -170,6 +199,10 @@ struct ZoneResult {
     Interpolation interp;
     Loading loading;
     Environment env;
+    // V1-c1: every frame of the window (frame_telemetry.hpp) and the GPU timing state.
+    std::vector<perf::FrameSample> telemetry;
+    perf::GpuInfo telemetryGpu;
+    float telemetryBudgetMs = 1000.f / 30.f;
 };
 
 struct ModInfo {
@@ -198,6 +231,10 @@ struct TourReport {
     bool predictiveInterpolation = false;
     std::string uniformReuseModeAtStart;
     bool pipelineMemo = false;
+    // V1-rc5: Minimal HUD hides the field minimap, which redraws itself every frame (~800 GX draws in Castle
+    // Town): a tour with it off is not comparable with one with it on (the "H35 -> rc4 FIFO regression" was this).
+    bool minimalHud = false;
+    bool dualScreen = false;
     int maxFrameRate = 0;
     bool vsync = false;
     std::string graphicsApi, adapter, driver;

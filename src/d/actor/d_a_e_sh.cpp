@@ -149,7 +149,7 @@ static int daE_SH_Draw(e_sh_class* i_this) {
     return 1;
 }
 
-static void damage_check(e_sh_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_sh_class* i_this) {
     fopAc_ac_c* actor = (fopAc_ac_c*)&i_this->enemy;
     fopAc_ac_c* unusedPlayer = dComIfGp_getPlayer(0);
 

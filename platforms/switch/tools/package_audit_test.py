@@ -34,14 +34,15 @@ def check(cond, what):
 
 # --- capacity ---------------------------------------------------------------------------------------
 cap = package_audit.capacity
-check(cap(0)["arena_objects"] == 0 and cap(64)["arena_objects"] == 1 and cap(65)["arena_objects"] == 2, "object count")
-check(cap(128)["within_planned_budget"] and not cap(129)["within_planned_budget"], "planned budget is two objects")
-check(cap(512)["within_arena_table"] and not cap(513)["within_arena_table"], "arena table holds eight objects")
-entries = {"a": {"estimated_pages": 100}, "b": {"estimated_pages": 40}, "c": {"estimated_pages": 600}}
+# DM2-a: 1024 hooks per CodeMemory object (16 slots a page)
+check(cap(0)["arena_objects"] == 0 and cap(1024)["arena_objects"] == 1 and cap(1025)["arena_objects"] == 2, "object count")
+check(cap(2048)["within_planned_budget"] and not cap(2049)["within_planned_budget"], "planned budget is two objects")
+check(cap(8192)["within_arena_table"] and not cap(8193)["within_arena_table"], "arena table holds eight objects")
+entries = {"a": {"estimated_pages": 1600}, "b": {"estimated_pages": 640}, "c": {"estimated_pages": 9000}}
 notes = package_audit.capacity_notes(entries)
 check(len(notes) == 1 and notes[0].startswith("c:") and "cannot be hooked" in notes[0], f"notes {notes}")
 combos = {tuple(c["mods"]): c for c in package_audit.combinations(entries, {("a", "b"): ["dComIfGp_setNextStage"]})}
-check(combos[("a", "b")]["pages"] == 140 and not combos[("a", "b")]["within_planned_budget"], "a+b over 128")
+check(combos[("a", "b")]["pages"] == 2240 and not combos[("a", "b")]["within_planned_budget"], "a+b over 2048")
 check(combos[("a", "b")]["shared_by_name_targets"] == ["dComIfGp_setNextStage"], "shared targets listed")
 check(combos[("a", "c")]["shared_by_name_targets"] == [], "no shared targets")
 

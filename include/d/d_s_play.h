@@ -81,7 +81,12 @@ public:
     #else
     static s8 isPause() { return pauseTimer; }
     #endif
+    #if TARGET_PC
+    // aleks2 (V1-rc8): out of line, as upstream (34a144a): mods built against it import the symbol.
+    static void setPauseTimer(s8 time);
+    #else
     static void setPauseTimer(s8 time) { nextPauseTimer = time; }
+    #endif
 
     static DUSK_GAME_DATA s8 pauseTimer;
     static DUSK_GAME_DATA s8 nextPauseTimer;

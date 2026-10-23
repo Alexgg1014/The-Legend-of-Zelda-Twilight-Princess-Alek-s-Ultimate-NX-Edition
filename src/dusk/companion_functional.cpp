@@ -1020,11 +1020,13 @@ void drawTransformCorner(f32 x0, f32 y0, f32 x1, f32 y1) {
     }
     // Published even when dimmed: the game answers a blocked transform with
     // its own error cue, matching the Cinematic button. Resting coords —
-    // the pinch above must not shrink the hit target.
-    s_transformBtnRect[0] = rx0;
-    s_transformBtnRect[1] = ry0;
-    s_transformBtnRect[2] = rx1;
-    s_transformBtnRect[3] = ry1;
+    // the pinch above must not shrink the hit target. V1, from igawa6's fork
+    // (ds-3.0.3, 39b266c, CC0): before the ability is unlocked the box is
+    // empty, so it takes no taps (no error beep).
+    s_transformBtnRect[0] = unlocked ? rx0 : 0.0f;
+    s_transformBtnRect[1] = unlocked ? ry0 : 0.0f;
+    s_transformBtnRect[2] = unlocked ? rx1 : 0.0f;
+    s_transformBtnRect[3] = unlocked ? ry1 : 0.0f;
 }
 
 // Status strip: FPS on the left, battery on the right, and between them the

@@ -7,6 +7,9 @@
 
 #include <cstring>
 #include <os.h>
+#if TARGET_PC
+#include "dusk/logging.h"
+#endif
 #include "JSystem/J2DGraph/J2DAnmLoader.h"
 #include "JSystem/J2DGraph/J2DGrafContext.h"
 #include "JSystem/J2DGraph/J2DTextBox.h"
@@ -953,11 +956,38 @@ void dMenu_Collect2D_c::screenSet() {
                 mpSelPm[i][j] = NULL;
             }
             if (getItemTag(i, j, false)) {
+#if TARGET_PC
+                // aleks2 (rc20): a mod that adds collection slots (getItemTag hooked) may name a pane this screen
+                // does not have; the game assumed every tag exists and crashed on the NULL (rc19, a tester with
+                // Twilit Essentials 2.8.4: Data Abort at null+0xb0 opening the pause menu). The slot is left as it
+                // is, and the first few are logged with the tag. Vanilla tags always exist: nothing changes there.
+                J2DPane* const pane = mpScreen->search(getItemTag(i, j, false));
+                if (pane == NULL) {
+                    static int s_reported = 0;
+                    if (s_reported++ < 4) {
+                        const u64 tag = getItemTag(i, j, false);
+                        char text[9] = {};
+                        for (int c = 0; c < 8; ++c) {
+                            const char ch = static_cast<char>(tag >> (56 - 8 * c));
+                            text[c] = ch >= 0x20 && ch < 0x7f ? ch : '.';
+                        }
+                        OS_REPORT("dMenu_Collect2D_c::screenSet: no pane '%s' (%016llx) for slot %d,%d; left out\n",
+                                  text, static_cast<unsigned long long>(tag), i, j);
+                        DuskLog.warn("collection screen: no pane '{}' ({:016x}) for slot {},{} (a mod's tag?); left out",
+                                     text, tag, i, j);
+                    }
+                } else if (field_0x22d[i][j] != 0 || (i == 5 && j == 0)) {
+                    pane->show();
+                } else {
+                    pane->hide();
+                }
+#else
                 if (field_0x22d[i][j] != 0 || (i == 5 && j == 0)) {
                     mpScreen->search(getItemTag(i, j, false))->show();
                 } else {
                     mpScreen->search(getItemTag(i, j, false))->hide();
                 }
+#endif
             }
         }
     }
@@ -1839,7 +1869,7 @@ void dMenu_Collect2D_c::setHIO(bool i_useHIO) {
     }
 }
 
-u64 dMenu_Collect2D_c::getItemTag(int i_tag1, int i_tag2, bool param_3) {
+DUSK_NOINLINE u64 dMenu_Collect2D_c::getItemTag(int i_tag1, int i_tag2, bool param_3) {
     static const u64 itemTag[6][7] = {
         {0, 0, 0, MULTI_CHAR('ken_n0'), MULTI_CHAR('ken_n1'), MULTI_CHAR('heart_kn'), MULTI_CHAR('kamen_n')},
         {0, 0, 0, MULTI_CHAR('tate_n0'), MULTI_CHAR('tate_n1')},
@@ -2080,7 +2110,7 @@ void dMenu_Collect2D_c::pointerActivateCurrent() {
     }
 }
 
-bool dMenu_Collect2D_c::pointerWait() {
+DUSK_NOINLINE bool dMenu_Collect2D_c::pointerWait() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, dawnlight, twilit_essentials), inlined by the PGO build
     dusk::menu_pointer::begin_context(dusk::menu_pointer::Context::Collection);
     for (u8 y = 0; y < 6; ++y) {
         for (u8 x = 0; x < 7; ++x) {
@@ -2440,7 +2470,7 @@ void dMenu_Collect2D_c::insect_close_proc() {
     mDoExt_setCurrentHeap(heap);
 }
 
-void dMenu_Collect2D_c::_move() {
+DUSK_NOINLINE void dMenu_Collect2D_c::_move() {  // aleks2 (rc17): a catalog hook target (twilit_essentials), inlined by the PGO build
     u8 last_process = mProcess;
     (this->*process[last_process])();
     if (mProcess != last_process) {
@@ -2757,7 +2787,7 @@ void dMenu_Collect3D_c::_create() {
     _move(mpCollect2D->getCursorX(), mpCollect2D->getCursorY());
 }
 
-void dMenu_Collect3D_c::_delete() {
+DUSK_NOINLINE void dMenu_Collect3D_c::_delete() {
     if (daAlink_getAlinkActorClass()) {
         daAlink_getAlinkActorClass()->resetStatusWindow();
     }

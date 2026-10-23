@@ -424,7 +424,252 @@ static void test_discontinuity_while_interpolating() {
     check_coherent(s.g);
 }
 
+// V1-rc12: Capped 60 with interp_floor_fps 54: a 36-40 FPS loop gives up (a steady 30), a 60 FPS one does not, and a
+// light scene comes back once its work leaves room for 60. The defaults are unchanged.
+static void test_floor_for_capped_60() {
+    Sim s;
+    CHECK(s.g.give_up_seconds() == kGiveUpSeconds);
+    s.g.set_thresholds(1.0f / 54.0f, 0.015f);
+    s.run(10.0, 0.026f, 0.020f);  // ~38 FPS while interpolating (rc11 Ordon / Kakariko outskirts)
+    CHECK(s.g.stalled() && s.enters == 1);
+    Sim fast;
+    fast.g.set_thresholds(1.0f / 54.0f, 0.015f);
+    fast.run(30.0, 0.0166f, 0.010f);  // 60 FPS: stays interpolating
+    CHECK(!fast.g.stalled() && fast.enters == 0);
+    Sim back;
+    back.g.set_thresholds(1.0f / 54.0f, 0.015f);
+    back.run(5.0, 0.026f, 0.020f);
+    CHECK(back.g.stalled());
+    back.run(30.0, 0.0166f, 0.010f);  // a light room: work 10 ms, under the 15 ms resume threshold
+    CHECK(back.resumes >= 1 && !back.g.stalled());
+    // Without the floor (rc11), the same 38 FPS loop keeps interpolating.
+    Sim old;
+    old.run(10.0, 0.026f, 0.020f);
+    CHECK(!old.g.stalled());
+}
+
+// V1-rc12: the GPU gate. rc12 console (deko3d, Balanced): stalled work 3-13 ms passed the CPU rule, the GPU took
+// 17-19 ms a frame, and every resume fell back within a second at 36-50 FPS.
+static void test_gpu_gate() {
+    auto heavy = [](Sim& s, double seconds, float gpu) {
+        const double end = s.now + seconds;
+        while (s.now < end) {
+            float gap, waits;
+            if (s.g.stalled()) {
+                gap = Sim::kTick;
+                waits = gap - 0.009f;  // 9 ms of work: the CPU rule alone would resume
+            } else {
+                gap = 0.024f;  // ~42 FPS interpolating: under the 54 floor
+                waits = 0.f;
+            }
+            s.now += gap;
+            const Event e = s.g.sample(s.now, gap, waits, gpu);
+            s.enters += e == Event::Entered;
+            s.resumes += e == Event::Resumed;
+        }
+    };
+    Sim gated;
+    gated.g.set_thresholds(1.0f / 54.0f, 0.015f);
+    gated.g.set_gpu_gate(0.9f / 54.0f);
+    heavy(gated, 120.0, 0.018f);  // GPU 18 ms > 16.7 ms gate
+    CHECK(gated.g.stalled() && gated.enters == 1 && gated.resumes == 0);
+    CHECK(gated.g.stats().gpuBlockedFrames > 0);
+    Sim ungated;  // the rc12 behaviour: resumes and falls back again and again
+    ungated.g.set_thresholds(1.0f / 54.0f, 0.015f);
+    heavy(ungated, 120.0, 0.018f);
+    CHECK(ungated.resumes >= 4 && ungated.enters >= 5);
+    Sim unknown;  // no GPU figure: the CPU rule, as before
+    unknown.g.set_thresholds(1.0f / 54.0f, 0.015f);
+    unknown.g.set_gpu_gate(0.9f / 54.0f);
+    heavy(unknown, 120.0, -1.f);
+    CHECK(unknown.resumes >= 4);
+    Sim light;  // a light room: GPU 10 ms, the floor is held
+    light.g.set_thresholds(1.0f / 54.0f, 0.015f);
+    light.g.set_gpu_gate(0.9f / 54.0f);
+    light.run(5.0, 0.026f, 0.020f);
+    CHECK(light.g.stalled());
+    {
+        const double end = light.now + 30.0;
+        while (light.now < end) {
+            const bool stalled = light.g.stalled();
+            const float gap = stalled ? Sim::kTick : 0.0166f;
+            const float waits = stalled ? gap - 0.010f : 0.f;
+            light.now += gap;
+            light.resumes += light.g.sample(light.now, gap, waits, 0.010f) == Event::Resumed;
+        }
+    }
+    CHECK(light.resumes >= 1 && !light.g.stalled());
+    Sim nogate;  // the gate off (no floor): the GPU figure changes nothing
+    nogate.run(10.0, 0.026f, 0.020f);
+    CHECK(!nogate.g.stalled() && nogate.g.gpu_gate() == 0.f);
+}
+
+// post-rc12: log 155101 (rc12 console, Balanced, Capped 60, deko3d) replayed. Interpolation was on 571-738 s; per scene,
+// the interval while interpolating at the logged stalls, the work while stalled at the logged resumes, and the GPU
+// frame from the rc12 tour (Hyrule Field 18.5 ms, Ordon 17.2 ms). Per-frame noise +-15 % and a 64 ms hitch every 600
+// frames. "Before" is rc12 (floor 54, no GPU gate, 5/10/20 s); "after" is floor 45, GPU gate, kCapped60Pacing.
+struct ReplayScene {
+    const char* name;
+    double seconds;
+    float interpGap, work, gpu;
+};
+static constexpr ReplayScene kLog155101[] = {
+    {"F_SP121 Hyrule Field", 64.0, 0.0300f, 0.006f, 0.0185f},
+    {"F_SP103 Ordon Village", 5.0, 0.0285f, 0.006f, 0.0172f},
+    {"F_SP00  Ordon Ranch", 43.0, 0.0205f, 0.009f, 0.0170f},
+    {"F_SP103 Ordon Village", 19.0, 0.0230f, 0.013f, 0.0172f},
+    {"F_SP00  Ordon Ranch", 36.0, 0.0210f, 0.011f, 0.0170f},
+};
+struct ReplayResult {
+    int enters = 0, resumes = 0;
+    double interpolatingSeconds[5] = {};
+    double sceneSeconds[5] = {};
+};
+static ReplayResult replay_log_155101(bool after, bool print) {
+    Governor g;
+    if (after) {
+        g.set_thresholds(1.0f / 45.0f, 0.015f);
+        g.set_gpu_gate(0.9f / 45.0f);
+        g.set_pacing(kCapped60Pacing);
+    } else {
+        g.set_thresholds(1.0f / 54.0f, 0.015f);
+    }
+    ReplayResult r;
+    uint32_t rng = 155101u;
+    auto noise = [&rng]() {
+        rng = rng * 1664525u + 1013904223u;
+        return (static_cast<float>(rng >> 8) / 16777216.0f) * 0.30f - 0.15f;  // +-15 %
+    };
+    double now = 571.0;
+    int frame = 0;
+    if (print) {
+        std::printf("  %s:\n", after ? "after" : "before");
+    }
+    for (int s = 0; s < 5; ++s) {
+        const auto& sc = kLog155101[s];
+        if (s > 0) {
+            g.discontinuity(now);  // a stage load
+        }
+        const double end = now + sc.seconds;
+        while (now < end) {
+            float gap, waits;
+            const bool hitch = ++frame % 600 == 0;
+            if (g.stalled()) {
+                const float work = sc.work * (1.f + noise());
+                gap = std::max(work, 1.0f / 30.0f) + (hitch ? 0.064f : 0.f);
+                waits = gap - work;
+            } else {
+                gap = sc.interpGap * (1.f + noise()) + (hitch ? 0.064f : 0.f);
+                waits = 0.f;
+            }
+            const float gpu = sc.gpu * (1.f + noise() * 0.5f);
+            if (!g.stalled()) {
+                r.interpolatingSeconds[s] += gap;
+            }
+            r.sceneSeconds[s] += gap;
+            now += gap;
+            const Event e = g.sample(now, gap, waits, gpu);
+            if (e != Event::None) {
+                r.enters += e == Event::Entered;
+                r.resumes += e == Event::Resumed;
+                if (print) {
+                    std::printf("    t=%6.1f %-22s %s (cooldown %.0f s)\n", now, sc.name,
+                        e == Event::Entered ? "stalled -> 30" : "resumed -> interpolating", g.stats().cooldownSeconds);
+                }
+            }
+        }
+    }
+    if (print) {
+        for (int s = 0; s < 5; ++s) {
+            std::printf("    %-22s interpolating %3.0f %%\n", kLog155101[s].name,
+                100.0 * r.interpolatingSeconds[s] / r.sceneSeconds[s]);
+        }
+        std::printf("    %d stalls, %d resumes\n", r.enters, r.resumes);
+    }
+    return r;
+}
+
+static void test_replay_log_155101() {
+    std::printf("replay of log 155101 (rc12 console, Capped 60, deko3d):\n");
+    const ReplayResult before = replay_log_155101(false, true);
+    const ReplayResult after = replay_log_155101(true, true);
+    auto pct = [](const ReplayResult& r, int s) { return r.interpolatingSeconds[s] / r.sceneSeconds[s]; };
+    CHECK(before.enters >= 5);                          // the model flaps as the console did (9 stalls in 167 s)
+    CHECK(pct(after, 2) > 0.8 && pct(after, 4) > 0.8);  // Ordon Ranch keeps its interpolated frames
+    CHECK(pct(after, 0) < 0.15);                        // Hyrule Field: a clean 30
+    CHECK(pct(after, 3) < 0.5);                         // Ordon Village at ~43 FPS: under the floor, mostly 30
+    CHECK(after.enters <= before.enters);
+    CHECK(pct(after, 2) > pct(before, 2) && pct(after, 4) > pct(before, 4));
+}
+
+// V1-rc16: Boldiatti's rc14 console (FW 22.5, deko3d, Capped/Fast 60), log 085043: on entering D_MN06B (~1000
+// draws/frame) the first frames after the load ran at 28.8 ms, the floor rule (45) stalled, and the way back needed work
+// under 15 ms; the room's work is ~18 ms (Unlimited ran it at 51.6-56.5 FPS), so it stayed at 30 for minutes. Modelled:
+// 2 s at 28.8 ms after the load, then 18.5 ms +-15 % (GPU ~18 ms, work ~18 ms while stalled), 150 s. And Ordon Ranch
+// GPU-bound (his logs: interval and GPU 40-42 ms): worse than 30 interpolated, so a clean 30 must stay.
+// "Before" = rc14 (floor 45, GPU gate, kCapped60Pacing); "after" = rc16 (no floor: the Unlimited rule).
+struct BoldiattiResult {
+    int enters = 0, resumes = 0;
+    double interpolating = 0.0, total = 0.0;
+};
+static BoldiattiResult replay_boldiatti(bool after, float steadyGap, float transientGap, float gpu, float stalledWork,
+                                        double seconds) {
+    Governor g;
+    if (!after) {
+        g.set_thresholds(1.0f / 45.0f, 0.015f);
+        g.set_gpu_gate(0.9f / 45.0f);
+        g.set_pacing(kCapped60Pacing);
+    }
+    BoldiattiResult r;
+    uint32_t rng = 85043u;
+    auto noise = [&rng]() {
+        rng = rng * 1664525u + 1013904223u;
+        return (static_cast<float>(rng >> 8) / 16777216.0f) * 0.30f - 0.15f;
+    };
+    double now = 100.0;
+    g.discontinuity(now);  // the stage load
+    const double start = now;
+    while (now < start + seconds) {
+        float gap, waits;
+        if (g.stalled()) {
+            const float work = stalledWork * (1.f + noise());
+            gap = std::max(work, 1.0f / 30.0f);
+            waits = gap - work;
+        } else {
+            gap = (now - start < 2.0 ? transientGap : steadyGap) * (1.f + noise());
+            waits = 0.f;
+            r.interpolating += gap;
+        }
+        r.total += gap;
+        now += gap;
+        const Event e = g.sample(now, gap, waits, gpu * (1.f + noise() * 0.5f));
+        r.enters += e == Event::Entered;
+        r.resumes += e == Event::Resumed;
+    }
+    return r;
+}
+
+static void test_replay_boldiatti_capped_60() {
+    std::printf("replay of Boldiatti's rc14 log 085043 (Capped 60):\n");
+    const auto before = replay_boldiatti(false, 0.0185f, 0.0288f, 0.018f, 0.018f, 150.0);
+    const auto after = replay_boldiatti(true, 0.0185f, 0.0288f, 0.018f, 0.018f, 150.0);
+    std::printf("  D_MN06B   before: interpolating %3.0f %%, %d stalls, %d resumes\n",
+        100.0 * before.interpolating / before.total, before.enters, before.resumes);
+    std::printf("  D_MN06B   after:  interpolating %3.0f %%, %d stalls, %d resumes\n",
+        100.0 * after.interpolating / after.total, after.enters, after.resumes);
+    CHECK(before.enters >= 1 && before.interpolating / before.total < 0.2);  // the console's lock at 30
+    CHECK(after.enters == 0 && after.interpolating / after.total > 0.95);    // like Unlimited: ~54 FPS throughout
+    const auto ranch = replay_boldiatti(true, 0.041f, 0.041f, 0.040f, 0.040f, 60.0);
+    std::printf("  F_SP00    after:  interpolating %3.0f %%, %d stalls (GPU-bound, worse than 30)\n",
+        100.0 * ranch.interpolating / ranch.total, ranch.enters);
+    CHECK(ranch.enters >= 1 && ranch.interpolating / ranch.total < 0.2);  // a real failure still gives a clean 30
+}
+
 int main() {
+    test_replay_boldiatti_capped_60();
+    test_replay_log_155101();
+    test_floor_for_capped_60();
+    test_gpu_gate();
     test_the_dead_end_is_real_and_fixed();
     test_heavy_scene_stays_stalled();
     test_entry_needs_dwell_and_threshold();

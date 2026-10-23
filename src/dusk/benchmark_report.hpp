@@ -34,7 +34,9 @@ struct FrameSummary {
     double p95Ms = 0.0;
     double p99Ms = 0.0;
     double maxMs = 0.0;
-    std::size_t over33 = 0;  // frames longer than 33.3 ms (a missed 30 fps tick)
+    // V1-rc8: frames longer than kMissedFrameMs, a missed 30 fps tick with margin. It was "> 33.3 ms", which a
+    // perfect 30 fps frame (33.333 ms) passes: every frame of a clean run counted as missed.
+    std::size_t over33 = 0;
     std::size_t over50 = 0;  // frames longer than 50 ms
     double pctOver33 = 0.0;
     double pctOver50 = 0.0;
@@ -43,7 +45,13 @@ struct FrameSummary {
     // (16.7/16.7/33.3 ms) or a 33/50/33/50 stagger reads high. Needs the frames in time order.
     std::size_t judderPairs = 0;
     double judderPct = 0.0;
+    // V1-rc8: the visible cadence, each interval in 60 Hz refreshes (rounded): [1] 1V, [2] 2V (30 fps), [3] 3V,
+    // [4] 4V or more. A steady 30 is all 2V; "45/24/33" frames are 3V/1V/2V.
+    std::size_t vblanks[5] = {};
 };
+
+inline constexpr float kMissedFrameMs = 1000.0f / 30.0f * 1.1f;  // 36.67 ms
+inline constexpr float kVblankMs = 1000.0f / 60.0f;
 
 inline constexpr float kJudderStepMs = 8.0f;
 

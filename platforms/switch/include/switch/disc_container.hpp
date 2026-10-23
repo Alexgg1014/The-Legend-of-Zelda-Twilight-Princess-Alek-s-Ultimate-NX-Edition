@@ -82,6 +82,11 @@ public:
     virtual std::uint64_t size() const = 0;
 
     virtual Format format() const = 0;
+
+    /// aleks2 (rc17): a container that stores Wii partition data already decrypted and hash-free (RVZ, WIA)
+    /// returns that data for the partition whose data starts at disc offset `dataStart`. Null otherwise (with
+    /// `error` set only if the container does store partitions but this one failed).
+    virtual std::unique_ptr<Container> stored_wii_partition(std::uint64_t dataStart, std::string& error);
 };
 
 /// Sniffs the container from the first bytes of the stream. Never reads more
@@ -95,5 +100,31 @@ struct OpenResult {
 };
 
 OpenResult open(const RawStream& stream);
+
+// ------------------------------------------------------------------ Wii --
+//
+// aleks2 (rc17): Wii discs. A Wii disc is a table of partitions; the game lives in the DATA partition, which on
+// the disc is encrypted per 0x8000-byte cluster (0x400 bytes of hashes, then 0x7C00 of data). What the game needs
+// is that partition's data with the hashes taken out: the same flat layout a GameCube disc has (boot.bin at 0,
+// bi2 at 0x440, the apploader at 0x2440), except that its DOL/FST offsets and the FST's file offsets are stored
+// divided by 4. That decrypted, hash-free view is what this returns, as an ordinary Container.
+//
+//   .iso      decrypted here, cluster by cluster, with a cache of decrypted clusters. The partition's title key
+//             is encrypted with the Wii common key, which only the player has (wii_crypto.hpp).
+//   .rvz/.wia store the partition already decrypted and hash-free, with the title key in the clear: no key is
+//             needed, and nothing is decrypted.
+//   WBFS/CISO stay unsupported.
+
+/// The disc header says Wii (0x5D1C9EA3 at 0x18).
+bool is_wii_disc(Container& disc);
+
+struct WiiKeys {
+    bool hasCommonKey = false;
+    std::uint8_t commonKey[16] = {};
+};
+
+/// The DATA partition of a Wii disc, decrypted and without hashes; offset 0 is the partition's boot.bin. Null with
+/// a sentence in `error` when it cannot be opened. The result reads through `disc`, which must outlive it.
+std::unique_ptr<Container> open_wii_data_partition(Container& disc, const WiiKeys& keys, std::string& error);
 
 }  // namespace dusk::sw::disc

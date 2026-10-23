@@ -49,7 +49,9 @@ size_t choose_package(std::span<const PackageRank> ranks, bool preferSwitch, Pac
 bool refuses_non_switch_update(
     const PackageLibraries& incoming, std::span<const PackageLibraries> existing, bool preferSwitch);
 
+// V1-rc5: says what to do. Only a Switch copy at least as new refuses (loader.cpp install_staged).
 inline constexpr std::string_view k_nonSwitchUpdateMessage =
-    "This update has no switch-arm64 library; the compatible Switch version was kept.";
+    "A Switch build of this mod at least as new is installed, so this Linux build was not installed. Keep the "
+    "Switch build; to restore it, copy it from the release zip into sdmc:/switch/dusklight/mods/.";
 
 }  // namespace dusk::mods

@@ -1074,7 +1074,17 @@ void ControllerConfigWindow::poll_pending_binding() {
     }
 
     if (mPendingButtonMapping != nullptr) {
-        const s32 nativeButton = PADGetNativeButtonPressed(mPendingPort);
+        s32 nativeButton = PADGetNativeButtonPressed(mPendingPort);
+        if (nativeButton == -1) {
+            // V1: a trigger that is only an axis (a GameCube adapter's L/R; the Switch's own also report as
+            // buttons, MISC1..4) can still drive a digital action, as PAD_NATIVE_TRIGGER_* (pad.h, SwitchWaker).
+            const PADSignedNativeAxis axis = PADGetNativeAxisPulled(mPendingPort);
+            if (axis.nativeAxis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
+                nativeButton = static_cast<s32>(PAD_NATIVE_TRIGGER_LEFT);
+            } else if (axis.nativeAxis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+                nativeButton = static_cast<s32>(PAD_NATIVE_TRIGGER_RIGHT);
+            }
+        }
         if (nativeButton != -1) {
             const int completedPort = mPendingPort;
             if (mPendingButtonMapping->nativeButton == static_cast<u32>(nativeButton) &&
@@ -1239,6 +1249,15 @@ void ControllerConfigWindow::stop_rumble_test() {
 Rml::String native_button_name(SDL_Gamepad* gamepad, u32 buttonUntyped) {
     if (buttonUntyped == PAD_NATIVE_BUTTON_INVALID) {
         return "Not Bound";
+    }
+    // V1: a trigger axis bound as a button (PAD_NATIVE_TRIGGER_*, pad.h).
+    if (buttonUntyped == PAD_NATIVE_TRIGGER_LEFT || buttonUntyped == PAD_NATIVE_TRIGGER_RIGHT) {
+        const bool left = buttonUntyped == PAD_NATIVE_TRIGGER_LEFT;
+#ifdef __SWITCH__
+        return left ? "L" : "R";  // platforms/switch/sdl: the Switch's L/R are the triggers
+#else
+        return left ? "Left Trigger" : "Right Trigger";
+#endif
     }
 #ifdef __SWITCH__
     // The Switch joystick driver offers the four shoulder buttons a second time as

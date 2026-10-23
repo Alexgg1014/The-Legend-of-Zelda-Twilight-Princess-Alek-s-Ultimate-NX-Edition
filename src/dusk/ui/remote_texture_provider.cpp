@@ -1,3 +1,4 @@
+#include <cstring>
 #include "remote_texture_provider.hpp"
 
 #include <fmt/format.h>
@@ -102,8 +103,21 @@ struct InFlight {
     borealis::Task<ri::FetchOutcome> task;
 };
 
+// V1-rc5: on the Switch, two images at a time (the console has 4 BSD sessions, shared with the catalog,
+// the update check and downloads) and three tries each.
+ri::Limits provider_limits() {
+    ri::Limits limits;
+#ifdef __SWITCH__
+    limits.maxPending = 2;
+    limits.maxReadyBytes = 32u * 1024 * 1024;  // a tester's rc4 ran out of memory after browsing (bad_alloc)
+#endif
+    limits.maxAttempts = 3;
+    return limits;
+}
+
 struct ProviderState {
-    ri::Cache cache;
+    ri::Cache cache{provider_limits()};
+    Clock::time_point epoch = Clock::now();
     std::unordered_map<std::string, InFlight> inFlight;
     RemoteImageTelemetry telemetry;
     std::optional<Clock::time_point> lastUpdate;
@@ -141,20 +155,31 @@ ri::FetchOutcome finish_fetch(const std::string& source, uint32_t maxDimension,
     }
     if (result.error != borealis::http::Error::None) {
         outcome.kind = ri::FetchOutcome::Kind::NetworkError;
-        outcome.message = result.message;
+        outcome.message = fmt::format("network error {}: {}", static_cast<int>(result.error), result.message);
         return outcome;
     }
     if (result.response.statusCode != 200) {
         outcome.kind = ri::FetchOutcome::Kind::HttpError;
+        outcome.httpStatus = static_cast<int>(result.response.statusCode);
         outcome.message = fmt::format("HTTP {}", result.response.statusCode);
         return outcome;
     }
     outcome.bodyBytes = result.response.body.size();
     const auto decodeStart = Clock::now();
     const auto* data = reinterpret_cast<const uint8_t*>(result.response.body.data());
+    // V1-rc5: an error page or a cut body is told apart from a PNG libpng cannot read.
+    static constexpr uint8_t kPngSignature[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    if (result.response.body.size() < sizeof kPngSignature ||
+        std::memcmp(data, kPngSignature, sizeof kPngSignature) != 0)
+    {
+        outcome.kind = ri::FetchOutcome::Kind::DecodeError;
+        outcome.message = fmt::format("not a PNG ({} bytes)", result.response.body.size());
+        return outcome;
+    }
     auto decoded = decode_png(std::span{data, result.response.body.size()}, source);
     if (!decoded) {
         outcome.kind = ri::FetchOutcome::Kind::DecodeError;
+        outcome.message = fmt::format("PNG decode failed ({} bytes)", result.response.body.size());
         outcome.decodeMs = ms_since(decodeStart);
         return outcome;
     }
@@ -300,14 +325,18 @@ void update_remote_texture_provider() noexcept {
         const std::string source = it->first;
         const uint64_t ticket = it->second.ticket;
         it = state.inFlight.erase(it);
-        if (outcome.kind == ri::FetchOutcome::Kind::NetworkError ||
-            outcome.kind == ri::FetchOutcome::Kind::HttpError)
-        {
-            Log.warn("Failed to fetch image '{}': {}", source, outcome.message);
-        }
-        if (state.cache.complete(source, ticket, std::move(outcome)) ==
-            ri::Cache::Completion::Rejected)
-        {
+        const std::string cause = outcome.message;
+        const auto bytes = outcome.bodyBytes;
+        const double networkMs = outcome.networkMs;
+        const auto completion = state.cache.complete(source, ticket, std::move(outcome));
+        const auto attempts = state.cache.attempts_of(source);
+        if (completion == ri::Cache::Completion::Retry) {
+            Log.debug("Image '{}' attempt {} failed ({}); trying again", source, attempts, cause);
+        } else if (completion == ri::Cache::Completion::Failed) {
+            // V1-rc5: one line per image that will not show, with why.
+            Log.warn("Image failed: '{}' cause={} attempts={} bytes={} net_ms={:.0f}", source,
+                cause.empty() ? "invalid image" : cause, attempts, bytes, networkMs);
+        } else if (completion == ri::Cache::Completion::Rejected) {
             Log.warn("Image '{}' exceeds the decoded image cache budget", source);
         }
     }
@@ -315,7 +344,8 @@ void update_remote_texture_provider() noexcept {
     // 2. Requests nobody wants any more (a page that was left, a closed browser).
     apply_cancels(state);
 
-    // 3. New requests, visible first, within the concurrency limit.
+    // 3. New requests, visible first, within the concurrency limit (retries when their time comes).
+    state.cache.set_now(std::chrono::duration<double>(Clock::now() - state.epoch).count());
     for (const auto& request : state.cache.take_starts()) {
         try {
             state.inFlight[request.source] = InFlight{
@@ -351,6 +381,10 @@ void update_remote_texture_provider() noexcept {
     release_sources(state);
 
     telemetry.updateMsMax = std::max(telemetry.updateMsMax, ms_since(start));
+}
+
+bool remote_image_failed(std::string_view source) noexcept {
+    return provider_state().cache.state_of(source) == ri::State::Failed;
 }
 
 uint64_t new_remote_image_owner() noexcept {
@@ -408,6 +442,7 @@ void set_remote_image_hints(
 void clear_remote_image_hints(uint64_t) noexcept {}
 RemoteImageTelemetry remote_image_telemetry() noexcept { return {}; }
 RemoteImageTelemetry begin_remote_image_telemetry() noexcept { return {}; }
+bool remote_image_failed(std::string_view) noexcept { return false; }
 
 }  // namespace dusk::ui
 

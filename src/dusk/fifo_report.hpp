@@ -23,6 +23,7 @@ struct Snapshot {
     AuroraUniformStats uniforms{};
     AuroraFrameWaitStats waits{};
     AuroraUniformReuseMode mode = AURORA_UNIFORM_REUSE_OFF;
+    AuroraRenderCpuStats render{};  // aleks2 (deko3d P1)
 };
 
 // Reads Aurora now. Inline so that the host tests, which never call it, need no Aurora.
@@ -32,6 +33,7 @@ inline Snapshot read_now() {
     aurora_gx_uniform_stats(&s.uniforms);
     aurora_gfx_frame_wait_stats(&s.waits);
     s.mode = aurora_gx_get_uniform_reuse_mode();
+    aurora_gfx_render_cpu_stats(&s.render);
     return s;
 }
 
@@ -75,6 +77,13 @@ struct Window {
     double stagingWaitMs = 0.0;
     std::uint64_t renderItems = 0;
     double renderWorkMs = 0.0;
+    // aleks2 (deko3d P1): the render worker's thread CPU, the draws it encoded, deko3d's GPU time
+    bool deko3d = false;
+    double renderCpuMs = 0.0;
+    std::uint64_t encodedFrames = 0;
+    std::uint64_t encodedDraws = 0;
+    double dkGpuMs = 0.0;
+    std::uint64_t dkGpuFrames = 0;
 };
 
 Window window(const Snapshot& start, const Snapshot& end, std::uint64_t frames);

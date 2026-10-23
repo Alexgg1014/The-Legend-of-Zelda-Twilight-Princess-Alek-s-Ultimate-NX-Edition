@@ -2120,7 +2120,7 @@ static DUSK_NOINLINE void small_damage(e_mf_class* i_this) {
     i_this->field_0x6ec = i_this->mAtInfo.mHitDirection.y;
 }
 
-static void damage_check(e_mf_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_mf_class* i_this) {
     fopEn_enemy_c* a_this = (fopEn_enemy_c*)&i_this->actor;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
 

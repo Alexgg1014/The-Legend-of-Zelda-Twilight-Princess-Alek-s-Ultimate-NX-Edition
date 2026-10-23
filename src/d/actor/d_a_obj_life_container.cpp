@@ -469,7 +469,7 @@ int daObjLife_c::actionWait2() {
     return 1;
 }
 
-void daObjLife_c::calcScale() {
+DUSK_NOINLINE void daObjLife_c::calcScale() {
     cLib_chaseF(&field_0x954, 1.0f, 0.2f);
     if (field_0x954 == 1.0f) {
         cLib_chaseF(&field_0x94c, 0.0f, 0.05f);

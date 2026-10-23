@@ -584,7 +584,7 @@ const ResTIMG* msgIconTimg(int idx) {
     if (idx < 0 || idx >= MSG_ICON_MAX) {
         return NULL;
     }
-    const char* bti = COutFont_c::getBtiName(idx);
+    const char* bti = COutFont_c::btiName(idx);
     if (bti == NULL || bti[0] == 0) {
         return NULL;
     }

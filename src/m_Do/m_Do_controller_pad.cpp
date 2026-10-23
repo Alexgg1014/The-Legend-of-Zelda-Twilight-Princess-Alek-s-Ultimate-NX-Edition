@@ -12,6 +12,7 @@
 #include "m_Do/m_Do_main.h"
 #ifdef __SWITCH__
 #include "dusk/benchmark.hpp"
+#include "dusk/director.hpp"
 #endif
 
 #if TARGET_PC
@@ -183,6 +184,7 @@ void mDoCPd_c::read() {
 #ifdef __SWITCH__
     // aleks2 (H28): last, so it sees every source -- pad, touch, companion.
     dusk::benchmark::filter_pad(m_cpadInfo, 4);
+    dusk::director::filter_pad(m_cpadInfo, 4);
 #endif
 }
 

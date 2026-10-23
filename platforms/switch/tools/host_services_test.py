@@ -118,7 +118,7 @@ class Services(unittest.TestCase):
         self.assertEqual(self.check([imp("file")]), [])
 
     def test_required_unavailable_blocks(self):
-        problems = self.check([imp("websocket")])
+        problems = self.check([imp("websocket")], unavailable=frozenset(hs.OFF_BUILD_UNAVAILABLE))
         self.assertEqual(len(problems), 1)
         self.assertTrue(problems[0]["blocking"])
         self.assertEqual(problems[0]["status"], "unavailable")
@@ -126,7 +126,8 @@ class Services(unittest.TestCase):
                          f"Mod requires a service that is unavailable (missing: {P}websocket)")
 
     def test_optional_unavailable_does_not_block(self):
-        problems = self.check([imp("websocket", optional=True), imp("net", optional=True)])
+        problems = self.check([imp("websocket", optional=True), imp("net", optional=True)],
+                              unavailable=frozenset(hs.OFF_BUILD_UNAVAILABLE))
         self.assertEqual(len(problems), 2)
         self.assertFalse(any(p["blocking"] for p in problems))
         self.assertEqual(hs.first_blocking(problems), "")
@@ -158,11 +159,19 @@ class Services(unittest.TestCase):
         self.assertEqual(self.check([imp("com.kite.kh2hud.drive"), imp("org.example.thing", 2, 3, True)]), [])
 
     def test_several_problems_count_the_rest(self):
-        line = hs.first_blocking(self.check([imp("net"), imp("websocket")]))
+        line = hs.first_blocking(self.check([imp("net"), imp("websocket")], unavailable=frozenset(hs.OFF_BUILD_UNAVAILABLE)))
         self.assertTrue(line.endswith("(and 1 more service problem(s))"), line)
 
+    def test_dm3_net_and_websocket_are_offered(self):
+        self.assertEqual(self.check([imp("net"), imp("websocket")]), [])
+        for suffix, source in hs.SWITCH_TRANSPORTS.items():
+            text = (ROOT / source).read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"bool\s+(available|backend_available)\(\)\s+noexcept\s*\{\s*return\s+false;\s*\}",
+                                f"{source} says the {suffix} service is unavailable")
+            self.assertIn("dusk::switchnet::available()", text, f"{source} does not ask the sockets service")
+
     def test_unavailable_list_matches_the_platform_sources(self):
-        for suffix, source in hs.UNAVAILABLE_ON_SWITCH.items():
+        for suffix, source in {**hs.UNAVAILABLE_ON_SWITCH, **hs.OFF_BUILD_UNAVAILABLE}.items():
             text = (ROOT / source).read_text(encoding="utf-8")
             self.assertRegex(text, r"bool\s+available\(\)\s+noexcept\s*\{\s*return\s+false;\s*\}",
                              f"{source} no longer says the {suffix} service is unavailable")

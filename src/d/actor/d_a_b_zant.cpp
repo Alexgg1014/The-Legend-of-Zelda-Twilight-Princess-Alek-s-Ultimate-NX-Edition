@@ -329,7 +329,7 @@ void daB_ZANT_c::setActionMode(int i_action, int i_mode) {
     mMode = i_mode;
 }
 
-bool daB_ZANT_c::checkBigDamage() {
+DUSK_NOINLINE bool daB_ZANT_c::checkBigDamage() {
     daPy_py_c* player = daPy_getPlayerActorClass();
     BOOL taken_big_dmg = false;
 
@@ -346,7 +346,7 @@ bool daB_ZANT_c::checkBigDamage() {
     return taken_big_dmg;
 }
 
-int daB_ZANT_c::checkDamageType() {
+DUSK_NOINLINE int daB_ZANT_c::checkDamageType() {
     if (mAtInfo.mpCollider->ChkAtType(AT_TYPE_HOOKSHOT) && mFightPhase == PHASE_OI) {
         return DMGTYPE_HOOK_OI;
     }

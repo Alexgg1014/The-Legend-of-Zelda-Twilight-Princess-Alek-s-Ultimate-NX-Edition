@@ -68,7 +68,7 @@ assert set(build["switch-devkitA64-release-h36"]["targets"]) == {"dusklight", "d
 # The other presets carry no mod set of their own: the H36 set is opt-in.
 for name in ("switch-devkitA64-release", "switch-devkitA64-debug"):
     assert "ALEKS2_STATIC_MODS" not in configure[name].get("cacheVariables", {}), name
-doc = (root / "docs/switch-h36-mod-platform.md").read_text()
+doc = (root / "docs/dev/building-switch.md").read_text()
 assert "--preset switch-devkitA64-release-h36" in doc
 assert '"cosmetics;luau_runtime;rollandsprint"' in doc
 print("ok   H36 preset: cosmetics;luau_runtime;rollandsprint, without template_mod/flow_demo/randomizer")

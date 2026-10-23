@@ -570,7 +570,7 @@ bool dMenuMapCommon_c::setIconInfo(u8 i_iconNo, f32 i_posX, f32 i_posY, f32 i_al
     return true;
 }
 
-void dMenuMapCommon_c::clearIconInfo() {
+DUSK_NOINLINE void dMenuMapCommon_c::clearIconInfo() {
     mIconNum = 0;
     for (int i = 0; i < 128; i++) {
         mIconInfo[i].pos_x = 0.0f;

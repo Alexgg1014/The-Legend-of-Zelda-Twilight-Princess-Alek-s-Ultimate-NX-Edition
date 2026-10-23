@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -349,8 +350,10 @@ bool atomic_replace(const std::filesystem::path& source, const std::filesystem::
   }
 
   std::error_code ec;
-  if (std::filesystem::exists(destination, ec) && !std::filesystem::remove(destination, ec)) {
-    error = describe("Failed to remove the file being replaced", ec ? ec.value() : first);
+  if (std::filesystem::exists(destination, ec) && ::remove(to.c_str()) != 0) {
+    // V1-rc19: the delete's own errno (rc18 reported the rename's EEXIST). An open file is refused by Horizon.
+    const int removeErrno = errno;
+    error = describe("Failed to remove the file being replaced (open?)", removeErrno != 0 ? removeErrno : first);
     return false;
   }
   if (::rename(from.c_str(), to.c_str()) == 0) {

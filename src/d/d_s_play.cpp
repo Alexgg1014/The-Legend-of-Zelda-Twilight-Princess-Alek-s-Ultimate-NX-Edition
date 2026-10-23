@@ -24,6 +24,9 @@
 #include "f_op/f_op_overlap_mng.h"
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_graphic.h"
+#ifdef __SWITCH__
+#include "dusk/shader_warmup_runtime.hpp"
+#endif
 #include "m_Do/m_Do_machine.h"
 #include "d/actor/d_a_suspend.h"
 #include "d/actor/d_a_ykgr.h"
@@ -141,7 +144,7 @@ void dScnPly_preLoad_HIO_c::genMessage(JORMContext* mctx) {
 }
 #endif
 
-s8 dScnPly_c::calcPauseTimer() {
+DUSK_NOINLINE s8 dScnPly_c::calcPauseTimer() {
     if (nextPauseTimer != 0) {
         pauseTimer = nextPauseTimer;
         nextPauseTimer = 0;
@@ -1096,6 +1099,12 @@ void dScnPly_c::offReset() {
     }
 }
 
+#ifdef TARGET_PC
+void dScnPly_c::setPauseTimer(s8 time) {
+    nextPauseTimer = time;
+}
+#endif
+
 static int phase_00(dScnPly_c* i_this) {
     if (!i_this->resetGame()) {
         return cPhs_INIT_e;
@@ -1632,6 +1641,14 @@ static int phase_6(dScnPly_c* i_this) {
     return cPhs_NEXT_e;
 }
 
+#ifdef __SWITCH__
+// aleks2 (V1-rc7): the stage is built; while the screen is still black, wait (up to game.shaderSceneWaitMs) for its
+// shaders, so the compile hitch happens in the loading screen and not in the first second of play.
+static int phase_shader_wait(dScnPly_c*) {
+    return dusk::shader_warmup::scene_shaders_pending() ? cPhs_INIT_e : cPhs_NEXT_e;
+}
+#endif
+
 static int phase_compleate(void* i_this) {
     return cPhs_COMPLEATE_e;
 }
@@ -1648,6 +1665,9 @@ static int dScnPly_Create(scene_class* i_this) {
         (request_of_phase_process_fn)phase_4,
         (request_of_phase_process_fn)phase_5,
         (request_of_phase_process_fn)phase_6,
+#ifdef __SWITCH__
+        (request_of_phase_process_fn)phase_shader_wait,
+#endif
         (request_of_phase_process_fn)phase_compleate,
     };
 

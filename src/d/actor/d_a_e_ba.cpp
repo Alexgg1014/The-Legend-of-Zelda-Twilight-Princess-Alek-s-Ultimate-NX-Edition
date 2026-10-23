@@ -113,7 +113,7 @@ static BOOL pl_check(e_ba_class* i_this, f32 i_maxDistance, s16 i_maxAngle) {
     return false;
 }
 
-static void damage_check(e_ba_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_ba_class* i_this) {
     fopEn_enemy_c* a_this = &i_this->mEnemy;
     daPy_py_c* player = static_cast<daPy_py_c*>(dComIfGp_getPlayer(0));
     if (i_this->mIFrames == 0) {

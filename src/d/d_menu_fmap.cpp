@@ -2813,7 +2813,7 @@ void dMenu_Fmap_c::drawSnowmanIcon() {
     drawIcon(0xe, 0xa);
 }
 
-void dMenu_Fmap_c::drawGoldWolfIcon() {
+DUSK_NOINLINE void dMenu_Fmap_c::drawGoldWolfIcon() {
     drawIcon(6, 0xb);
 }
 
@@ -3066,6 +3066,15 @@ void dMenu_Fmap_c::yamibossArrowPosInit() {
 void dMenu_Fmap_c::howlArrowPosInit() {
     u8 type = dMeter2Info_getGoldWolfMapType();
     static DUSK_CONST char* stage_name[6] = {"F_SP104", "F_SP122", "F_SP122", "F_SP124", "F_SP111", "F_SP116"};
+#if TARGET_PC
+    // aleks2 (V1-rc7): the howl map with no golden wolf type (2..7) indexed before the table: a tester's console
+    // read a stray pointer as a 14-character stage name and stopped. Nothing to mark then.
+    if (type < 2 || type > 7) {
+        OSReport("dMenu_Fmap_c::howlArrowPosInit: golden wolf map type %u is outside 2..7; no marker\n", type);
+        mMarkedStageName[0] = '\0';
+        return;
+    }
+#endif
     SAFE_STRCPY(mMarkedStageName, stage_name[type - 2]);
     static const int i_swBit[6] = {0x41, 0x29, 0x2a, 0x32, 0x79, 0x32};
     f32 icon_x, icon_z;
@@ -3075,7 +3084,7 @@ void dMenu_Fmap_c::howlArrowPosInit() {
     }
 }
 
-u8 dMenu_Fmap_c::getHowlRegionID() {
+DUSK_NOINLINE u8 dMenu_Fmap_c::getHowlRegionID() {
     switch (dMeter2Info_getGoldWolfMapType()) {
     case 2:
         return 1;

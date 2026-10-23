@@ -430,7 +430,18 @@ void dRenderingMap_c::makeResTIMG(ResTIMG* p_image, u16 width, u16 height, u8* p
     p_image->imageOffset = p_data - (u8*)p_image;
 }
 
+#if TARGET_PC
+// aleks2 (rc9, minimap_pan): set by d_map.cpp while the panned minimap is on. Returns
+// true when it rendered `map` itself (only the minimap's own instance).
+bool (*g_dMapPanRender)(dRenderingMap_c* map) = nullptr;
+#endif
+
 void dRenderingMap_c::renderingMap() {
+#if TARGET_PC
+    if (g_dMapPanRender != nullptr && g_dMapPanRender(this)) {
+        return;
+    }
+#endif
     preRenderingMap();
     if (isDrawPath()) {
         preDrawPath();

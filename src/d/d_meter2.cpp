@@ -359,7 +359,7 @@ int dMeter2_c::_execute() {
     return 1;
 }
 
-int dMeter2_c::_draw() {
+DUSK_NOINLINE int dMeter2_c::_draw() {
     #if TARGET_PC
     // Companion dungeon-map render pass (self-gated; same drawlist stage as
     // the minimap render below). Runs before the HUD-suppression early-out
@@ -1292,7 +1292,7 @@ void dMeter2_c::moveRupee() {
     alphaAnimeRupee();
 }
 
-void dMeter2_c::moveKey() {
+DUSK_NOINLINE void dMeter2_c::moveKey() {  // aleks2 (rc17): a catalog hook target (dusklight_online), inlined by the PGO build
     s16 var_r5;
     bool draw_key;
 
@@ -1821,7 +1821,7 @@ void dMeter2_c::moveButtonR() {
     }
 }
 
-void dMeter2_c::moveButtonZ() {
+DUSK_NOINLINE void dMeter2_c::moveButtonZ() {  // aleks2 (rc17): a catalog hook target (albw), inlined by the PGO build
     bool draw_buttonZ = false;
 
     if (field_0x324 != g_drawHIO.mButtonZScale) {
@@ -2288,7 +2288,7 @@ void dMeter2_c::moveButtonXY() {
     dMeter2Info_resetDirectUseItem();
 }
 
-void dMeter2_c::moveButtonCross() {
+DUSK_NOINLINE void dMeter2_c::moveButtonCross() {  // aleks2 (rc17): a catalog hook target (albw, dawnlight), inlined by the PGO build
     f32 temp_f1;
     f32 temp_f30;
     f32 temp_f31;
@@ -2344,6 +2344,10 @@ void dMeter2_c::moveButtonCross() {
         bool mapInside = mpMap->isDispPosInsideFlg();
 #if TARGET_PC
         if (dusk::dualscreen::mainHudRestored()) {
+            mapInside = false;
+        }
+        // aleks2 (V1-rc11): Settings > Minimap off draws no corner map either: the d-pad takes its place.
+        if (!dusk::getSettings().game.showMinimap) {
             mapInside = false;
         }
 #endif
@@ -2799,7 +2803,7 @@ void dMeter2_c::moveBombNum() {
     }
 }
 
-void dMeter2_c::moveBottleNum() {
+DUSK_NOINLINE void dMeter2_c::moveBottleNum() {  // aleks2 (rc17): a catalog hook target (albw), inlined by the PGO build
     for (int i = 0; i < 4; i++) {
         if (dComIfGs_getItem((u8)(i + SLOT_11), true) == dItemNo_BEE_CHILD_e) {
             if (mBottleNum[i] != dComIfGs_getBottleNum(i)) {
@@ -2901,7 +2905,7 @@ void dMeter2_c::moveArrowNum() {
     }
 }
 
-void dMeter2_c::movePachinkoNum() {
+DUSK_NOINLINE void dMeter2_c::movePachinkoNum() {  // aleks2 (rc17): a catalog hook target (custom_capacities), inlined by the PGO build
     if (g_mwHIO.getPachinkoFlag()) {
         if (dComIfGs_getPachinkoNum() != dComIfGs_getPachinkoMax()) {
             u8 max = dComIfGs_getPachinkoMax();
@@ -2981,7 +2985,7 @@ void dMeter2_c::alphaAnimeLife() {
     mpMeterDraw->setAlphaLifeChange(false);
 }
 
-void dMeter2_c::alphaAnimeKantera() {
+DUSK_NOINLINE void dMeter2_c::alphaAnimeKantera() {  // aleks2 (rc17): a catalog hook target (albw, unrestricted_items), inlined by the PGO build
     if (dComIfGs_getMaxOil() == 0 || dComIfGs_getItem(SLOT_1, true) != dItemNo_KANTERA_e ||
         !daPy_getPlayerActorClass()->checkUseKandelaar(0) || (mStatus & 0x4000) ||
         ((mStatus & 0x40) && dComIfGp_event_checkHind(0x400)) || dComIfGp_getOxygenShowFlag() ||

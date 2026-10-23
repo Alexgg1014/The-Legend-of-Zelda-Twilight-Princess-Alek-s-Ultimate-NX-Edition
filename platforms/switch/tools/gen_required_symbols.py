@@ -48,9 +48,15 @@ def requirements(mod_id: str, path: pathlib.Path, symgen: str) -> tuple:
             name = versioned.split("@")[0]
             if name in weak or name in elf_audit.LOADER_SHIMS:
                 continue
+            # DM2-d: what this image's loader supplies to Linux modules itself is not a requirement either.
+            if elf_audit.library_platform(label) == "linux-aarch64" and elf_audit.image_shim(name):
+                continue
             if elf_audit.matches(name, elf_audit.DENIED):
                 denied.append(name)
                 continue
+            # DM2-b: what the NRO must export is the game's spelling of the name (the loader looks it up so).
+            if elf_audit.library_platform(label) == "linux-aarch64":
+                name = elf_audit.newlib_spelling(name)
             lines.append((mod_id, "import", GROUPS[group], name))
     with tempfile.TemporaryDirectory() as tmp:
         lib = pathlib.Path(tmp) / "mod.so"

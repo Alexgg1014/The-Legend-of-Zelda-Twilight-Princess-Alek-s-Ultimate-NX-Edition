@@ -41,6 +41,7 @@ bool g_meter2ItemUsable[4] = {true, true, true, true};
 #include "d/d_meter2.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "dusk/game_access.h"
 
@@ -800,54 +801,87 @@ void dMeter2Draw_c::draw() {
     // stomped: re-apply whenever the pane is not where we last put it,
     // using the game's fresh position as the base. move() is absolute, so
     // this is idempotent — an untouched pane is never moved twice.
-    if (mpUzu != NULL && mpUzu->getPanePtr() != NULL) {
-        static f32 sUzuSetX = -99999.0f;
-        static f32 sUzuSetY = 0.0f;
+    // V1-rc1: the shift is measured, not fixed. It used to be (+42, -50), tuned on one screen shape;
+    // in Flip Grip and on wide PC windows the 2D layout scales differently and the swirl landed off
+    // the buttons. Now: the centre of the A/B pair's global bounds minus the swirl's own centre
+    // (both from the last frame's draw), converted to the pane's parent units by its own
+    // local/global size ratio. The vessel gets the same on-screen shift in its units.
+    struct Carried {
+        f32 setX = -99999.0f, setY = 0.0f;  // where we last put the pane (parent units)
+        f32 dx = 0.0f, dy = 0.0f;           // the shift applied there (parent units)
+    };
+    static Carried sUzu, sVessel;
+    const bool carryCluster = mainHudRestored && !dComIfGp_event_runCheck() && !getCameraSubject() &&
+        !getItemSubject() && !getPlayerSubject();
+    // Global shift from the swirl to the A/B pair, with the swirl at its game position.
+    f32 shiftX = 0.0f, shiftY = 0.0f;
+    bool haveShift = false;
+    if (carryCluster && mpUzu != NULL && mpUzu->getPanePtr() != NULL && mpButtonA != NULL &&
+        mpButtonB != NULL && mpButtonA->getPanePtr() != NULL && mpButtonB->getPanePtr() != NULL)
+    {
         J2DPane* uzuPane = mpUzu->getPanePtr();
-        const JGeometry::TBox2<f32>& ub = uzuPane->getBounds();
-        const bool carryUzu = mainHudRestored && !dComIfGp_event_runCheck() &&
-            !getCameraSubject() && !getItemSubject() && !getPlayerSubject();
-        if (carryUzu) {
-            if (ub.i.x != sUzuSetX || ub.i.y != sUzuSetY) {
-                uzuPane->move(ub.i.x + 42.0f, ub.i.y - 50.0f);
-                const JGeometry::TBox2<f32>& nb = uzuPane->getBounds();
-                sUzuSetX = nb.i.x;
-                sUzuSetY = nb.i.y;
-            }
-        } else {
-            // Leaving 3DS Style: put the swirl back once if it still sits
-            // where we left it; the game's own writes stand otherwise.
-            if (ub.i.x == sUzuSetX && ub.i.y == sUzuSetY && sUzuSetX > -99998.0f) {
-                uzuPane->move(ub.i.x - 42.0f, ub.i.y + 50.0f);
-            }
-            sUzuSetX = -99999.0f;
+        const JGeometry::TBox2<f32>& ga = mpButtonA->getPanePtr()->getGlbBounds();
+        const JGeometry::TBox2<f32>& gb = mpButtonB->getPanePtr()->getGlbBounds();
+        const JGeometry::TBox2<f32>& gu = uzuPane->getGlbBounds();
+        const JGeometry::TBox2<f32>& lu = uzuPane->getBounds();
+        if (ga.getWidth() > 0.0f && gb.getWidth() > 0.0f && gu.getWidth() > 0.0f && gu.getHeight() > 0.0f) {
+            const f32 sx = lu.getWidth() / gu.getWidth();
+            const f32 sy = lu.getHeight() / gu.getHeight();
+            const bool atOurSpot = lu.i.x == sUzu.setX && lu.i.y == sUzu.setY;
+            // The last draw saw the swirl with our shift (if it is still where we put it).
+            const f32 baseX = (gu.i.x + gu.f.x) * 0.5f - (atOurSpot && sx != 0.0f ? sUzu.dx / sx : 0.0f);
+            const f32 baseY = (gu.i.y + gu.f.y) * 0.5f - (atOurSpot && sy != 0.0f ? sUzu.dy / sy : 0.0f);
+            const f32 pairX = (std::min(ga.i.x, gb.i.x) + std::max(ga.f.x, gb.f.x)) * 0.5f;
+            const f32 pairY = (std::min(ga.i.y, gb.i.y) + std::max(ga.f.y, gb.f.y)) * 0.5f;
+            shiftX = pairX - baseX;
+            shiftY = pairY - baseY;
+            haveShift = true;
         }
     }
-    // 3DS Style: the Vessel of Light rides the SAME shift as the uzu
-    // ornament, so the whole relocated cluster stays together. Moving the
-    // vessel's parent carries its tears and glow with it. Idempotent
-    // re-apply / restore, exactly as above.
-    if (mpLightDropParent != NULL && mpLightDropParent->getPanePtr() != NULL) {
-        static f32 sVesselSetX = -99999.0f;
-        static f32 sVesselSetY = 0.0f;
-        J2DPane* vesselPane = mpLightDropParent->getPanePtr();
-        const JGeometry::TBox2<f32>& vb = vesselPane->getBounds();
-        const bool carryVessel = mainHudRestored && !dComIfGp_event_runCheck() &&
-            !getCameraSubject() && !getItemSubject() && !getPlayerSubject();
-        if (carryVessel) {
-            if (vb.i.x != sVesselSetX || vb.i.y != sVesselSetY) {
-                vesselPane->move(vb.i.x + 42.0f, vb.i.y - 50.0f);
-                const JGeometry::TBox2<f32>& nv = vesselPane->getBounds();
-                sVesselSetX = nv.i.x;
-                sVesselSetY = nv.i.y;
-            }
-        } else {
-            if (vb.i.x == sVesselSetX && vb.i.y == sVesselSetY && sVesselSetX > -99998.0f) {
-                vesselPane->move(vb.i.x - 42.0f, vb.i.y + 50.0f);
-            }
-            sVesselSetX = -99999.0f;
+    // Idempotent re-apply / restore. The screen animation re-asserts the panes' blo transforms at
+    // its own times, so: a pane not where we left it is at the game's position again (shift 0).
+    // move() is absolute.
+    const auto carry = [&](CPaneMgrAlpha* mgr, Carried& st) {
+        if (mgr == NULL || mgr->getPanePtr() == NULL) {
+            return;
         }
-    }
+        J2DPane* pane = mgr->getPanePtr();
+        const JGeometry::TBox2<f32>& lb = pane->getBounds();
+        const bool atOurSpot = lb.i.x == st.setX && lb.i.y == st.setY && st.setX > -99998.0f;
+        const f32 appliedX = atOurSpot ? st.dx : 0.0f;
+        const f32 appliedY = atOurSpot ? st.dy : 0.0f;
+        if (carryCluster) {
+            if (!haveShift) {
+                return;  // no geometry yet (first frame): try again on the next one
+            }
+            const JGeometry::TBox2<f32>& gl = pane->getGlbBounds();
+            if (gl.getWidth() <= 0.0f || gl.getHeight() <= 0.0f) {
+                return;
+            }
+            const f32 wantX = shiftX * (lb.getWidth() / gl.getWidth());
+            const f32 wantY = shiftY * (lb.getHeight() / gl.getHeight());
+            if (atOurSpot && std::fabs(wantX - appliedX) < 0.5f && std::fabs(wantY - appliedY) < 0.5f) {
+                return;
+            }
+            pane->move(lb.i.x - appliedX + wantX, lb.i.y - appliedY + wantY);
+            const JGeometry::TBox2<f32>& nb = pane->getBounds();
+            st.setX = nb.i.x;
+            st.setY = nb.i.y;
+            st.dx = wantX;
+            st.dy = wantY;
+        } else {
+            // Leaving 3DS Style: put the pane back once if it still sits where we left it; the
+            // game's own writes stand otherwise.
+            if (atOurSpot) {
+                pane->move(lb.i.x - appliedX, lb.i.y - appliedY);
+            }
+            st = Carried{};
+        }
+    };
+    carry(mpUzu, sUzu);
+    // The Vessel of Light rides the same on-screen shift, so the relocated cluster stays together;
+    // moving the vessel's parent carries its tears and glow with it.
+    carry(mpLightDropParent, sVessel);
     // The touch overlay replaces the on-screen cluster, so it has the final
     // say — but only while the cluster is on this screen at all. In Cinematic
     // the pane partition above already hid it and must not be undone.
@@ -1639,7 +1673,7 @@ void dMeter2Draw_c::playOxygenBpkAnimation(J2DAnmColor* i_bpk) {
     }
 }
 
-void dMeter2Draw_c::drawPikari(CPaneMgr* i_pane, f32* i_framep, f32 i_scale,
+DUSK_NOINLINE void dMeter2Draw_c::drawPikari(CPaneMgr* i_pane, f32* i_framep, f32 i_scale,
                                JUtility::TColor i_moyaBlack, JUtility::TColor i_moyaWhite,
                                JUtility::TColor i_moyabsBlack, JUtility::TColor i_moyabsWhite,
                                f32 param_7, u8 param_8) {
@@ -1931,7 +1965,7 @@ void dMeter2Draw_c::setAlphaLifeAnimeMax() {
 #endif
 }
 
-void dMeter2Draw_c::drawKanteraScreen(u8 i_meterType) {
+DUSK_NOINLINE void dMeter2Draw_c::drawKanteraScreen(u8 i_meterType) {  // aleks2 (rc17): a catalog hook target (twilit_essentials, albw, dawnlight), inlined by the PGO build
     GX_AND_TRACY_SCOPED("drawKanteraScreen");
     J2DGrafContext* graf_ctx = dComIfGp_getCurrentGrafPort();
 
@@ -2061,7 +2095,7 @@ static f32 dummyLiteralOrder() {
     return 5.0f;
 }
 
-void dMeter2Draw_c::drawKantera(s32 i_max, DUSK_IF_ELSE(f32, s32) i_oil, f32 i_posX, f32 i_posY) {
+DUSK_NOINLINE void dMeter2Draw_c::drawKantera(s32 i_max, DUSK_IF_ELSE(f32, s32) i_oil, f32 i_posX, f32 i_posY) {
     f32 var_f6 = mpMagicFrameR->getInitPosX() - mpMagicFrameL->getInitPosX();
     f32 var_f7 = 0.0f;
     f32 var_f4 = 0.0f;
@@ -2149,7 +2183,7 @@ void dMeter2Draw_c::setAlphaKanteraAnimeMax() {
 #endif
 }
 
-void dMeter2Draw_c::drawOxygen(s32 i_max, DUSK_IF_ELSE(f32, s32) i_oxygen, f32 i_posX, f32 i_posY) {
+DUSK_NOINLINE void dMeter2Draw_c::drawOxygen(s32 i_max, DUSK_IF_ELSE(f32, s32) i_oxygen, f32 i_posX, f32 i_posY) {
     f32 var_f6 = mpMagicFrameR->getInitPosX() - mpMagicFrameL->getInitPosX();
     f32 var_f7 = 0.0f;
     f32 var_f4 = 0.0f;
@@ -2880,7 +2914,7 @@ void dMeter2Draw_c::drawButtonB(u8 i_action, bool param_1, f32 i_posX, f32 i_pos
 #endif
 }
 
-void dMeter2Draw_c::drawButtonR(u8 unused0, u8 i_action, bool unused1, bool unused2) {
+DUSK_NOINLINE void dMeter2Draw_c::drawButtonR(u8 unused0, u8 i_action, bool unused1, bool unused2) {
     mpScreen->search(MULTI_CHAR('item_r_n'))->hide();
     mpTextXY[2]->show();
 
@@ -3756,7 +3790,7 @@ void dMeter2Draw_c::setButtonIconMidonaAlpha(u32 param_0) {
     IF_DUSK(dusk::ui::update_midna_icon_texture(mpButtonMidona != NULL ? mpButtonMidona->getPanePtr() : NULL));
 }
 
-void dMeter2Draw_c::setButtonIconAlpha(int i_no, u8 unused0, u32 unused1, bool unused2) {
+DUSK_NOINLINE void dMeter2Draw_c::setButtonIconAlpha(int i_no, u8 unused0, u32 unused1, bool unused2) {  // aleks2 (rc17): a catalog hook target (twilit_essentials, twilit_essentials), inlined by the PGO build
     JUT_ASSERT(0, i_no < SELECT_MAX_e);
 
 #if TARGET_PC
@@ -3870,7 +3904,7 @@ ResTIMG* dMeter2Draw_c::getNumberTexture(int i) {
                                                               dMeter2Info_getNumberTextureName(i));
 }
 
-char* dMeter2Draw_c::getActionString(u8 i_action, u8 i_type, u8* param_2) {
+DUSK_NOINLINE char* dMeter2Draw_c::getActionString(u8 i_action, u8 i_type, u8* param_2) {
     static u32 i_action_num[] = {
         0,    1001, 1002, 1003, 1004, 1005, 1006, 1007, 1387, 1009, 1010, 1011, 1012, 1013, 1014,
         1015, 1033, 1016, 1017, 1018, 1019, 1020, 1045, 1022, 1026, 1027, 1028, 1029, 1030, 1024,
@@ -3973,7 +4007,7 @@ void dMeter2Draw_c::changeTextureItemB(u8 i_itemNo) {
     mpItemBPane->resize(field_0x6e4, field_0x6e8);
 }
 
-void dMeter2Draw_c::changeTextureItemXY(int i_no, u8 i_itemNo) {
+DUSK_NOINLINE void dMeter2Draw_c::changeTextureItemXY(int i_no, u8 i_itemNo) {  // aleks2 (rc17): a catalog hook target (twilit_essentials, twilit_essentials), inlined by the PGO build
     JUT_ASSERT(0, i_no < SELECT_MAX_e);
 
     if (i_itemNo == dItemNo_LIGHT_ARROW_e) {

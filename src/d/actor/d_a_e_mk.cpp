@@ -289,7 +289,8 @@ static e_db_class* search_db(e_mk_class* i_this) {
     return NULL;
 }
 
-static void e_mk_move(e_mk_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; inlined once action was out of line (DM1-d audit).
+static DUSK_NOINLINE void e_mk_move(e_mk_class* i_this) {
     fopEn_enemy_c* actor = (fopEn_enemy_c*)&i_this->actor;
     cXyz work;
     int frame = i_this->anmP->getFrame();
@@ -1569,7 +1570,9 @@ static void demo_camera_start(e_mk_class* i_this) {
     }
 }
 
-static void demo_camera_end(e_mk_class* i_this) {
+// DM1-d: the bundled Randomizer hooks this local function by name. With action and e_mk_move out of line (DM1-d),
+// -O3 inlined it into its only caller; test-hook-targets.sh caught it.
+static DUSK_NOINLINE void demo_camera_end(e_mk_class* i_this) {
     fopEn_enemy_c* actor = (fopEn_enemy_c*)&i_this->actor;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     fopAc_ac_c* boomerang_p = (fopAc_ac_c*)fopAcM_SearchByID(i_this->boomerangId);
@@ -2391,7 +2394,8 @@ static void demo_camera(e_mk_class* i_this) {
     }
 }
 
-static void action(e_mk_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE void action(e_mk_class* i_this) {
     fopEn_enemy_c* actor = (fopEn_enemy_c*)&i_this->actor;
     daPy_py_c* player = (daPy_py_c *)dComIfGp_getPlayer(0);
     cXyz work, pos;

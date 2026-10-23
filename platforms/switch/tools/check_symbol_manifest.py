@@ -142,6 +142,9 @@ def check_requirements(elf, symtab, relocs, exports, runtime_names, manifest, re
     """Per mod: every import and every by-name hook resolved as the loader will resolve it."""
     mods = {}
     hook_addresses = {}
+    # DM2-b: the glibc-layout file streams the loader binds Linux modules' imports to (aleks2lx_<name>,
+    # linux_streams_rename.py): found, though the game's own instance of the name need not be exported.
+    linux_streams = {s[0][len("aleks2lx_"):] for s in symtab if s[0].startswith("aleks2lx_")}
     for mod_id, kind, group, name in required:
         m = mods.setdefault(mod_id, {"imports": {"required": 0, "found": 0, "missing": [], "image_runtime": []},
                                      "hooks": {"required": 0, "found": 0, "missing": [], "ambiguous": [],
@@ -153,6 +156,8 @@ def check_requirements(elf, symtab, relocs, exports, runtime_names, manifest, re
             elif name in runtime_names:
                 m["imports"]["found"] += 1
                 m["imports"]["image_runtime"].append(name)
+            elif name in linux_streams:
+                m["imports"]["found"] += 1
             else:
                 m["imports"]["missing"].append(f"{name} ({group})")
         else:
@@ -172,6 +177,9 @@ def check_requirements(elf, symtab, relocs, exports, runtime_names, manifest, re
             m = mods[mod_id]["hooks"]
             if targets[name]["problems"]:
                 m["not_interceptable"].append(f"{name}: {', '.join(targets[name]['problems'])}")
+                # DM2-e: shorter than the patch with no padding to cover: its own category (still not interceptable)
+                if any(p.startswith("too short:") for p in targets[name]["problems"]):
+                    m.setdefault("too_short", []).append(name)
             else:
                 m["found"] += 1
     for m in mods.values():
@@ -210,7 +218,10 @@ def main(argv=None) -> int:
                             ("ambiguous hook target", h["ambiguous"]),
                             ("hook target not interceptable", h["not_interceptable"])):
             for name in names:
-                print(f"    {what}: {name}")
+                if what == "hook target not interceptable" and name.split(":", 1)[0] in h.get("too_short", []):
+                    print(f"    hook target too short (no padding for the patch): {name}")
+                else:
+                    print(f"    {what}: {name}")
         incompatible += not m["compatible"]
     if incompatible and args.strict:
         print(f"check_symbol_manifest: {incompatible} mod(s) incompatible with this build", file=sys.stderr)

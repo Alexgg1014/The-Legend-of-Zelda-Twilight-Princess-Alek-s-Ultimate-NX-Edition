@@ -817,7 +817,7 @@ void daE_FB_c::dead_eff_set() {
     }
 }
 
-int daE_FB_c::execute() {
+DUSK_NOINLINE int daE_FB_c::execute() {
     if (field_0x69c != 0) {
         --field_0x69c;
     }

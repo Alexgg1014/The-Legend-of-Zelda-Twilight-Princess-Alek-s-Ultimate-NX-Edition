@@ -262,7 +262,7 @@ static void e_th_spin(e_th_class* i_this) {
     i_this->mMode = 0;
 }
 
-static void e_th_spin_B(e_th_class* i_this) {
+static DUSK_NOINLINE void e_th_spin_B(e_th_class* i_this) {
     cXyz sp18;
     cXyz spC;
 
@@ -584,7 +584,7 @@ static DUSK_NOINLINE void damage_check(e_th_class* i_this) {
     }
 }
 
-static void action(e_th_class* i_this) {
+static DUSK_NOINLINE void action(e_th_class* i_this) {
     fopEn_enemy_c* a_this = (fopEn_enemy_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     cXyz sp50;
@@ -695,7 +695,7 @@ static void cam_3d_morf(e_th_class* i_this, f32 param_1) {
     cLib_addCalc2(&i_this->mDemoCamEye.z, i_this->mDemoCamEyeTarget.z, param_1, i_this->mDemoCamEyeSpd.z * i_this->field_0xd88);
 }
 
-static void demo_camera(e_th_class* i_this) {
+static DUSK_NOINLINE void demo_camera(e_th_class* i_this) {
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
     camera_process_class* camera0 = dComIfGp_getCamera(0);

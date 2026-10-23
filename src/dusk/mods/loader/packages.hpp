@@ -40,9 +40,17 @@ std::unique_ptr<ModBundle> load_bundle(const std::filesystem::path& modPath, boo
 struct PackageInstallResult {
     bool replaced = false;
     std::string error;
+    // aleks2 (V1-rc19): the installed package is open (its mod is loaded) and Horizon will not replace an open
+    // file: the new one waits as <destination>.pending and is put in place at the next start
+    // (apply_pending_packages). Counts as installed; the change applies after a restart.
+    bool pending = false;
 };
 
 PackageInstallResult install_package(const std::filesystem::path& path,
     const std::filesystem::path& destination, std::string_view modId);
+
+// aleks2 (V1-rc19): at start, before any package is opened (and before the update journal looks at them): every
+// <name>.dusk.pending in `userDir` replaces <name>.dusk. A failure is logged and tried again at the next start.
+void apply_pending_packages(const std::filesystem::path& userDir);
 
 }  // namespace dusk::mods

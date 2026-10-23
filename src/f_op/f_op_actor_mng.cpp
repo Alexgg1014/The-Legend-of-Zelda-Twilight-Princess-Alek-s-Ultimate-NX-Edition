@@ -255,7 +255,7 @@ s32 fopAcM_delete(fpc_ProcID i_actorID) {
     }
 }
 
-fpc_ProcID fopAcM_create(s16 i_procName, u16 i_setId, u32 i_parameters, const cXyz* i_pos,
+DUSK_NOINLINE fpc_ProcID fopAcM_create(s16 i_procName, u16 i_setId, u32 i_parameters, const cXyz* i_pos,
     int i_roomNo, const csXyz* i_angle, const cXyz* i_scale, s8 i_argument,
     createFunc i_createFunc IF_DUSK_ARG(u32 i_itemGiveTag) IF_DUSK_ARG(u8 i_itemOriginalNo)) {
     fopAcM_prm_class* append = createAppend(i_setId, i_parameters, i_pos, i_roomNo, i_angle,
@@ -268,14 +268,14 @@ fpc_ProcID fopAcM_create(s16 i_procName, u16 i_setId, u32 i_parameters, const cX
     return fpcM_Create(i_procName, i_createFunc, append);
 }
 
-fpc_ProcID fopAcM_create(s16 i_procName, u32 i_parameters, const cXyz* i_pos, int i_roomNo,
+DUSK_NOINLINE fpc_ProcID fopAcM_create(s16 i_procName, u32 i_parameters, const cXyz* i_pos, int i_roomNo,
     const csXyz* i_angle, const cXyz* i_scale, s8 i_argument IF_DUSK_ARG(u32 i_itemGiveTag)
         IF_DUSK_ARG(u8 i_itemOriginalNo)) {
     return fopAcM_create(i_procName, 0xFFFF, i_parameters, i_pos, i_roomNo, i_angle, i_scale,
         i_argument, NULL IF_DUSK_ARG(i_itemGiveTag) IF_DUSK_ARG(i_itemOriginalNo));
 }
 
-fopAc_ac_c* fopAcM_fastCreate(s16 i_procName, u32 i_parameters, const cXyz* i_pos, int i_roomNo,
+DUSK_NOINLINE fopAc_ac_c* fopAcM_fastCreate(s16 i_procName, u32 i_parameters, const cXyz* i_pos, int i_roomNo,
     const csXyz* i_angle, const cXyz* i_scale, s8 i_argument, createFunc i_createFunc,
     void* i_createFuncData IF_DUSK_ARG(u32 i_itemGiveTag) IF_DUSK_ARG(u8 i_itemOriginalNo)) {
     fopAcM_prm_class* append =
@@ -821,7 +821,7 @@ void fopAcM_calcSpeed(fopAc_ac_c* i_actor) {
     fopAcM_SetSpeed(i_actor, xSpeed, ySpeed, zSpeed);
 }
 
-void fopAcM_posMove(fopAc_ac_c* i_actor, const cXyz* i_movePos) {
+DUSK_NOINLINE void fopAcM_posMove(fopAc_ac_c* i_actor, const cXyz* i_movePos) {
     cXyz* pos = fopAcM_GetPosition_p(i_actor);
     cXyz* speed = fopAcM_GetSpeed_p(i_actor);
     pos->x += speed->x;
@@ -840,7 +840,7 @@ void fopAcM_posMoveF(fopAc_ac_c* i_actor, const cXyz* i_movePos) {
     fopAcM_posMove(i_actor, i_movePos);
 }
 
-s16 fopAcM_searchActorAngleY(const fopAc_ac_c* i_actorA, const fopAc_ac_c* i_actorB) {
+DUSK_NOINLINE s16 fopAcM_searchActorAngleY(const fopAc_ac_c* i_actorA, const fopAc_ac_c* i_actorB) {
     return cLib_targetAngleY(fopAcM_GetPosition_p(i_actorA), fopAcM_GetPosition_p(i_actorB));
 }
 
@@ -1528,7 +1528,7 @@ fpc_ProcID fopAcM_createItemFromEnemyID(u8 i_enemyID, cXyz const* i_pos, int i_i
                                       i_speedF, i_speedY, false);
 }
 
-fpc_ProcID fopAcM_createItemFromTable(cXyz const* i_pos, int i_itemNo, int i_itemBitNo,
+DUSK_NOINLINE fpc_ProcID fopAcM_createItemFromTable(cXyz const* i_pos, int i_itemNo, int i_itemBitNo,
                                       int i_roomNo, csXyz const* i_angle, int param_5,
                                       cXyz const* i_scale, f32* i_speedF, f32* i_speedY,
                                       bool i_createDirect) {
@@ -1667,7 +1667,7 @@ fopAc_ac_c* fopAcM_createItemForSimpleDemo(const cXyz* i_pos, int i_itemNo, int 
     return ret;
 }
 
-fpc_ProcID fopAcM_createItem(const cXyz* i_pos, int i_itemNo, int i_itemBitNo, int i_roomNo,
+DUSK_NOINLINE fpc_ProcID fopAcM_createItem(const cXyz* i_pos, int i_itemNo, int i_itemBitNo, int i_roomNo,
                              const csXyz* i_angle, const cXyz* i_scale, int param_7) {
     // clang-format off
     JUT_ASSERT(4067, 0 <= i_itemNo && i_itemNo < 256 && (-1 <= i_itemBitNo && i_itemBitNo < (dSv_info_c::DAN_ITEM + dSv_info_c::MEMORY_ITEM + dSv_info_c::ZONE_ITEM )) || i_itemBitNo == 255);

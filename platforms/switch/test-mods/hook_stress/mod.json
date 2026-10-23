@@ -1,0 +1,7 @@
+{
+  "id": "dev.aleks2.hook_stress",
+  "name": "Hook Stress (DM2-a lab)",
+  "version": "1.0.0",
+  "author": "Alek's Ultimate NX Edition",
+  "description": "LAB ONLY. Installs 333 hooks by name on game actor functions with an argument-less trampoline, to fill the code arenas in the loader-only lab mode. Never enable it with the game running."
+}

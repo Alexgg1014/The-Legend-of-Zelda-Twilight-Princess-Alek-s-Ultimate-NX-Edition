@@ -1,0 +1,68 @@
+# aleks2 (DM2-c): what the game image adds on Switch so that catalog mods find the symbols they name.
+# The single list. platforms/switch/tools/gen_mod_compat.py makes the code from it:
+#   include/aleks2/mod_compat_templates.inc   extern template declarations (read by the defining headers)
+#   src/dusk/mods/compat/mod_compat.cpp       explicit instantiations and the PC-only stubs
+#   python platforms/switch/tools/gen_mod_compat.py generate        rewrite both (CMake runs --check)
+#   python platforms/switch/tools/gen_mod_compat.py update --audit catalog-audit-raw.json
+#                                           add what a catalog audit found missing, then generate
+#
+# Three categories. Docs: docs/investigaciones/dm2c-capas-generales.md (3: dm3-resultado-c1.md)
+#
+# 1. template <header under include/> <hook name> | <instantiation declarator>
+#    A function template instance the game uses but GCC inlined everywhere, so it had no symbol a
+#    by-name hook could patch. `extern template` in the header makes every caller call one out-of-line
+#    copy (same body, same mangled name), which mod_compat.cpp instantiates. Only for templates that
+#    are not declared `inline`: GCC still inlines an inline function behind an extern template.
+#    "catalog" = a catalog mod hooks it; "common" = instantiated ahead of time, nobody asks for it yet.
+#
+# 2. pc-only <category> <hook|import> <symbol> <return>
+#    A symbol of the PC build with no Switch counterpart (Discord presence, desktop window, ...).
+#    A neutral stub with that exact name: a hook on it installs and never fires; a call to it does
+#    nothing and returns <return> (zero = 0 / false / nullptr in x0; void). Same stub for every mod;
+#    weak, so a real definition (borealis' discord stub.cpp, if ever linked on Switch) wins.
+#    pc-prefix <category> <prefix>: names that `update` files under pc-only when an audit finds them
+#    missing (only a mangled name becomes a stub; a demangled one is printed as manual).
+#
+# 3. out-of-line <header under include/> <source> <origin> <Class::method>    (DM3)
+#    A member function declared `inline` in its class and defined in one source file: GCC inlines it into every
+#    caller and drops the symbol, so a by-name hook finds nothing. `generate` makes it a real function on Switch:
+#    the header's `inline` becomes ALEKS2_OUT_OF_LINE_DECL and the definition gains ALEKS2_OUT_OF_LINE
+#    (include/global.h: `inline` / nothing on PC, so the PC build is unchanged; nothing / noinline on Switch).
+#    Same body, same mangled name, every caller calls it. `update --audit` adds the line for any missing hook
+#    of that shape. A new one needs a new NRO: what was inlined cannot be recreated at run time.
+#
+# Not here, on purpose: dusk::mouse::* and SDL keyboard/window functions. They exist on Switch (SDL3
+# and src/dusk/mouse.cpp are built) and already answer neutrally; DM2-c only kept two of them out of
+# line (src/dusk/mouse.cpp).
+
+pc-prefix discord _ZN8borealis7discord
+pc-prefix discord borealis::discord::
+pc-prefix discord _ZN7discord
+pc-prefix discord discord::
+
+# --- templates a catalog mod hooks ---------------------------------------------------------------
+template SSystem/SComponent/c_lib.h catalog cLib_calcTimer<int> | int cLib_calcTimer<int>(int*)
+
+# --- common instances (the explicit uses in the game sources), so a future hook finds them -------
+template SSystem/SComponent/c_lib.h common cLib_calcTimer<signed char> | s8 cLib_calcTimer<s8>(s8*)
+template SSystem/SComponent/c_lib.h common cLib_calcTimer<unsigned char> | u8 cLib_calcTimer<u8>(u8*)
+template SSystem/SComponent/c_lib.h common cLib_calcTimer<short int> | s16 cLib_calcTimer<s16>(s16*)
+template SSystem/SComponent/c_lib.h common cLib_calcTimer<short unsigned int> | u16 cLib_calcTimer<u16>(u16*)
+template SSystem/SComponent/c_lib.h common cLib_calcTimer<unsigned int> | u32 cLib_calcTimer<u32>(u32*)
+template SSystem/SComponent/c_lib.h common cLib_getRndValue<int> | int cLib_getRndValue<int>(int, int)
+template SSystem/SComponent/c_lib.h common cLib_getRndValue<short int> | s16 cLib_getRndValue<s16>(s16, s16)
+template SSystem/SComponent/c_lib.h common cLib_getRndValue<float> | f32 cLib_getRndValue<f32>(f32, f32)
+template SSystem/SComponent/c_angle.h common cAngle::Adjust<float> | f32 cAngle::Adjust<f32>(f32, f32, f32)
+
+# --- inline members a catalog mod hooks (DM3) -----------------------------------------------------
+# Crests of Courage 1.10.0 (dev.remiafterdark.coop_mod): the sumo rules.
+out-of-line d/actor/d_a_npc_wrestler.h src/d/actor/d_a_npc_wrestler.cpp catalog daNpcWrestler_c::sumouAI
+out-of-line d/actor/d_a_npc_wrestler.h src/d/actor/d_a_npc_wrestler.cpp catalog daNpcWrestler_c::checkOutOfArenaP
+out-of-line d/actor/d_a_npc_wrestler.h src/d/actor/d_a_npc_wrestler.cpp catalog daNpcWrestler_c::checkOutOfArenaW
+out-of-line d/actor/d_a_npc_wrestler.h src/d/actor/d_a_npc_wrestler.cpp catalog daNpcWrestler_c::setNextAction
+out-of-line d/actor/d_a_npc_wrestler.h src/d/actor/d_a_npc_wrestler.cpp catalog daNpcWrestler_c::setStepAngle
+out-of-line d/actor/d_a_npc_wrestler.h src/d/actor/d_a_npc_wrestler.cpp catalog daNpcWrestler_c::setBackToLiving
+
+# --- PC-only -------------------------------------------------------------------------------------
+# Twilit Essentials 2.8.4 hooks borealis' Discord rich presence (its UI library on PC).
+pc-only discord hook _ZN8borealis7discord15update_presenceENS0_8PresenceE void

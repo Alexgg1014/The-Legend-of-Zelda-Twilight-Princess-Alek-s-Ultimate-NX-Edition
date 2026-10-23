@@ -304,7 +304,7 @@ void daDoor20_c::setEventPrm() {
     }
 }
 
-int daDoor20_c::checkOpenMsgDoor(int* param_1) {
+DUSK_NOINLINE int daDoor20_c::checkOpenMsgDoor(int* param_1) {
     if (!door_param2_c::isMsgDoor(this)) {
         return 1;
     }

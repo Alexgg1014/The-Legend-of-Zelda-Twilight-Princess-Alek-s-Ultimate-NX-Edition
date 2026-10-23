@@ -4,7 +4,9 @@
 #include "manifest.hpp"
 #include "native_module.hpp"
 #include "natives.hpp"
+#include "lib_cache.hpp"  // V1-rc19
 #include "packages.hpp"
+#include "update_journal.hpp"
 #if DUSK_HAS_PREPATCH
 #include "prepatch.hpp"
 #endif
@@ -24,12 +26,15 @@
 #include "dusk/ui/mod_texture_provider.hpp"
 #include "dusk/ui/mods_window.hpp"
 #include "dusk/ui/ui.hpp"
+#include "dusk/ui/boot_splash.hpp"  // V1-rc19
 #include "dusk/utilities.hpp"
+#include "dusk/file_copy.hpp"  // aleks2 (rc18)
 #if ALEKS2_NATIVE_MOD_LOADER
 #include "dusk/switch_native_loader.hpp"
 #endif
 #if defined(__SWITCH__) && DUSK_HAS_FUNCHOOK
 #include "dusk/switch_code_arena.h"
+#include "same_path.hpp"  // V1: equivalent() is wrong on the Switch (st_ino 0)
 #endif
 
 #include <borealis/io.hpp>
@@ -37,6 +42,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <functional>
+#include <atomic>
+#include <cstddef>
 #include <chrono>
 #include <filesystem>
 #include <string>
@@ -45,6 +53,8 @@
 #include <variant>
 
 namespace fs = std::filesystem;
+
+extern bool g_duskModLibCache;  // natives.cpp (V1-rc19)
 
 namespace dusk::mods {
 namespace {
@@ -76,6 +86,35 @@ LoadedMod::FileIdentity file_identity(const fs::path& path) {
     }
     return {.size = size, .modified = modified, .valid = true};
 }
+
+#if ALEKS2_NATIVE_MOD_LOADER
+// DM1-b: the journal's file operations, as the rest of the loader does them.
+bool journal_readable(const fs::path& package) {
+    ModMetadata metadata;
+    std::string error;
+    return inspect_mod_bundle(package, metadata, error);
+}
+bool journal_replace(const fs::path& from, const fs::path& to, std::string& error) {
+    return borealis::io::atomic_replace(from, to, error);
+}
+#endif
+
+}  // namespace
+}  // namespace dusk::mods
+
+#if defined(__SWITCH__)
+// DM1-b: defined by platforms/switch/patches/dawn-worker-stack.patch in Dawn's WorkerThread.cpp.
+namespace aleks2::dawn_worker {
+extern std::atomic<std::size_t> stackDefault;
+extern std::atomic<std::size_t> stackSize;
+extern std::atomic<unsigned> threads;
+extern std::atomic<unsigned> fallbacks;
+extern std::atomic<int> lastError;
+}  // namespace aleks2::dawn_worker
+#endif
+
+namespace dusk::mods {
+namespace {
 
 }  // namespace
 
@@ -240,6 +279,14 @@ bool ModLoader::activate_mod(LoadedMod& mod) {
 
     if (mod.native) {
         svc::hook_resolve_mod_records(mod);
+        // aleks2 (DM2-a): before any of its code runs, its hooks must fit what the code arenas
+        // have left; a mod that would only get some of them does not start at all.
+        std::string hookRoom;
+        if (!svc::hook_room_check(mod, hookRoom)) {
+            fail_mod(mod, MOD_UNAVAILABLE, hookRoom);
+            deactivate_mod(mod);
+            return false;
+        }
         *mod.native->contextSymbol = mod.context.get();
     } else {
         auto& runtime = *mod.runtime;
@@ -278,6 +325,7 @@ bool ModLoader::activate_mod(LoadedMod& mod) {
             bootGuard->enter(mod.metadata.id, guard::Stage::Constructors);
         }
         std::string why;
+        log::write(mod.metadata.id, LOG_LEVEL_INFO, "running constructors");  // V1-rc6: where a crash stopped
         const bool constructed = mod.native->handle->RunDeferredInitializers(why);
         if (bootGuard != nullptr) {
             bootGuard->leave();
@@ -296,7 +344,7 @@ bool ModLoader::activate_mod(LoadedMod& mod) {
         bootGuard->enter(mod.metadata.id, guard::Stage::Initialize);
     }
 #endif
-    log::write(mod.metadata.id, LOG_LEVEL_TRACE, "calling {}", initializeName);
+    log::write(mod.metadata.id, LOG_LEVEL_INFO, "calling {}", initializeName);  // V1-rc6: Info, see above
     try {
         ModError error = MOD_ERROR_INIT;
         const auto result = mod.native ?
@@ -347,7 +395,7 @@ bool ModLoader::activate_mod(LoadedMod& mod) {
 #if defined(__SWITCH__) && DUSK_HAS_FUNCHOOK
     if (m_startupComplete && mod.native) {
         // Enabled while playing: say what the hooks took (startup says it once for all).
-        char arenas[320];
+        char arenas[512];
         funchook_switch_describe(arenas, sizeof arenas);
         log::write(mod.metadata.id, LOG_LEVEL_INFO, "{}", arenas);
     }
@@ -431,13 +479,46 @@ void ModLoader::init() {
     }
 #endif
 
+#if ALEKS2_NATIVE_MOD_LOADER
+    // aleks2 (V1-rc19): updates that waited for this start (their package was open) go in place first, before the
+    // journal below looks at them and before any package is opened.
+    apply_pending_packages(m_searchDirs.front().path);
+
+    // aleks2 (DM1-b): an update the previous session left unfinished, or that crashed the last
+    // start, is undone before anything loads (update_journal.hpp).
+    {
+        std::error_code userError;
+        const auto userDir = data::canonical_path(m_searchDirs.front().path, userError);
+        if (!userError) {
+            const auto& crashed = switchelf::startup().crashed;
+            for (const auto& action : journal::recover_at_start(
+                     userDir, crashed ? std::string_view{crashed->modId} : std::string_view{},
+                     journal_readable, journal_replace))
+            {
+                Log.warn("update journal: {}{}{}", action.id, action.id.empty() ? "" : ": ", action.message);
+                if (action.restored) {
+                    ui::push_toast({.type = "warning", .title = "Mod update undone", .content = action.message,
+                        .duration = std::chrono::seconds{8}});
+                }
+            }
+        }
+    }
+#endif
+
     std::error_code ec;
 
     // Stale libs from previous sessions (see load_native).
-    fs::remove_all(m_cacheDir, ec);
+    { const auto bootT = dusk::boot_timing::now(); fs::remove_all(m_cacheDir, ec); dusk::boot_timing::phase("mod cache cleanup (.cache)", bootT); }
 
-    const auto packages = scan_packages(m_searchDirs);
+    const auto bootScanT = dusk::boot_timing::now(); const auto packages = scan_packages(m_searchDirs); dusk::boot_timing::phase("mod package scan", bootScanT);
+    int bootIndex = 0, bootStarted = 0;  // V1-rc19: the boot splash's counts
     for (const auto& package : packages) {
+        if (!m_startupComplete) {
+            ++bootIndex;
+            ui::boot_splash::progress(fmt::format("Loading mods {}/{}: {}", bootIndex, packages.size(),
+                                          package.metadata.name).c_str(),
+                bootIndex - 1, static_cast<int>(packages.size()) * 2);  // loading is the first half of the bar
+        }
         const auto* selected = select_package(packages, package.metadata.id);
         if (selected != &package) {
             // aleks2 (H38): a newer package is set behind an older one only for the Switch preference.
@@ -450,10 +531,19 @@ void ModLoader::init() {
                                  "");
             continue;
         }
-        if (auto* mod = try_load_mod(package.path, package.fromDirectory, package.searchDirIndex)) {
+        const auto bootModT = dusk::boot_timing::now(); if (auto* mod = try_load_mod(package.path, package.fromDirectory, package.searchDirIndex)) {
             record_package_sources(*mod, packages);
+        } dusk::boot_timing::mod_loaded(package.metadata.id.c_str(), bootModT);
+    }
+
+#if ALEKS2_NATIVE_MOD_LOADER
+    // aleks2 (V1-rc19): mods/.libcache entries that no package used this boot go (natives.cpp).
+    if (g_duskModLibCache) {
+        if (const size_t removed = lib_cache::prune(m_cacheDir.parent_path() / ".libcache"); removed != 0) {
+            Log.info("lib cache: {} entr{} no installed package uses removed", removed, removed == 1 ? "y" : "ies");
         }
     }
+#endif
 
     if (m_mods.empty()) {
         init_services();
@@ -512,17 +602,20 @@ void ModLoader::init() {
 
     for (auto& mod : mods()) {
         if (mod.active) {
-            activate_mod(mod);
+            ++bootStarted;
+            ui::boot_splash::progress(fmt::format("Starting mods {}/{}: {}", bootStarted, m_mods.size(), mod.metadata.name).c_str(),
+                bootIndex + bootStarted, bootIndex + static_cast<int>(m_mods.size()));
+            const auto bootModT = dusk::boot_timing::now(); activate_mod(mod); dusk::boot_timing::mod_activated(mod.metadata.id.c_str(), bootModT);
         }
     }
 
-    svc::modules_lifecycle_applied();
+    svc::modules_lifecycle_applied(); dusk::boot_timing::mods_report();
 
     auto active = std::ranges::count_if(mods(), [](const LoadedMod& m) { return m.active; });
     Log.info("{}/{} mod(s) active", active, m_mods.size());
 #if defined(__SWITCH__) && DUSK_HAS_FUNCHOOK
     // aleks2 (H37): how many kernel code memory objects the hooks took (code_arena.h).
-    char arenas[320];
+    char arenas[512];
     funchook_switch_describe(arenas, sizeof arenas);
     Log.info("{}", arenas);
 #endif
@@ -609,6 +702,90 @@ ModOperationHandle ModLoader::request_reactivate(std::string_view id) {
 
 fs::path ModLoader::user_mods_dir() const {
     return m_searchDirs.empty() ? fs::path{} : m_searchDirs.front().path;
+}
+
+bool ModLoader::restart_required(std::string_view id) const {
+    return std::ranges::any_of(m_restartRequired, [&](const auto& entry) { return entry.first == id; });
+}
+
+void ModLoader::require_restart(std::string_view id, std::string reason) {
+    const auto existing = std::ranges::find_if(m_restartRequired, [&](const auto& entry) { return entry.first == id; });
+    if (existing != m_restartRequired.end()) {
+        existing->second = reason;
+    } else {
+        m_restartRequired.emplace_back(std::string{id}, reason);
+    }
+    ++m_generation;
+    Log.info("{}: restart required ({})", id, reason);
+    ui::push_toast({.type = "warning", .title = "Restart required", .content = fmt::format("{}: {}", id, reason),
+        .duration = std::chrono::seconds{6}});
+}
+
+std::string_view ModLoader::staged_version(std::string_view id) const {
+    const auto staged = std::ranges::find_if(m_stagedVersions, [&](const auto& entry) { return entry.first == id; });
+    return staged != m_stagedVersions.end() ? std::string_view{staged->second} : std::string_view{};
+}
+
+void ModLoader::clear_restart(std::string_view id) {
+    if (const auto staged = staged_version(id); !staged.empty()) {
+        // DM1-c: toggling the mod back does not undo an install that waits for the restart.
+        const auto existing =
+            std::ranges::find_if(m_restartRequired, [&](const auto& entry) { return entry.first == id; });
+        const auto reason = fmt::format("v{} installed; restart the game to run it", staged);
+        if (existing != m_restartRequired.end() && existing->second != reason) {
+            existing->second = reason;
+            ++m_generation;
+        }
+        return;
+    }
+    if (std::erase_if(m_restartRequired, [&](const auto& entry) { return entry.first == id; }) != 0) {
+        ++m_generation;
+        Log.info("{}: no restart needed any more", id);
+    }
+}
+
+bool ModLoader::code_change_needs_restart(const LoadedMod& mod) const {
+#if ALEKS2_NATIVE_MOD_LOADER
+    // aleks2 (DM1-b): once the boot is over, code is neither started nor stopped until the next start --
+    // nothing is unloaded on Switch, and hooks are not proven to come off cleanly.
+    return m_startupComplete && (mod.native != nullptr || mod.nativeStatus != NativeModStatus::None);
+#else
+    (void)mod;
+    return false;
+#endif
+}
+
+void ModLoader::settle_update_journal() {
+#if ALEKS2_NATIVE_MOD_LOADER
+#if defined(__SWITCH__)
+    {
+        // DM1-b: Dawn's worker stacks, as dawn-worker-stack.patch set them up (0 threads: none started yet).
+        namespace w = aleks2::dawn_worker;
+        Log.info("dawn workers: {} thread(s) with a {} KiB stack (default {} KiB); {} fell back to the default "
+                 "(last pthread_create error {})",
+            w::threads.load(), w::stackSize.load() / 1024, w::stackDefault.load() / 1024, w::fallbacks.load(),
+            w::lastError.load());
+    }
+#endif
+    std::error_code error;
+    const auto userDir = data::canonical_path(user_mods_dir(), error);
+    if (error) {
+        return;
+    }
+    const auto outcome = [this](std::string_view id) {
+        const auto* mod = find_mod(id);
+        if (mod == nullptr || mod->loadFailed) {
+            return journal::Outcome::Failed;
+        }
+        return mod->active ? journal::Outcome::Running : journal::Outcome::NotStarted;
+    };
+    for (const auto& action : journal::settle_after_boot(userDir, outcome, journal_replace)) {
+        Log.info("update journal: {}: {}", action.id, action.message);
+        if (action.restored) {
+            require_restart(action.id, action.message);
+        }
+    }
+#endif
 }
 
 bool ModLoader::can_uninstall(const LoadedMod& mod) const {
@@ -887,6 +1064,17 @@ void ModLoader::on_enabled_changed(LoadedMod& mod) {
         }
         return;
     }
+    if (code_change_needs_restart(mod)) {
+        // aleks2 (DM1-b): the setting is saved now; the code starts or stops at the next start.
+        const bool wanted = mod.cvarIsEnabled->getValue();
+        if (wanted == (mod.active || mod.enabledApplied)) {
+            clear_restart(mod.metadata.id);
+        } else {
+            require_restart(mod.metadata.id,
+                wanted ? "enabled; its code starts after a restart" : "disabled; its code stops after a restart");
+        }
+        return;
+    }
     m_pendingRequests.push_back(LifecycleRequest{
         .modId = mod.metadata.id,
         .action =
@@ -1048,13 +1236,44 @@ ModLoader::OperationResult ModLoader::uninstall_runtime_mod(LoadedMod& mod) {
             return false;
         }
         std::error_code error;
+        // V1-rc12: the mod's own .dusk is open (its ModBundleZip reads from it while the mod is listed), and Horizon
+        // does not delete an open file: a tester's uninstalled mods were still in mods/ and came back at the next
+        // start. Close it first; reopen it if the file stays.
+        const bool ownBundle = !mod.active && mod.bundle != nullptr && package.path == mod.modPath;
+        if (ownBundle) {
+            mod.bundle.reset();
+        }
         fs::remove(package.path, error);
+        {
+            // aleks2 (V1-rc19): an update of it waiting for the next start goes too, or it would come back.
+            std::error_code pendingError;
+            fs::remove(fs::path{package.path.string() + ".pending"}, pendingError);
+        }
+        if (ownBundle && error) {
+            mod.bundle = load_bundle(mod.modPath, false);
+        }
         if (error) {
             removalError = fmt::format("Could not remove {}: {}",
                 data::abbreviated_path_string(package.path), error.message());
         }
         return !error;
     });
+
+    // V1-rc12: an uncommitted update of this mod leaves a journal entry and the previous package in <mods>/.backup; the
+    // next start sees the installed package gone and puts the backup back (update_journal.hpp): the uninstalled mod
+    // returned after a restart (tester, rc9). Drop both once the package is gone.
+    if (removalError.empty()) {
+        const auto userDir = user_mods_dir();
+        if (!userDir.empty()) {
+            for (const auto& entry : journal::read_all(userDir)) {
+                if (entry.id == mod.metadata.id && !entry.backup.empty()) {
+                    std::error_code ec;
+                    fs::remove(entry.backup, ec);
+                }
+            }
+            journal::remove(userDir, mod.metadata.id);
+        }
+    }
 
     OperationResult result;
     if (const auto* selected = select_package(packages, mod.metadata.id)) {
@@ -1157,10 +1376,15 @@ ModLoader::OperationResult ModLoader::install_staged(
     }
 
     for (const auto& mod : mods()) {
-        if (mod.metadata.id != metadata.id && fs::equivalent(mod.modPath, destination, error)) {
+        if (mod.metadata.id != metadata.id && dusk::mods::same_path(mod.modPath, destination, error)) {
+            // V1: say which mod and what to do (uninstall it), not only that the name is taken.
+            Log.error("install of {} refused: {} is {}'s package", metadata.id, destination.filename().string(),
+                mod.metadata.id);
             return {
                 .success = false,
-                .message = "The destination filename belongs to a different mod",
+                .message = fmt::format("{} is already used by another mod ({}). Uninstall that mod first, then "
+                                       "install this one again.",
+                    destination.filename().string(), mod.metadata.name.empty() ? mod.metadata.id : mod.metadata.name),
             };
         }
     }
@@ -1196,9 +1420,14 @@ ModLoader::OperationResult ModLoader::install_staged(
         Log.warn("could not list the libraries of {}: {}", data::abbreviated_path_string(path), e.what());
     }
     {
+        // V1-rc5: only a copy at least as new as the incoming package can refuse it. A newer catalog version of a
+        // mod this build ships a Switch package of (Twilit Essentials 2.8.4 over our 2.5.0) installs, and the older
+        // Switch copy is set aside below so the scan does not keep preferring it.
         std::vector<PackageLibraries> existing;
         for (const auto& package : packages) {
-            if (package.metadata.id == metadata.id) {
+            if (package.metadata.id == metadata.id &&
+                compare_package_versions(package.metadata.version, metadata.version) >= 0)
+            {
                 existing.push_back(package.libraries);
             }
         }
@@ -1228,16 +1457,90 @@ ModLoader::OperationResult ModLoader::install_staged(
     if (installed != nullptr && fs::is_regular_file(destination, error)) {
         backup = userDir / ".backup" / fmt::format("{}.dusk", utils::safe_filename(metadata.id));
         fs::create_directories(backup.parent_path(), error);
-        if (error || !fs::copy_file(destination, backup, fs::copy_options::overwrite_existing, error)) {
+        if (error || !file_copy::copy_file(destination, backup, error)) {  // aleks2 (rc18): file_copy.hpp
             return {.success = false,
                 .message = fmt::format("Could not back up the installed version: {}", error.message())};
         }
     }
     error.clear();
+    // aleks2 (DM1-b): a package with native code is only put in place; it runs after a restart, and
+    // the journal undoes it if that start fails (update_journal.hpp). Asset and Luau packages keep
+    // the live path below.
+    if (m_startupComplete &&
+        (incomingLibraries.native() || (installed != nullptr && code_change_needs_restart(*installed))))
+    {
+        const bool journaled = installed != nullptr && !backup.empty();
+        if (journaled) {
+            std::string journalError;
+            if (!journal::write(userDir,
+                    {.id = metadata.id, .fromVersion = installed->metadata.version, .toVersion = metadata.version,
+                        .destination = destination, .backup = backup},
+                    journalError))
+            {
+                return {.success = false,
+                    .message = fmt::format("Not installed: could not record the update ({})", journalError)};
+            }
+        }
+        const auto deferred = install_package(path, destination, metadata.id);
+        if (!deferred.replaced) {
+            if (journaled) {
+                journal::remove(userDir, metadata.id);
+            }
+            return {.success = false, .message = deferred.error};
+        }
+        // V1-rc5: older Switch copies of this mod under other file names (randomizer.dusk, twilit_essentials.dusk from
+        // the release) would still be chosen over a newer Linux package; they move to mods/.replaced/, where the
+        // player can take one back.
+        if (!incomingLibraries.switchArm64) {
+            for (const auto& package : packages) {
+                if (package.metadata.id != metadata.id || !package.libraries.switchArm64 || package.searchDirIndex != 0 ||
+                    package.fromDirectory || package.symlink || dusk::mods::same_path(package.path, destination, error))
+                {
+                    error.clear();
+                    continue;
+                }
+                const auto aside = userDir / ".replaced" / package.path.filename();
+                fs::create_directories(aside.parent_path(), error);
+                fs::rename(package.path, aside, error);
+                if (error) {
+                    Log.warn("{}: could not set aside the older Switch package {}: {}", metadata.id,
+                        data::abbreviated_path_string(package.path), error.message());
+                    error.clear();
+                } else {
+                    Log.info("{}: the older Switch package v{} moved to {} (the catalog's v{} replaces it)", metadata.id,
+                        package.metadata.version, data::abbreviated_path_string(aside), metadata.version);
+                }
+            }
+        }
+        Log.info("{} v{} installed for the next start ({}{}); the running code is unchanged", metadata.id,
+            metadata.version,
+            incomingLibraries.switchArm64      ? "switch-arm64" :
+            incomingLibraries.linuxAarch64     ? "linux-aarch64 compatibility" :
+                                                 "no Switch library",
+            journaled ? fmt::format(", replaces v{}", installed->metadata.version) : std::string{});
+        auto message = fmt::format("v{} installed; restart the game to run it", metadata.version);
+        // DM1-c: remembered so the browser and the updates list stop offering what is already on the card.
+        if (const auto staged = std::ranges::find_if(
+                m_stagedVersions, [&](const auto& entry) { return entry.first == metadata.id; });
+            staged != m_stagedVersions.end())
+        {
+            staged->second = metadata.version;
+        } else {
+            m_stagedVersions.emplace_back(metadata.id, metadata.version);
+        }
+        require_restart(metadata.id, message);
+        return {.success = true, .message = std::move(message)};
+    }
 #endif
     const auto packageResult = install_package(path, destination, metadata.id);
     if (!packageResult.replaced) {
         return {.success = false, .message = packageResult.error};
+    }
+    if (packageResult.pending) {
+        // aleks2 (V1-rc19): the installed package was open; the new one is put in place at the next start.
+        std::string message = "updated; it applies after a restart";
+        require_restart(metadata.id, message);
+        return {.success = true, .message = std::move(message)};
     }
     std::erase_if(packages, [&](const auto& package) {
         if (package.metadata.id != metadata.id || package.searchDirIndex != 0 ||
@@ -1246,7 +1549,7 @@ ModLoader::OperationResult ModLoader::install_staged(
             return false;
         }
         std::error_code statusError;
-        return fs::equivalent(package.path, destination, statusError) ||
+        return dusk::mods::same_path(package.path, destination, statusError) ||
                !fs::exists(package.path, statusError);
     });
     packages.push_back({.path = destination, .metadata = metadata, .libraries = incomingLibraries});
@@ -1267,7 +1570,7 @@ ModLoader::OperationResult ModLoader::install_staged(
         std::string restoreError;
         const auto restoring = userDir / ".staging" / fmt::format("{}-restore.dusk.part", utils::safe_filename(metadata.id));
         fs::create_directories(restoring.parent_path(), error);
-        if (fs::copy_file(backup, restoring, fs::copy_options::overwrite_existing, error) &&
+        if (file_copy::copy_file(backup, restoring, error) &&  // aleks2 (rc18): file_copy.hpp
             borealis::io::atomic_replace(restoring, destination, restoreError))
         {
             const std::string why = result.message.empty() ? "it did not load" : result.message;
@@ -1363,6 +1666,11 @@ void ModLoader::apply_pending_requests() {
                 complete_operation(reload->operation, false, "The mod is no longer installed");
                 continue;
             }
+            if (code_change_needs_restart(*mod)) {
+                complete_operation(reload->operation, false,
+                    "A mod with native code is reloaded by restarting the game");
+                continue;
+            }
             auto result = reload_runtime_mod(*mod);
             complete_operation(reload->operation, result.success, std::move(result.message));
             continue;
@@ -1371,6 +1679,11 @@ void ModLoader::apply_pending_requests() {
             auto* mod = find_mod(uninstall->modId);
             if (mod == nullptr) {
                 complete_operation(uninstall->operation);
+                continue;
+            }
+            if (code_change_needs_restart(*mod) && (mod->active || mod->initialized)) {
+                complete_operation(uninstall->operation, false,
+                    "Its native code is running: turn the mod off, restart, then uninstall it");
                 continue;
             }
             const auto removedName = mod->metadata.name;
@@ -1414,6 +1727,19 @@ void ModLoader::apply_pending_requests() {
             continue;
         }
 
+        if (request.action == LifecycleAction::Reactivate && code_change_needs_restart(*mod)) {
+#if ALEKS2_NATIVE_MOD_LOADER
+            if (auto* bootGuard = switchelf::boot_guard()) {
+                bootGuard->release(mod->metadata.id);
+            }
+#endif
+            if (!mod->cvarIsEnabled->getValue()) {
+                mod->cvarIsEnabled->setValue(true);
+            }
+            require_restart(mod->metadata.id, "it is tried again after a restart");
+            complete_operation(request.operation);
+            continue;
+        }
         if (request.action == LifecycleAction::Reactivate) {
             mod->loadFailed = false;
             mod->failureReason.clear();
@@ -1442,7 +1768,7 @@ void ModLoader::apply_pending_requests() {
     Log.info("{}/{} mod(s) active", active, m_mods.size());
 #if defined(__SWITCH__) && DUSK_HAS_FUNCHOOK
     // aleks2 (H37): how many kernel code memory objects the hooks took (code_arena.h).
-    char arenas[320];
+    char arenas[512];
     funchook_switch_describe(arenas, sizeof arenas);
     Log.info("{}", arenas);
 #endif
@@ -1466,10 +1792,21 @@ void ModLoader::tick() {
 #if ALEKS2_NATIVE_MOD_LOADER
     // aleks2 (H37): ten seconds of frames after the mods started, the boot is over: a crash
     // after that is not a boot loop (boot_guard.hpp).
+    const double nowSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (m_startupComplete && m_startupCompleteAt == 0.0) {
+        m_startupCompleteAt = nowSeconds;
+    }
+    if (m_startupComplete && m_bootTicks < kBootTicks && m_bootTicks >= 60 &&
+        nowSeconds - m_startupCompleteAt >= kBootSeconds)
+    {
+        m_bootTicks = kBootTicks - 1;  // ends below, as after 600 frames
+    }
     if (m_startupComplete && m_bootTicks < kBootTicks && ++m_bootTicks == kBootTicks) {
         if (auto* bootGuard = switchelf::boot_guard()) {
             bootGuard->end_boot();
         }
+        settle_update_journal();
     }
 #endif
 
@@ -1480,10 +1817,15 @@ void ModLoader::tick() {
         try {
             ModError error = MOD_ERROR_INIT;
             const bool delegated = !mod.native;
+            const auto updateStart = std::chrono::steady_clock::now();
             const auto result = delegated ?
                                     mod.runtime->service->update(
                                         mod.runtime->providerContext, mod.context.get(), &error) :
                                     mod.native->fn_update(&error);
+            svc::cpu_profile_add(mod.context.get(),
+                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - updateStart)
+                                          .count()));
             if (result != MOD_OK) {
                 fail_mod(mod, result,
                     lifecycle_error_message(
@@ -1498,9 +1840,57 @@ void ModLoader::tick() {
 
     svc::modules_frame_end();
     flush_toasts();
+
+    // V1-rc6: every 900 frames (~30 s), the mods' share of the game thread (hook callbacks + mod_update).
+    static uint32_t s_profileFrames = 0;
+    if (s_profileFrames == 0) {
+        svc::cpu_profile_set_thread();
+    }
+    if (++s_profileFrames >= 900) {
+        auto entries = svc::cpu_profile_take();
+        std::ranges::sort(entries, std::greater{}, &svc::CpuProfileEntry::nanoseconds);
+        std::string line;
+        uint64_t total = 0;
+        for (const auto& entry : entries) {
+            total += entry.nanoseconds;
+            const char* id = "?";
+            for (const auto& mod : mods()) {
+                if (mod.context.get() == entry.modContext) {
+                    id = mod.metadata.id.c_str();
+                    break;
+                }
+            }
+            if (line.size() < 400) {
+                line += fmt::format("{}{} {:.2f}", line.empty() ? "" : ", ", id,
+                    static_cast<double>(entry.nanoseconds) / 1e6 / s_profileFrames);
+            }
+        }
+        Log.info("mods cpu per frame (ms, game thread): total {:.2f} | {}",
+            static_cast<double>(total) / 1e6 / s_profileFrames, line.empty() ? "none" : line);
+        // V1-rc9: the hook dispatch (ours) against the mods' callbacks in it (theirs); timing sampled 1 in 64.
+        const auto hooks = svc::hook_stats_take(s_profileFrames);
+        if (hooks.targets != 0) {
+            Log.info("hooks per frame (game thread): {:.0f} calls on {} targets, dispatch {:.2f} ms (callbacks "
+                     "{:.2f} ms, dispatcher {:.2f} ms) | top: {}",
+                hooks.callsPerFrame, hooks.targets, hooks.dispatchMsPerFrame, hooks.callbacksMsPerFrame,
+                hooks.dispatchMsPerFrame - hooks.callbacksMsPerFrame, hooks.top);
+            if (!hooks.topCallbacks.empty()) {
+                Log.info("hooks: top target's callbacks (ms/frame): {}", hooks.topCallbacks);  // V1-rc16
+            }
+        }
+        s_profileFrames = 1;
+    }
 }
 
 void ModLoader::shutdown() {
+#if defined(__SWITCH__) && ALEKS2_NATIVE_MOD_LOADER
+    {
+        // DM1-b: again at exit -- Dawn starts its workers lazily, often after the boot log line.
+        namespace w = aleks2::dawn_worker;
+        Log.info("dawn workers at exit: {} thread(s) with a {} KiB stack (default {} KiB); {} fell back",
+            w::threads.load(), w::stackSize.load() / 1024, w::stackDefault.load() / 1024, w::fallbacks.load());
+    }
+#endif
     // Reverse initialization order, so importers shut down before their service providers.
     for (auto& mod : mods() | std::views::reverse) {
         deactivate_mod(mod);

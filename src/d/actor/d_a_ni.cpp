@@ -560,7 +560,8 @@ static void ni_swim(ni_class* i_this) {
     }
 }
 
-static int ni_carry(ni_class* i_this) {
+// DM1-c: Object Yeet 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE int ni_carry(ni_class* i_this) {
     ni_class* a_this = (ni_class*)i_this;
     cXyz sp40;
     cXyz sp4C;

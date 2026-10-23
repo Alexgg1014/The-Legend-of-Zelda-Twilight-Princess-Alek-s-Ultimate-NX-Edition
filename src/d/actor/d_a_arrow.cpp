@@ -83,7 +83,7 @@ const static dCcD_SrcSph l_coSphSrc = {
     } // mSphAttr
 };
 
-void daArrow_c::atHitCallBack(dCcD_GObjInf* i_atObjInf, fopAc_ac_c* i_tgActor, dCcD_GObjInf* i_tgObjInf) {
+DUSK_NOINLINE void daArrow_c::atHitCallBack(dCcD_GObjInf* i_atObjInf, fopAc_ac_c* i_tgActor, dCcD_GObjInf* i_tgObjInf) {
     if (i_tgObjInf->ChkTgArrowThrough()) {
         if (i_tgActor != NULL && fopAcM_GetName(i_tgActor) == fpcNm_E_PZ_e) {
             ((daE_PZ_c*)i_tgActor)->onBombArrowHit();
@@ -173,7 +173,7 @@ void daArrow_c::setLightChargeEffect(int param_0) {
     }
 }
 
-int daArrow_c::setArrowWaterNextPos(cXyz* i_start, cXyz* i_end) {
+DUSK_NOINLINE int daArrow_c::setArrowWaterNextPos(cXyz* i_start, cXyz* i_end) {  // aleks2 (rc17): a catalog hook target (dawnlight), inlined by the PGO build
     field_0x5dc.Set(i_start, i_end, this);
 
     if (dComIfG_Bgsp().LineCross(&field_0x5dc)) {
@@ -211,7 +211,7 @@ int daArrow_c::setArrowWaterNextPos(cXyz* i_start, cXyz* i_end) {
     return 0;
 }
 
-void daArrow_c::setArrowAt(f32 param_0) {
+DUSK_NOINLINE void daArrow_c::setArrowAt(f32 param_0) {  // aleks2 (rc17): a catalog hook target (dawnlight), inlined by the PGO build
     daAlink_c* player = daAlink_getAlinkActorClass();
 
     f32 radius;
@@ -964,7 +964,7 @@ int daArrow_c::procActorStop() {
     return TRUE;
 }
 
-int daArrow_c::procActorControllStop() {
+DUSK_NOINLINE int daArrow_c::procActorControllStop() {
     decAlphaBlur();
     return TRUE;
 }
@@ -1012,7 +1012,7 @@ int daArrow_c::procSlingHit() {
     return TRUE;
 }
 
-int daArrow_c::execute() {
+DUSK_NOINLINE int daArrow_c::execute() {  // aleks2 (rc17): a catalog hook target (chicken_bomb, fire_arrows, dawnlight), inlined by the PGO build
     field_0xa08.setActor();
     mReverb = dComIfGp_getReverb(fopAcM_GetRoomNo(this));
 
@@ -1070,7 +1070,7 @@ static int daArrow_execute(daArrow_c* i_this) {
     return i_this->execute();
 }
 
-int daArrow_c::draw() {
+DUSK_NOINLINE int daArrow_c::draw() {
     g_env_light.settingTevStruct(0, &current.pos, &tevStr);
 
     if (field_0x942 != 0 || field_0x93f != 0 || fopAcM_GetParam(this) == 8) {

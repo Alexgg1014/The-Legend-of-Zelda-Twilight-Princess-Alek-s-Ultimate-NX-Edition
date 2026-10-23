@@ -272,7 +272,7 @@ static void (*item_func_ptr[256])() = {
 #if !TARGET_PC
 inline
 #endif
-void getItemFunc(u8 i_itemNo) {
+DUSK_NOINLINE void getItemFunc(u8 i_itemNo) {
     dComIfGs_onItemFirstBit(i_itemNo);
     item_func_ptr[i_itemNo]();
 }
@@ -545,7 +545,7 @@ inline int getCheckItemFunc(u8 i_itemNo) {
     return item_getcheck_func_ptr[i_itemNo]();
 }
 
-int checkItemGet(u8 i_itemNo, int i_default) {
+DUSK_NOINLINE int checkItemGet(u8 i_itemNo, int i_default) {
     int result = getCheckItemFunc(i_itemNo);
 
     if (result == -1) {
@@ -976,7 +976,7 @@ void item_func_DROP_BOTTLE() {
     dComIfGs_setEmptyBottle(dItemNo_FAIRY_DROP_e);
 }
 
-void item_func_BEE_CHILD() {
+DUSK_NOINLINE void item_func_BEE_CHILD() {
     int bottleIdx;
     int i;
 
@@ -1501,7 +1501,7 @@ int item_getcheck_func_LIGHT_SWORD() {
     return dComIfGs_isCollectSword(COLLECT_LIGHT_SWORD);
 }
 
-int item_getcheck_func_FISHING_ROD_1() {
+DUSK_NOINLINE int item_getcheck_func_FISHING_ROD_1() {
     return (dComIfGs_getItem(SLOT_20, true) == dItemNo_FISHING_ROD_1_e ||
             dComIfGs_getItem(SLOT_20, true) == dItemNo_BEE_ROD_e ||
             dComIfGs_getItem(SLOT_20, true) == dItemNo_WORM_ROD_e ||

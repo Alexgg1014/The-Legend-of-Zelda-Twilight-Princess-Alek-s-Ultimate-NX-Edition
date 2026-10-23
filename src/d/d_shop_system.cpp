@@ -1382,7 +1382,7 @@ void dShopSystem_c::setSoldOutFlag() {
     mSoldOutFlag = mCursorPos - 1;
 }
 
-void dShopSystem_c::setSoldOut() {
+DUSK_NOINLINE void dShopSystem_c::setSoldOut() {
     if (mSoldOutFlag != 0xFF) {
         if (field_0xf60 < 0) {
             u8 sw = (u8)dShopSystem_itemActor[mSoldOutFlag]->home.angle.z & 0xFF;

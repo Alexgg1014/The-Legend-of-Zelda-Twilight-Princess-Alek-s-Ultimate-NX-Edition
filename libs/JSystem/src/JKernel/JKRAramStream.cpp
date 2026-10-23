@@ -70,7 +70,7 @@ s32 JKRAramStream::readFromAram() {
     return 1;
 }
 
-s32 JKRAramStream::writeToAram(JKRAramStreamCommand* command) {
+DUSK_NOINLINE s32 JKRAramStream::writeToAram(JKRAramStreamCommand* command) {  // aleks2 (rc17): a catalog hook target (hyrule_hide_and_seek), inlined by the PGO build
     u32 dstSize = command->mSize;
     u32 offset = command->mOffset;
     u32 writtenLength = 0;

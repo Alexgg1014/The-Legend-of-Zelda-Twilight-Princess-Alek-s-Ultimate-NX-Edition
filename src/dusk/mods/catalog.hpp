@@ -124,7 +124,10 @@ struct UpdateFetchResult {
     int retryAfter = 0;
 };
 
+// The platform whose packages this build installs (sent to the catalog).
 std::string_view platform() noexcept;
+// The device itself; differs from platform() on Switch, which installs linux-aarch64 packages.
+std::string_view device_platform() noexcept;
 bool supports_native_installs() noexcept;
 borealis::Task<UpdateFetchResult> fetch_updates(
     UpdateEnvironment environment, std::vector<std::string> targets);

@@ -34,9 +34,23 @@ struct Zone {
 };
 
 /// The tour, in order. Every stage, room and point is taken from the warp table
-/// (src/dusk/map_loader_definitions.h); docs/switch-h34-content-preparation.md gives
+/// (src/dusk/map_loader_definitions.h); docs/history/switch-h34-content-preparation.md gives
 /// the evidence for each one.
 std::span<const Zone> zones();
+
+/// aleks2 (SHADERS-c1): the six zones above (Prepare Shaders as players see it) and the
+/// full Shader Tour that builds the list shipped in the NRO. zones() is one or the other,
+/// as use_master_tour() chose (shader_tour=1 in shader-lab.ini).
+std::span<const Zone> player_zones();
+std::span<const Zone> master_zones();
+void use_master_tour(bool master);
+bool master_tour();
+
+/// V1-c4: the harvest tour (shader_tour=all): every room of the warp table, built at run
+/// time by the caller. zones() returns it while set; an empty vector goes back to the
+/// lists above. Shorter per-zone timing (harvest_timing()) since it is hundreds of rooms.
+void use_harvest_zones(std::vector<Zone> zones);
+bool harvest_tour();
 
 struct Timing {
     double minRenderSeconds = 15.0;  ///< always drawn at least this long once loaded
@@ -46,6 +60,9 @@ struct Timing {
     double loadTimeoutSeconds = 120.0;
     double eventWaitSeconds = 30.0;  ///< a cutscene on arrival may finish first
 };
+
+/// V1-c4: the harvest tour's shorter timing (hundreds of rooms).
+Timing harvest_timing();
 
 enum class ZoneEnd : std::uint8_t {
     None,      ///< keep drawing

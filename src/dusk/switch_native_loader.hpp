@@ -9,16 +9,21 @@
 // number of packages:
 //
 //   Off      nothing is read; the mod is refused with that reason.
-//   Dry Run  the file is validated and every import and relocation planned against this build
-//            (default). A JSON report goes to sdmc:/switch/dusklight/mods/.reports/<id>.json.
+//   Dry Run  the file is validated and every import and relocation planned against this build.
+//            A JSON report goes to sdmc:/switch/dusklight/mods/.reports/<id>.json.
 //            Nothing is mapped executable and no mod code runs; the mod is listed as refused,
 //            with the result.
 //   Execute  as Dry Run, then mapped (switch_elf_memory.cpp), its .eh_frame registered, its
 //            exports found. Its constructors run later, when the mod is activated, under the
 //            boot guard (boot_guard.hpp) -- a disabled or quarantined mod never runs any code.
+//            The default since DM1-c, on a new install. An install that already booted this loader
+//            with the old default (Dry Run) and never chose a mode keeps Dry Run (start()).
 //
 // Mappings are never undone: a disabled mod's code stays mapped, inert, until the game exits.
 #include "dusk/mods/loader/boot_guard.hpp"
+#if defined(ALEKS2_MOD_TLS)
+#include "dusk/mods/loader/elf_tls.hpp"
+#endif
 
 #include <cstdint>
 #include <filesystem>
@@ -36,6 +41,8 @@ namespace dusk::switchelf {
 
 enum class LoaderMode : int32_t { Off = 0, DryRun = 1, Execute = 2 };
 LoaderMode loader_mode();
+// Loader-only lab mode: Execute for this session only; the saved Loader Mode is not changed.
+void force_execute_this_session();
 void set_loader_mode(LoaderMode mode);  // persisted
 std::string_view loader_mode_name(LoaderMode mode);
 
@@ -76,5 +83,12 @@ std::optional<std::string> check_package(mods::ModBundle& bundle, std::string_vi
 
 // The game image's exported surface, for diagnostics: how many names it exports.
 size_t exported_symbol_count();
+
+#if defined(ALEKS2_MOD_TLS)
+// TLS-lab: the resolver a Linux module with TLS gets (the game's exports, the Linux, TLS and
+// std::call_once shims, the call_once thread-locals' accessors), plus `extra` thread-locals of the game.
+// For the self-test (switch_tls_selftest.cpp), which must bind exactly as a mod does.
+mods::elf::Resolver linux_tls_resolver(std::vector<mods::elf::tls::HostVariable> extra = {});
+#endif
 
 }  // namespace dusk::switchelf

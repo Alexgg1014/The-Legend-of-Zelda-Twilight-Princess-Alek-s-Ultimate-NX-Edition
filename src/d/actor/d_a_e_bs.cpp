@@ -427,7 +427,7 @@ static DUSK_NOINLINE void e_bs_damage(e_bs_class* i_this) {
     }
 }
 
-static void damage_check(e_bs_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_bs_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     

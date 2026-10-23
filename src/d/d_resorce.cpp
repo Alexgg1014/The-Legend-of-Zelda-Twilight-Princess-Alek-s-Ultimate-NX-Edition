@@ -598,7 +598,7 @@ int dRes_info_c::setRes(JKRArchive* i_archive, JKRHeap* i_heap) {
 
 DUSK_GAME_DATA bool data_8074C6C0_debug;
 
-int dRes_info_c::setRes() {
+DUSK_NOINLINE int dRes_info_c::setRes() {  // aleks2 (rc18): a catalog hook target (Dawnlight 5.1.0); inlined into syncRes/syncAllRes in rc16 and rc17
     if (mArchive == NULL) {
         if (mDMCommand == NULL) {
             return -1;
@@ -805,7 +805,7 @@ dRes_control_c::~dRes_control_c() {
     }
 }
 
-int dRes_control_c::setRes(char const* i_arcName, dRes_info_c* i_resInfo, int i_infoNum,
+DUSK_NOINLINE int dRes_control_c::setRes(char const* i_arcName, dRes_info_c* i_resInfo, int i_infoNum,
                            char const* i_path, u8 i_mountDirection, JKRHeap* i_heap) {
     dRes_info_c* resInfo = getResInfo(i_arcName, i_resInfo, i_infoNum);
 

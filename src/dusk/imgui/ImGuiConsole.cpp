@@ -6,6 +6,7 @@
 #include "dusk/action_bindings.h"
 #include "dusk/config.hpp"
 #include "dusk/data.hpp"
+#include "dusk/deko3d_policy.hpp"
 #include "dusk/game_mode.hpp"
 #include "dusk/livesplit.h"
 #include "dusk/main.h"
@@ -473,6 +474,8 @@ namespace dusk {
             return "WebGPU"sv;
         case BACKEND_NULL:
             return "Null"sv;
+        case BACKEND_DEKO3D:  // aleks2 (deko3d rc12): as Settings names it
+            return dusk::deko3d_policy::deko3d_default() ? "deko3d (recommended)"sv : "deko3d (Experimental)"sv;
         }
     }
 
@@ -496,6 +499,8 @@ namespace dusk {
             return "webgpu"sv;
         case BACKEND_NULL:
             return "null"sv;
+        case BACKEND_DEKO3D:
+            return "deko3d"sv;
         }
     }
 
@@ -534,6 +539,11 @@ namespace dusk {
         }
         if (backend == "null") {
             outBackend = BACKEND_NULL;
+            return true;
+        }
+        // aleks2 (deko3d P1)
+        if (backend == "deko3d") {
+            outBackend = BACKEND_DEKO3D;
             return true;
         }
 

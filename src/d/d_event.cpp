@@ -612,7 +612,7 @@ int dEvt_control_c::change() {
     return -1;
 }
 
-int dEvt_control_c::entry() {
+DUSK_NOINLINE int dEvt_control_c::entry() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, twilit_essentials), inlined by the PGO build
     if (mNum != 0) {
         // "%06d: event: %d event requests!!"
         OS_REPORT("\x1b[34m%06d: event: %d個のイベント要求!!\n\x1b[m", g_Counter.mCounter0, mNum);
@@ -870,7 +870,7 @@ void dEvt_control_c::offSkipFade() {
     mIsSkipFade = FALSE;
 }
 
-bool dEvt_control_c::skipper() {
+DUSK_NOINLINE bool dEvt_control_c::skipper() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, coop_mod, randomizer), inlined by the PGO build
     bool doSkip = false;
     bool canSkip = false;
 

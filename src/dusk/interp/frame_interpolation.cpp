@@ -143,7 +143,7 @@ uint64_t sim_tick_seq() {
     return s_simTickSeq;
 }
 
-void begin_frame(float step) {
+DUSK_NOINLINE void begin_frame(float step) {
     const game_clock::FrameTiming& timing = game_clock::g_frameTiming;
     if (s_observedPresentationEpoch != timing.presentationEpoch) {
         s_observedPresentationEpoch = timing.presentationEpoch;
@@ -156,7 +156,7 @@ void begin_frame(float step) {
     }
 }
 
-bool is_enabled() {
+DUSK_NOINLINE bool is_enabled() {
     return game_clock::g_frameTiming.interpolating;
 }
 
@@ -195,7 +195,7 @@ void request_presentation_sync() {
     s_syncPresentation = true;
 }
 
-bool presentation_sync_active() {
+DUSK_NOINLINE bool presentation_sync_active() {
     if (!is_enabled()) {
         return false;
     }

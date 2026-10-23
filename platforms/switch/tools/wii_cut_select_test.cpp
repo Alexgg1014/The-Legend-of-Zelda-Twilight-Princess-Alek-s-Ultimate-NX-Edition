@@ -27,7 +27,7 @@ int main() {
 
     // gesture x mirror x swap x branch
     const SwordGesture gestures[] = {SwordGesture::None, SwordGesture::Generic, SwordGesture::Vertical,
-        SwordGesture::LeftToRight, SwordGesture::RightToLeft};
+        SwordGesture::LeftToRight, SwordGesture::RightToLeft, SwordGesture::Thrust};
     const CutBranch branches[] = {CutBranch::Normal, CutBranch::Targeted, CutBranch::Chain, CutBranch::Finisher,
         CutBranch::StunnedEnemy, CutBranch::Other};
     for (SwordGesture g : gestures) {
@@ -45,6 +45,8 @@ int main() {
                     case SwordGesture::Vertical: CHECK(s == CutStyle::Vertical); break;  // sides do not matter
                     case SwordGesture::LeftToRight: CHECK(s == ((mirror != swap) ? CutStyle::Right : CutStyle::Left)); break;
                     case SwordGesture::RightToLeft: CHECK(s == ((mirror != swap) ? CutStyle::Left : CutStyle::Right)); break;
+                    // V1-rc7: a thrust is the stab, except in a chain (which alternates left and right)
+                    case SwordGesture::Thrust: CHECK(s == (b == CutBranch::Chain ? CutStyle::Keep : CutStyle::Stab)); break;
                     }
                 }
             }

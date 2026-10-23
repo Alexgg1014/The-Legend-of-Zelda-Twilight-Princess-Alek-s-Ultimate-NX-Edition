@@ -218,7 +218,7 @@ static BOOL way_gake_check(e_dd_class* i_this, f32 param_1) {
     return FALSE;
 }
 
-static void damage_check(e_dd_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_dd_class* i_this) {
     fopAc_ac_c* a_this = &i_this->actor;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
 

@@ -3,11 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <string_view>
 
 namespace dusk::perf_tour {
 namespace {
 
-// Heavy -> medium -> light. Evidence for each entry: docs/switch-h35-fifo-plan.md
+// Heavy -> medium -> light. Evidence for each entry: docs/history/switch-h35-fifo-plan.md
 // ("Performance Tour"). Ordon is entered at point 1, from Outside Link's House: point 0 is
 // the Ordon Ranch pathway entrance, which on a new file plays the goat scene and leaves
 // for F_SP00 (H34-c2 on hardware).
@@ -15,6 +16,10 @@ constexpr std::array kZones{
     Zone{"F_SP122", 8, 0, -1, "Outside Castle Town - West", "heavy"},
     Zone{"F_SP103", 0, 1, -1, "Ordon Village", "medium"},
     Zone{"R_SP01", 4, 0, -1, "Link's House", "light"},
+    // V1-rc7: Hyrule Field, where players feel the frame rate most (long draw distance). Fourth and last, so the
+    // first three stay comparable with the rc4-rc6 tours. Room 0 point 0 is the Shader Tour's entry (shader_prep.cpp),
+    // already warped to on the console.
+    Zone{"F_SP121", 0, 0, -1, "Hyrule Field", "heavy-field"},
 };
 
 const char* status_name(ZoneStatus status) {
@@ -73,6 +78,14 @@ void write_performance(benchmark::JsonWriter& j, const benchmark::FrameSummary& 
     j.integer("over_50_ms", static_cast<std::int64_t>(f.over50));
     j.num("pct_over_50_ms", f.pctOver50, 2);
     j.num("judder_pct", f.judderPct, 2);
+    // V1-rc8: missed frames are over {kMissedFrameMs} (was 33.3: a perfect 30 fps frame counted); the cadence.
+    j.num("missed_frame_threshold_ms", benchmark::kMissedFrameMs, 2);
+    j.begin_object("vblank_cadence");
+    j.integer("1v", static_cast<std::int64_t>(f.vblanks[1]));
+    j.integer("2v", static_cast<std::int64_t>(f.vblanks[2]));
+    j.integer("3v", static_cast<std::int64_t>(f.vblanks[3]));
+    j.integer("4v_plus", static_cast<std::int64_t>(f.vblanks[4]));
+    j.end_object();
     j.end_object();
 }
 
@@ -130,6 +143,9 @@ void write_zone(benchmark::JsonWriter& j, std::size_t index, const Zone& zone, c
     j.integer("layer", zone.layer);
     j.str("name", zone.name);
     j.str("class", zone.category);
+    if (const auto* s = plan_step(index)) {
+        j.str("config", s->label);  // V1-rc9: tour_matrix
+    }
     j.str("status", status_name(z.status));
     j.str("detail", z.detail);
     j.str("arrived_stage", z.arrivedStage);
@@ -138,6 +154,11 @@ void write_zone(benchmark::JsonWriter& j, std::size_t index, const Zone& zone, c
     j.boolean("measurement_complete", z.measurementComplete);
     j.num("measure_seconds_wall", z.measureSecondsWall, 3);
     j.integer("frames_with_event_running", static_cast<std::int64_t>(z.framesWithEvent));
+    if (z.measured) {
+        j.begin_object("telemetry");
+        perf::write_telemetry(j, z.telemetry, z.telemetryBudgetMs, z.telemetryGpu);
+        j.end_object();
+    }
     j.integer("frames_with_ui_visible", static_cast<std::int64_t>(z.framesWithUiVisible));
     write_performance(j, z.frames);
     j.begin_object("cpu_zones_ms");
@@ -162,8 +183,123 @@ void write_zone(benchmark::JsonWriter& j, std::size_t index, const Zone& zone, c
 
 }  // namespace
 
+std::vector<PlanStep> g_plan;
+std::vector<Zone> g_planZones;
+std::string g_planSpec;
+
+std::string_view trim(std::string_view s) {
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) {
+        s.remove_prefix(1);
+    }
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) {
+        s.remove_suffix(1);
+    }
+    return s;
+}
+
 std::span<const Zone> zones() {
+    if (!g_planZones.empty()) {
+        return g_planZones;
+    }
     return kZones;
+}
+
+std::span<const Zone> base_zones() {
+    return kZones;
+}
+
+std::vector<MatrixAxis> parse_matrix(std::string_view spec, std::string& notes) {
+    std::vector<MatrixAxis> axes;
+    while (!spec.empty()) {
+        const auto end = spec.find_first_of(";|");
+        const std::string_view part = trim(spec.substr(0, end));
+        spec = end == std::string_view::npos ? std::string_view{} : spec.substr(end + 1);
+        if (part.empty()) {
+            continue;
+        }
+        const auto colon = part.find(':');
+        MatrixAxis axis;
+        axis.key = std::string(trim(part.substr(0, colon)));
+        if (colon != std::string_view::npos) {
+            std::string_view values = part.substr(colon + 1);
+            while (!values.empty()) {
+                const auto comma = values.find(',');
+                const std::string_view v = trim(values.substr(0, comma));
+                values = comma == std::string_view::npos ? std::string_view{} : values.substr(comma + 1);
+                if (!v.empty()) {
+                    axis.values.emplace_back(v);
+                }
+            }
+        }
+        bool duplicate = false;
+        for (const auto& a : axes) {
+            duplicate = duplicate || a.key == axis.key;
+        }
+        if (axis.key.empty() || axis.values.size() < 2 || duplicate) {
+            notes += "'" + std::string(part) + "' (needs key:a,b, once); ";
+            continue;
+        }
+        axes.push_back(std::move(axis));
+    }
+    return axes;
+}
+
+std::string describe_axes(const std::vector<MatrixAxis>& axes) {
+    std::string s;
+    for (const auto& a : axes) {
+        s += (s.empty() ? "" : " ") + a.key + "[";
+        for (std::size_t i = 0; i < a.values.size(); ++i) {
+            s += (i ? "," : "") + a.values[i];
+        }
+        s += "]";
+    }
+    return s;
+}
+
+std::vector<PlanStep> build_plan(std::span<const Zone> base, const std::vector<MatrixAxis>& axes) {
+    std::vector<PlanStep> plan;
+    const auto step = [&](std::size_t zone, std::size_t changedAxis, std::size_t value) {
+        PlanStep s;
+        s.zone = zone;
+        for (std::size_t a = 0; a < axes.size(); ++a) {
+            const auto& v = axes[a].values[a == changedAxis ? value : 0];
+            s.values.emplace_back(axes[a].key, v);
+            s.label += (s.label.empty() ? "" : " ") + axes[a].key + "=" + v;
+        }
+        plan.push_back(std::move(s));
+    };
+    for (std::size_t z = 0; z < base.size(); ++z) {
+        step(z, axes.size(), 0);  // the baseline
+        if (std::string_view{base[z].category}.rfind("heavy", 0) != 0) {
+            continue;
+        }
+        for (std::size_t a = 0; a < axes.size(); ++a) {
+            for (std::size_t v = 1; v < axes[a].values.size(); ++v) {
+                step(z, a, v);
+            }
+        }
+    }
+    return plan;
+}
+
+void set_plan(std::vector<PlanStep> plan, std::string spec) {
+    g_plan = std::move(plan);
+    g_planSpec = std::move(spec);
+    g_planZones.clear();
+    if (g_planSpec.empty()) {
+        g_plan.clear();
+    }
+    for (const auto& s : g_plan) {
+        g_planZones.push_back(kZones[s.zone]);
+    }
+}
+
+const PlanStep* plan_step(std::size_t index) {
+    return index < g_plan.size() && !g_planSpec.empty() ? &g_plan[index] : nullptr;
+}
+
+const std::string& plan_spec() {
+    return g_planSpec;
 }
 
 PipelineWaitEnd decide_pipeline_wait(const PipelineWaitProgress& p, const Timing& t) {
@@ -248,6 +384,10 @@ std::string build_report(const TourReport& r, std::span<const Zone> plan) {
     j.integer("schema_version", kReportSchemaVersion);
     j.str("note", "three zones measured one after the other with the settings the console already had: heavy, "
                   "medium, light. Every figure is per zone; nothing is averaged across zones");
+    if (!plan_spec().empty()) {
+        // V1-rc9: one row per (zone, config): the heavy zones once per value of each toggle, the others once.
+        j.str("tour_matrix", plan_spec());
+    }
 
     j.begin_object("build");
     j.str("id", r.buildId);
@@ -264,7 +404,7 @@ std::string build_report(const TourReport& r, std::span<const Zone> plan) {
     j.integer("started_unix", r.startedUnix);
     j.str("file", r.fileName);
     j.num("total_seconds", r.totalSeconds, 1);
-    j.str("zone_order", "heavy, medium, light");
+    j.str("zone_order", "heavy, medium, light, heavy-field");
     j.boolean("governor_reset_between_zones", false);
     j.end_object();
 
@@ -285,6 +425,8 @@ std::string build_report(const TourReport& r, std::span<const Zone> plan) {
     j.end_object();
     j.str("uniform_reuse_mode", r.uniformReuseModeAtStart);
     j.boolean("pipeline_memo", r.pipelineMemo);
+    j.boolean("minimal_hud", r.minimalHud);
+    j.boolean("dual_screen", r.dualScreen);
     j.integer("max_frame_rate", r.maxFrameRate);
     j.boolean("vsync", r.vsync);
     j.str("graphics_api", r.graphicsApi);
@@ -345,7 +487,15 @@ std::string build_report(const TourReport& r, std::span<const Zone> plan) {
                                          "do not compare those zones");
     j.integer("uniform_verification_mismatches", static_cast<std::int64_t>(mismatches));
     const ZoneResult* heavy = !r.zones.empty() ? &r.zones.front() : nullptr;
-    const ZoneResult* light = r.zones.size() == plan.size() && !r.zones.empty() ? &r.zones.back() : nullptr;
+    // V1-rc7: the light zone by its category, not the last one (Hyrule Field now comes after it).
+    const ZoneResult* light = nullptr;
+    if (r.zones.size() == plan.size()) {
+        for (std::size_t i = 0; i < plan.size(); ++i) {
+            if (std::string_view{plan[i].category} == "light") {
+                light = &r.zones[i];
+            }
+        }
+    }
     j.boolean("heavy_zone_stalled", heavy != nullptr && heavy->interp.recovery.stalledInZone());
     j.boolean("light_zone_arrived_stalled", light != nullptr && light->interp.recovery.stalledAtArrival());
     j.boolean("light_zone_recovered", light != nullptr && light->interp.recovery.recovered());
@@ -419,6 +569,23 @@ std::string summary_text(const TourReport& r, std::span<const Zone> plan) {
                                                                                      ", interpolation stalled") :
                                                     "",
                 z.status == ZoneStatus::Completed ? "" : " (partial)");
+            out += line;
+            // V1-c1: GPU time and who explains the missed frames.
+            const auto w = perf::summarize(z.telemetry, z.telemetryBudgetMs);
+            std::vector<float> gpu;
+            for (const auto& f : z.telemetry) {
+                if (f.gpuMs >= 0.f) {
+                    gpu.push_back(f.gpuMs);
+                }
+            }
+            if (gpu.empty()) {
+                std::snprintf(line, sizeof line, "    missed %.1f%% (limit: %s), GPU time not available\n",
+                    w.missedPct(), perf::verdict(w));
+            } else {
+                std::snprintf(line, sizeof line, "    missed %.1f%% (limit: %s), GPU p50 %.1f ms p99 %.1f ms\n",
+                    w.missedPct(), perf::verdict(w), static_cast<double>(perf::percentile(gpu, 50)),
+                    static_cast<double>(perf::percentile(gpu, 99)));
+            }
         } else {
             std::snprintf(line, sizeof line, "%s (%s): %s%s%s\n", plan[i].name, plan[i].category,
                 status_name(z.status), z.detail.empty() ? "" : " - ", z.detail.c_str());

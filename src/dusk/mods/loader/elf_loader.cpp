@@ -36,6 +36,9 @@ constexpr uint32_t kRelIrelative = 1032;
 constexpr uint64_t kMaxDynamicEntries = 4096;
 constexpr uint64_t kMaxVersionEntries = 4096;
 constexpr uint64_t kMaxReserveAlign = 2ull << 20;
+constexpr uint64_t kDfStaticTls = 0x10;
+constexpr uint64_t kMaxTlsBytes = 1ull << 20;  // per module and thread; the catalog's largest is 11616 (Dawnlight)
+constexpr uint64_t kMaxTlsAlign = kPageSize;
 
 template <class T>
 T load(const uint8_t* p) {
@@ -341,6 +344,9 @@ ParseResult parse(std::span<const uint8_t> file, const Limits& limits) {
 
     Image image;
     image.file = file;
+    image.phdrTable.assign(file.begin() + static_cast<std::ptrdiff_t>(phoff),
+        file.begin() + static_cast<std::ptrdiff_t>(phoff + tableBytes));
+    image.phnum = phnum;
     std::optional<Segment> dynamic;
     for (uint16_t i = 0; i < phnum; ++i) {
         const uint8_t* p = r.at(phoff + 56ull * i);
@@ -395,8 +401,20 @@ ParseResult parse(std::span<const uint8_t> file, const Limits& limits) {
             diag = fail(Error::InterpreterPresent, "has PT_INTERP: an executable, not a library");
             return result;
         case kPtTls:
-            diag = fail(Error::TlsUnsupported, "has thread-local storage (PT_TLS), which the loader does not provide");
-            return result;
+            // TLS-lab: kept as the module's template; plan() refuses it unless the caller offers TLS.
+            if (image.tls) {
+                diag = fail(Error::BadProgramHeaders, "more than one PT_TLS");
+                return result;
+            }
+            if (s.filesz > s.memsz || s.memsz > kMaxTlsBytes || (s.align > 1 && !is_pow2(s.align)) ||
+                s.align > kMaxTlsAlign)
+            {
+                diag = fail(Error::BadProgramHeaders, "PT_TLS sizes or alignment are not acceptable (memsz " +
+                                                          std::to_string(s.memsz) + ", align " + hex(s.align) + ")");
+                return result;
+            }
+            image.tls = TlsTemplate{s.vaddr, s.filesz, s.memsz, std::max<uint64_t>(s.align, 1)};
+            break;
         case kPtGnuRelro:
             image.relro = s;
             break;
@@ -456,6 +474,13 @@ ParseResult parse(std::span<const uint8_t> file, const Limits& limits) {
     }
 
     const AddressMap m{&image.loads};
+    // TLS-lab: the initialisation image is read from the mapped image by every thread's first access,
+    // so it must lie in file-backed memory of one PT_LOAD.
+    if (image.tls && image.tls->filesz != 0 && !m.file_offset(image.tls->vaddr, image.tls->filesz)) {
+        diag = fail(Error::BadProgramHeaders, "PT_TLS initialisation image at " + hex(image.tls->vaddr) +
+                                                  " is not inside one PT_LOAD's file-backed bytes");
+        return result;
+    }
     if (!dynamic) {
         diag = fail(Error::NoDynamic, "no PT_DYNAMIC: nothing says how to relocate it");
         return result;
@@ -512,6 +537,7 @@ ParseResult parse(std::span<const uint8_t> file, const Limits& limits) {
         return result;
     }
     image.bindNow = dyn.contains(kDtBindNow) || (get(kDtFlags) & kDfBindNow) || (get(kDtFlags1) & kDf1Now);
+    image.staticTls = (get(kDtFlags) & kDfStaticTls) != 0;
     image.gnuHash = dyn.contains(kDtGnuHash);
     image.sysvHash = dyn.contains(kDtHash);
 
@@ -575,14 +601,21 @@ ParseResult parse(std::span<const uint8_t> file, const Limits& limits) {
         sym.value = load<uint64_t>(s + 8);
         sym.size = load<uint64_t>(s + 16);
         if (sym.type == kSttTls) {
-            diag = fail(Error::TlsUnsupported, "thread-local symbol '" + std::string(sym.name) + "'");
-            return result;
+            // TLS-lab: a defined one's value is an offset in the module's TLS block, not an address.
+            image.tlsSymbols = true;
+            if (sym.defined() && (!image.tls || sym.value > image.tls->memsz ||
+                                     sym.size > image.tls->memsz - sym.value))
+            {
+                diag = fail(Error::BadSymbolTable, "thread-local symbol '" + std::string(sym.name) +
+                                                       "' lies outside the module's PT_TLS");
+                return result;
+            }
         }
         if (sym.type == kSttGnuIfunc) {
             diag = fail(Error::IfuncUnsupported, "indirect function '" + std::string(sym.name) + "'");
             return result;
         }
-        if (sym.defined() && sym.shndx != kShnAbs && sym.bind != kStbLocal &&
+        if (sym.defined() && sym.type != kSttTls && sym.shndx != kShnAbs && sym.bind != kStbLocal &&
             m.segment(sym.value, 0) == nullptr)
         {
             diag = fail(Error::BadSymbolTable, "symbol '" + std::string(sym.name) + "' defined outside the image");
@@ -753,9 +786,21 @@ ParseResult parse(std::span<const uint8_t> file, const Limits& limits) {
     return result;
 }
 
-Plan plan(const Image& image, const Resolver& resolver, const NeededPolicy& needed) {
+Plan plan(const Image& image, const Resolver& resolver, const NeededPolicy& needed, bool tls) {
     Plan out;
     const AddressMap m{&image.loads};
+
+    // Thread-local storage first, as parse() used to refuse it: the first problem is what a report and
+    // the boot guard's category name.
+    if (!tls && (image.tls || image.tlsSymbols)) {
+        out.problems.push_back(fail(Error::TlsUnsupported,
+            "has thread-local storage (PT_TLS / TLS symbols), which the loader does not provide"));
+    }
+    if (tls && image.staticTls) {
+        out.problems.push_back(fail(Error::TlsUnsupported,
+            "linked for initial-exec TLS (DF_STATIC_TLS): it needs a static TLS block allocated with every "
+            "thread, and the loader provides only dynamic TLS (TLSDESC, __tls_get_addr)"));
+    }
 
     for (const auto soname : image.needed) {
         std::string why;
@@ -771,8 +816,16 @@ Plan plan(const Image& image, const Resolver& resolver, const NeededPolicy& need
     uint64_t textRelocs = 0, outside = 0;
     uint64_t firstText = 0, firstOutside = 0;
     std::set<uint32_t> referenced;
+    uint64_t tprel = 0, tlsMisuse = 0;
+    std::string firstMisuse;
+    const auto misuse = [&](std::string what) {
+        if (tlsMisuse++ == 0) {
+            firstMisuse = std::move(what);
+        }
+    };
     for (const auto& rel : image.relocations) {
         ++counts[rel.type];
+        uint64_t width = 8;
         switch (rel.type) {
         case kRelNone:
             continue;
@@ -782,14 +835,54 @@ Plan plan(const Image& image, const Resolver& resolver, const NeededPolicy& need
         case kRelGlobDat:
         case kRelJumpSlot:
             if (rel.symbol != 0) {
+                if (image.symbols[rel.symbol].type == kSttTls) {
+                    misuse(std::string(relocation_name(rel.type)) + " against thread-local '" +
+                           std::string(image.symbols[rel.symbol].name) + "'");
+                    continue;
+                }
                 referenced.insert(rel.symbol);
             }
             break;
+        case kRelTlsDesc:
+        case kRelTlsDtpMod64:
+        case kRelTlsDtpRel64: {
+            if (!tls) {
+                ++unsupported[rel.type];
+                continue;
+            }
+            // TLS-lab. A TLSDESC fills two words (the GOT pair); the tls_index pair is two
+            // relocations of one word each.
+            width = rel.type == kRelTlsDesc ? 16 : 8;
+            if (rel.symbol == 0) {
+                if (!image.tls && rel.type != kRelTlsDtpMod64) {
+                    misuse(std::string(relocation_name(rel.type)) + " for the module's own TLS, but it has no PT_TLS");
+                    continue;
+                }
+            } else {
+                const Symbol& sym = image.symbols[rel.symbol];
+                if (sym.type != kSttTls) {
+                    misuse(std::string(relocation_name(rel.type)) + " against '" + std::string(sym.name) +
+                           "', which is not thread-local");
+                    continue;
+                }
+                // An import (the game's thread-local) gets, for __tls_get_addr, a module id of its own
+                // that stands for its accessor (TlsProvider::import_module).
+                referenced.insert(rel.symbol);
+            }
+            break;
+        }
+        case kRelTlsTpRel64:
+            if (!tls) {
+                ++unsupported[rel.type];
+            } else {
+                ++tprel;
+            }
+            continue;
         default:
             ++unsupported[rel.type];
             continue;
         }
-        const Segment* seg = m.segment(rel.offset, 8);
+        const Segment* seg = m.segment(rel.offset, width);
         if (seg == nullptr) {
             if (outside++ == 0) {
                 firstOutside = rel.offset;
@@ -803,7 +896,19 @@ Plan plan(const Image& image, const Resolver& resolver, const NeededPolicy& need
     for (const auto& [type, n] : unsupported) {
         out.problems.push_back(fail(Error::UnsupportedRelocation,
             std::string(relocation_name(type)) + " (" + std::to_string(type) + ") x" + std::to_string(n) +
-                ": the loader applies only NONE, ABS64, GLOB_DAT, JUMP_SLOT and RELATIVE"));
+                (tls ? ": the loader applies only NONE, ABS64, GLOB_DAT, JUMP_SLOT, RELATIVE, TLSDESC, "
+                       "TLS_DTPMOD64 and TLS_DTPREL64" :
+                       ": the loader applies only NONE, ABS64, GLOB_DAT, JUMP_SLOT and RELATIVE")));
+    }
+    if (tprel != 0) {
+        out.problems.push_back(fail(Error::TlsUnsupported,
+            "R_AARCH64_TLS_TPREL64 x" + std::to_string(tprel) +
+                ": initial-exec TLS needs a static TLS block allocated with every thread; the loader provides "
+                "only dynamic TLS (TLSDESC, __tls_get_addr)"));
+    }
+    if (tlsMisuse != 0) {
+        out.problems.push_back(fail(Error::BadRelocationTable,
+            std::to_string(tlsMisuse) + " malformed thread-local relocation(s), first: " + firstMisuse));
     }
     if (outside != 0) {
         out.problems.push_back(fail(Error::RelocationOutOfImage,
@@ -823,13 +928,14 @@ Plan plan(const Image& image, const Resolver& resolver, const NeededPolicy& need
         d.symbol = index;
         d.name = sym.name;
         d.version = sym.version;
+        d.tls = sym.type == kSttTls;
         if (sym.defined()) {
             d.source = Source::Module;
-            d.address = sym.value;
+            d.address = sym.value;  // for a thread-local, the offset in the module's block
             out.imports.push_back(std::move(d));
             continue;
         }
-        const ImportQuery query{sym.name, sym.version, sym.type == kSttFunc, sym.bind == kStbWeak};
+        const ImportQuery query{sym.name, sym.version, sym.type == kSttFunc, sym.bind == kStbWeak, d.tls};
         std::string why;
         const auto r = resolver ? resolver(query, why) : std::nullopt;
         if (r && r->source == Source::Denied) {
@@ -841,7 +947,7 @@ Plan plan(const Image& image, const Resolver& resolver, const NeededPolicy& need
             d.source = r->source;
             d.address = r->address;
             d.why = why;
-        } else if (sym.bind == kStbWeak) {
+        } else if (sym.bind == kStbWeak && !d.tls) {  // a thread-local has no null address to stand for it
             d.source = Source::WeakNull;
         } else {
             d.source = Source::Missing;
@@ -925,15 +1031,27 @@ uint64_t Loaded::find(std::string_view name) const {
     return 0;
 }
 
-MapResult map(const Image& image, const Plan& plan, MemoryBackend& memory) {
+MapResult map(const Image& image, const Plan& plan, MemoryBackend& memory, TlsProvider* tls) {
     MapResult out;
     if (!plan.ok()) {
         out.diagnostic = plan.problems.front();
         return out;
     }
+    bool tlsRelocations = false;
+    for (const auto& rel : image.relocations) {
+        tlsRelocations |= rel.type == kRelTlsDesc || rel.type == kRelTlsDtpMod64 || rel.type == kRelTlsDtpRel64;
+    }
+    if ((image.tls || tlsRelocations) && tls == nullptr) {
+        out.diagnostic = fail(Error::TlsUnsupported, "uses thread-local storage and no TLS provider was given");
+        return out;
+    }
+    std::string error;
+    if ((image.tls || tlsRelocations) && !tls->prepare(error)) {
+        out.diagnostic = fail(Error::MapFailed, "could not prepare the module's TLS: " + error);
+        return out;
+    }
     uint8_t* staging = nullptr;
     uint64_t runtimeBase = 0;
-    std::string error;
     const uint64_t align = std::max<uint64_t>(image.maxAlign, kPageSize);
     if (!memory.reserve(image.size, align, staging, runtimeBase, error) || staging == nullptr) {
         out.diagnostic = fail(Error::MapFailed, "could not reserve " + std::to_string(image.size) + " bytes: " + error);
@@ -941,21 +1059,71 @@ MapResult map(const Image& image, const Plan& plan, MemoryBackend& memory) {
     }
     const uint64_t bias = runtimeBase - image.base;
     std::memset(staging, 0, image.size);
+    uint32_t counterReads = 0;
     for (const auto& s : image.loads) {
         std::memcpy(staging + (s.vaddr - image.base), image.file.data() + s.offset, s.filesz);
+        if ((s.perm & kPermX) != 0) {
+            counterReads += redirect_counter_reads(staging + (s.vaddr - image.base), s.filesz);  // V1-rc7
+        }
     }
 
     // S for every referenced symbol: the module's own definitions move with the image,
     // resolved imports are absolute, weak imports nothing defines are null.
+    // A thread-local's value stays what the plan says: an offset in the module's block, or the accessor
+    // of an imported one.
     std::vector<uint64_t> symbolValue(image.symbols.size(), 0);
     for (const auto& d : plan.imports) {
         if (d.symbol < symbolValue.size()) {
-            symbolValue[d.symbol] = d.source == Source::Module ? bias + d.address : d.address;
+            symbolValue[d.symbol] = d.source == Source::Module && !d.tls ? bias + d.address : d.address;
         }
     }
+
+    // TLS-lab: the module's template is registered before any relocation is written, and before any
+    // code of it runs: a constructor may already touch a thread-local.
+    uint64_t tlsModule = 0;
+    if (image.tls) {
+        tlsModule = tls->register_module(bias + image.tls->vaddr, *image.tls, error);
+        if (tlsModule == 0) {
+            out.diagnostic = fail(Error::MapFailed, "could not register the module's TLS: " + error);
+            return out;
+        }
+    }
+    // Any failure from here on leaves a registered template whose image will not be there: abandon it.
+    struct AbandonOnFailure {
+        TlsProvider* tls;
+        uint64_t module;
+        bool keep = false;
+        ~AbandonOnFailure() {
+            if (!keep && module != 0) {
+                tls->abandon(module);
+            }
+        }
+    } abandonOnFailure{tls, tlsModule};
+    const auto tlsOffset = [&](const Relocation& rel) {
+        return (rel.symbol != 0 ? symbolValue[rel.symbol] : 0) + static_cast<uint64_t>(rel.addend);
+    };
+    const auto isTlsImport = [&](const Relocation& rel) {
+        return rel.symbol != 0 && !image.symbols[rel.symbol].defined();
+    };
+
     for (const auto& rel : image.relocations) {
         uint64_t value = 0;
         switch (rel.type) {
+        case kRelTlsDesc: {
+            const auto words = isTlsImport(rel) ?
+                                   tls->import_descriptor(symbolValue[rel.symbol], rel.addend) :
+                                   tls->descriptor(tlsModule, tlsOffset(rel));
+            const uint64_t pair[2] = {words.first, words.second};
+            std::memcpy(staging + (rel.offset - image.base), pair, sizeof(pair));
+            continue;
+        }
+        case kRelTlsDtpMod64:
+            value = isTlsImport(rel) ? tls->import_module(symbolValue[rel.symbol]) : tlsModule;
+            break;
+        case kRelTlsDtpRel64:
+            // For an import, S is the variable itself (offset 0 from what its accessor returns).
+            value = isTlsImport(rel) ? static_cast<uint64_t>(rel.addend) : tlsOffset(rel);
+            break;
         case kRelNone:
             continue;
         case kRelRelative:
@@ -1016,17 +1184,21 @@ MapResult map(const Image& image, const Plan& plan, MemoryBackend& memory) {
         return out;
     }
     for (const auto& sym : image.symbols) {
-        if (sym.defined() && sym.bind != kStbLocal && !sym.name.empty()) {
+        // A thread-local has no address of its own to export (its value is an offset in a block).
+        if (sym.defined() && sym.bind != kStbLocal && !sym.name.empty() && sym.type != kSttTls) {
             loaded.exports.emplace_back(std::string(sym.name),
                 sym.shndx == kShnAbs ? sym.value : bias + sym.value);
         }
     }
     loaded.ehFrame = image.ehFrame != 0 ? bias + image.ehFrame : 0;
+    loaded.tlsModule = tlsModule;
+    loaded.counterReadsRedirected = counterReads;
 
     if (!memory.publish(protections(image), error)) {
         out.diagnostic = fail(Error::ProtectFailed, "could not publish the image: " + error);
         return out;
     }
+    abandonOnFailure.keep = true;
     out.loaded = std::move(loaded);
     return out;
 }
@@ -1086,7 +1258,12 @@ std::string report_json(std::string_view label, std::string_view mode, const Par
         j += ",\"image\":{\"bytes\":" + std::to_string(im.size) + ",\"max_align\":" + std::to_string(im.maxAlign) +
              ",\"bind_now\":" + (im.bindNow ? "true" : "false") + ",\"gnu_hash\":" + (im.gnuHash ? "true" : "false") +
              ",\"sysv_hash\":" + (im.sysvHash ? "true" : "false") + ",\"relro\":" + (im.relro ? "true" : "false") +
-             ",\"eh_frame\":" + (im.ehFrame != 0 ? "true" : "false") + ",\"segments\":[";
+             ",\"eh_frame\":" + (im.ehFrame != 0 ? "true" : "false");
+        if (im.tls) {
+            j += ",\"tls\":{\"filesz\":" + std::to_string(im.tls->filesz) + ",\"memsz\":" +
+                 std::to_string(im.tls->memsz) + ",\"align\":" + std::to_string(im.tls->align) + "}";
+        }
+        j += ",\"segments\":[";
         for (size_t i = 0; i < im.loads.size(); ++i) {
             const auto& s = im.loads[i];
             std::string perm;

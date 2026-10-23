@@ -52,7 +52,7 @@ Z2SeqMgr::Z2SeqMgr() : JASGlobalInstance<Z2SeqMgr>(true) {
     mFlags.mTimeProcVolMod = false;
 }
 
-void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {
+DUSK_NOINLINE void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {  // aleks2 (rc17): a catalog hook target (carco_corp, twilit_essentials, twilit_essentials), inlined by the PGO build
     DUSK_AUDIO_SKIP();
 
     switch (bgmID) {
@@ -153,7 +153,7 @@ void Z2SeqMgr::bgmStart(u32 bgmID, u32 fadeTime, s32 param_2) {
     #endif
 }
 
-void Z2SeqMgr::bgmStop(u32 fadeTime, s32 param_1) {
+DUSK_NOINLINE void Z2SeqMgr::bgmStop(u32 fadeTime, s32 param_1) {
     if (mMainBgmHandle) {
         mMainBgmHandle->stop(fadeTime);
     }
@@ -514,7 +514,7 @@ static void dummy1() {
     OS_REPORT("[Z2SeqMgr::bgmStreamPlay] \n");
 }
 
-void Z2SeqMgr::bgmStreamPrepare(u32 bgmID) {
+DUSK_NOINLINE void Z2SeqMgr::bgmStreamPrepare(u32 bgmID) {  // aleks2 (rc17): a catalog hook target (carco_corp), inlined by the PGO build
     DUSK_AUDIO_SKIP();
 
     u32 bgmID2 = bgmID;
@@ -573,7 +573,7 @@ bool Z2SeqMgr::bgmStreamCheckReady() {
     }
 }
 
-void Z2SeqMgr::bgmStreamPlay() {
+DUSK_NOINLINE void Z2SeqMgr::bgmStreamPlay() {  // aleks2 (rc17): a catalog hook target (CarcoCorp)
     DUSK_AUDIO_SKIP();
     
     if (mStreamBgmHandle) {
@@ -1672,7 +1672,7 @@ void Z2SeqMgr::setChildTrackVolume(JAISoundHandle* handle, int trackId, f32 volu
     }
 }
 
-void Z2SeqMgr::resetBattleBgmParams() {
+DUSK_NOINLINE void Z2SeqMgr::resetBattleBgmParams() {
     if (Z2GetSoundObjMgr() != NULL) {
         Z2GetSoundObjMgr()->setForceBattleArea(false, 700, 1100, 1500);
     }

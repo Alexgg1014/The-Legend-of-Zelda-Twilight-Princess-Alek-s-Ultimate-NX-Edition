@@ -27,6 +27,12 @@ constexpr Sint16 kGamepadAxisPressThreshold = 16384;
 constexpr Sint16 kGamepadAxisReleaseThreshold = 12000;
 constexpr float kNavAxisDeadZone = 0.12f;
 constexpr double kMaxNavAxisDt = 0.05;
+// V1-rc5: a gap this long between two input updates is a hitch (a tab being built, a mod's UI callback), not a
+// button held on purpose. The held keys start their initial delay again instead of firing a repeat: on the
+// console a D-pad press on a mod window's tab built that tab inside the key event for a second or more, the next
+// update still saw the button down (its release not processed yet) and repeated -- one more tab, one more stall:
+// "it hangs for a few seconds and then jumps one".
+constexpr double kInputHitchSeconds = 0.2;
 constexpr int kGamepadAxisDirectionCount = SDL_GAMEPAD_AXIS_COUNT * 2;
 constexpr int kMenuTapFingerCount = 3;
 constexpr float kMenuTapMoveThreshold = 12.0f;
@@ -929,17 +935,112 @@ void handle_event(const SDL_Event& event) noexcept {
     sync_input_block();
 }
 
+// V1: the right stick scrolls a long panel as its scrollbar would (the mod browser's details, a settings
+// description). Focus navigation never reads it (left stick, d-pad and triggers only), so nothing else moves.
+// The target: an overflowing panel of the focused document that does not contain the focus (the reading pane next to
+// a list, e.g. Settings' descriptions), the largest one; failing that, the focused element's own scrolling ancestor
+// (the mod details page). Speed grows with the square of the push past a 20 % dead zone, up to ~1500 px/s at 1 dp.
+float right_stick_y() noexcept {
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    float best = 0.0f;
+    for (int i = 0; ids != nullptr && i < count; ++i) {
+        if (SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i])) {
+            const float y = static_cast<float>(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY)) / 32767.0f;
+            if (std::abs(y) > std::abs(best)) {
+                best = y;
+            }
+        }
+    }
+    SDL_free(ids);
+    return std::clamp(best, -1.0f, 1.0f);
+}
+
+bool scrolls_vertically(Rml::Element* element) noexcept {
+    if (element == nullptr || !element->IsVisible()) {
+        return false;
+    }
+    const auto overflow = element->GetComputedValues().overflow_y();
+    return (overflow == Rml::Style::Overflow::Auto || overflow == Rml::Style::Overflow::Scroll) &&
+           element->GetScrollHeight() > element->GetClientHeight() + 1.0f;
+}
+
+void collect_scrollers(Rml::Element* element, Rml::Element* focus, Rml::Element*& best, float& bestArea) noexcept {
+    if (element == nullptr || !element->IsVisible()) {
+        return;
+    }
+    if (scrolls_vertically(element)) {
+        bool containsFocus = false;
+        for (auto* p = focus; p != nullptr; p = p->GetParentNode()) {
+            if (p == element) {
+                containsFocus = true;
+                break;
+            }
+        }
+        const float area = element->GetClientWidth() * element->GetClientHeight();
+        if (!containsFocus && area > bestArea) {
+            best = element;
+            bestArea = area;
+        }
+    }
+    for (int i = 0; i < element->GetNumChildren(); ++i) {
+        collect_scrollers(element->GetChild(i), focus, best, bestArea);
+    }
+}
+
+void scroll_with_right_stick(Rml::Context& context, double dtSeconds) noexcept {
+    constexpr float kDeadZone = 0.20f;
+    constexpr float kMaxSpeed = 1500.0f;  // px per second at full push, per dp
+    if (!sPadInputBlocked) {
+        return;  // in game the right stick is the camera: only while a menu holds the controller
+    }
+    const float y = right_stick_y();
+    if (std::abs(y) <= kDeadZone || dtSeconds <= 0.0) {
+        return;
+    }
+    Rml::Element* focus = context.GetFocusElement();
+    Rml::Element* root = focus != nullptr ? focus->GetOwnerDocument() : nullptr;
+    if (root == nullptr) {
+        return;
+    }
+    Rml::Element* target = nullptr;
+    float area = 0.0f;
+    collect_scrollers(root, focus, target, area);
+    if (target == nullptr) {
+        for (auto* p = focus; p != nullptr; p = p->GetParentNode()) {
+            if (scrolls_vertically(p)) {
+                target = p;
+                break;
+            }
+        }
+    }
+    if (target == nullptr) {
+        return;
+    }
+    const float push = (std::abs(y) - kDeadZone) / (1.0f - kDeadZone);
+    const float speed = push * push * kMaxSpeed * context.GetDensityIndependentPixelRatio();
+    const float maxTop = target->GetScrollHeight() - target->GetClientHeight();
+    const float top = target->GetScrollTop() + (y > 0.0f ? 1.0f : -1.0f) * speed * static_cast<float>(dtSeconds);
+    target->SetScrollTop(std::clamp(top, 0.0f, std::max(maxTop, 0.0f)));
+}
+
 void update_input() noexcept {
     auto* context = aurora::rmlui::get_context();
     if (context != nullptr) {
         const double now = now_seconds();
+        const bool hitch = sLastInputUpdateAt != 0.0 && now - sLastInputUpdateAt > kInputHitchSeconds;
         const double dtSeconds = sLastInputUpdateAt == 0.0 ?
                                      0.0 :
                                      std::clamp(now - sLastInputUpdateAt, 0.0, kMaxNavAxisDt);
         sLastInputUpdateAt = now;
-        auto process_repeats = [context, now](auto& repeats) {
+        auto process_repeats = [context, now, hitch](auto& repeats) {
             for (auto& repeat : repeats) {
                 if (!repeat.held) {
+                    continue;
+                }
+                if (hitch && !repeat.pending && repeat.repeatable) {
+                    repeat.pressedAt = now;
+                    repeat.nextRepeatAt = now + kGamepadRepeatInitialDelay;
                     continue;
                 }
 
@@ -970,6 +1071,7 @@ void update_input() noexcept {
         process_repeats(sGamepadButtonRepeats);
         process_repeats(sGamepadAxisRepeats);
         dispatch_nav_axis(*context, dtSeconds);
+        scroll_with_right_stick(*context, dtSeconds);  // V1
     } else {
         reset_input_state();
         sLastInputUpdateAt = 0.0;

@@ -54,7 +54,7 @@ static int daE_YC_Draw(e_yc_class* i_this) {
     return 1;
 }
 
-static void damage_check(e_yc_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_yc_class* i_this) {
     daPy_py_c* player = static_cast<daPy_py_c*>(dComIfGp_getPlayer(0));
     i_this->mCcStts.Move();
     if (i_this->mCcDisableTimer == 0 && i_this->mCcSph.ChkTgHit()) {
@@ -555,7 +555,7 @@ static void anm_se_set(e_yc_class* i_this) {
     }
 }
 
-static void action(e_yc_class* i_this) {
+static DUSK_NOINLINE void action(e_yc_class* i_this) {
     cXyz vec1, vec2;
     fopAc_ac_c* _this = static_cast<fopAc_ac_c*>(i_this);
 

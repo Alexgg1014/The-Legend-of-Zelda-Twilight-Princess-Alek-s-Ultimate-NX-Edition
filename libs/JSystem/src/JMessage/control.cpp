@@ -88,7 +88,7 @@ int JMessage::TControl::setMessageID(u32 uMsgID, u32 param_1, bool* pbValid) {
     return setMessageCode_inReset_(pProcessor, uCode >> 16, uCode & 0xFFFF);
 }
 
-bool JMessage::TControl::setMessageCode_inSequence_(JMessage::TProcessor const* pProcessor, u16 u16GroupID, u16 u16Index) {
+DUSK_NOINLINE bool JMessage::TControl::setMessageCode_inSequence_(JMessage::TProcessor const* pProcessor, u16 u16GroupID, u16 u16Index) {
 #if TARGET_PC
     const TResource* resource = NULL;
     const void* resolvedEntry = NULL;

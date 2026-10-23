@@ -83,7 +83,7 @@ OFFICIAL = {
 # Randomizer's iostreams died inside the game's libstdc++ when built with Ubuntu's GCC 13 headers (H37-c5).
 REQUIRE_SWITCH_ARM64 = ("dev.twilitrealm.randomizer",)
 OPTIONAL = {"dev.twilitrealm.luau": "luau_runtime.dusk"}
-# H38-c5: five official catalog packages whose only gap was exports (docs/switch-h38-mods.md). Optional: absent never
+# H38-c5: five official catalog packages whose only gap was exports (H38 milestone notes). Optional: absent never
 # blocks, a provided one must pass (package_audit.blocks) and, being compatible, takes part in the capacity profiles.
 OPTIONAL_H38 = {
     "alexandre.cooper_hat.texture_selector": "cowboy_link.dusk",         # Cowboy Link 1.1.0
@@ -194,6 +194,22 @@ def main(argv=None) -> int:
     else:
         try:
             elf = elf_audit.Elf(args.elf.read_bytes(), args.elf.name)
+            # TLS-lab: judge packages as this image's loader does, with or without its dynamic TLS.
+            elf_audit.set_mod_tls(elf_audit.image_provides_tls(elf))
+            print(f"dynamic TLS for linux-aarch64 modules: {'on' if elf_audit.MOD_TLS else 'off'} in this image")
+            # DM2-d: the glibc ABI layer and dl_iterate_phdr, as this image's loader offers them.
+            elf_audit.set_dm2d(elf_audit.image_has_symbol(elf, elf_audit.GLIBC_ABI_SYMBOL),
+                               elf_audit.image_has_symbol(elf, elf_audit.DL_SYMBOL))
+            print(f"glibc ABI layer: {'on' if elf_audit.MOD_GLIBC_ABI else 'off'}; "
+                  f"dl_iterate_phdr: {'on' if elf_audit.MOD_DL else 'off'} in this image")
+            # DM3: the sockets layer.
+            elf_audit.set_dm3(elf_audit.image_has_symbol(elf, elf_audit.GLIBC_NET_SYMBOL))
+            print(f"sockets layer: {'on' if elf_audit.MOD_GLIBC_NET else 'off'} in this image "
+                  f"({len(elf_audit.GLIBC_NET_SHIMS)} names)")
+            # DM2-b: and with its glibc-layout file streams, if it has them.
+            elf_audit.set_linux_streams(elf_audit.image_linux_streams(elf))
+            print(f"glibc-layout file streams for linux-aarch64 modules: {len(elf_audit.LINUX_STREAMS)} name(s) "
+                  "in this image")
             elf_id = check_symbol_manifest.elf_build_id(elf)
             symdb_id, manifest = check_symbol_manifest.read_symdb(args.symdb.read_bytes())
         except (check_symbol_manifest.CheckError, elf_audit.ElfError, OSError) as error:

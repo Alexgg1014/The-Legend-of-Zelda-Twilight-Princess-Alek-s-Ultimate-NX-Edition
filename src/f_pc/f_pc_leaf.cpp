@@ -14,7 +14,7 @@ s16 fpcLf_GetPriority(const leafdraw_class* i_leaf) {
     return fpcDwPi_Get(&i_leaf->draw_priority);
 }
 
-int fpcLf_DrawMethod(leafdraw_method_class DUSK_CONST* i_methods, void* i_process) {
+DUSK_NOINLINE int fpcLf_DrawMethod(leafdraw_method_class DUSK_CONST* i_methods, void* i_process) {
     return fpcMtd_Method(i_methods->draw_method, i_process);
 }
 

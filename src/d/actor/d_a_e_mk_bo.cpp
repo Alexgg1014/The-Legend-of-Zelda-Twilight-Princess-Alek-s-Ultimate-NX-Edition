@@ -83,7 +83,8 @@ static void hit_check(e_mk_bo_class* i_this) {
     }
 }
 
-static s8 e_mk_bo_shot(e_mk_bo_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE s8 e_mk_bo_shot(e_mk_bo_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
     fopAc_ac_c* a_parent = (fopAc_ac_c*)fopAcM_SearchByID(actor->parentActorID);
 
@@ -254,7 +255,8 @@ static s8 e_mk_bo_start(e_mk_bo_class* i_this) {
     return rt;
 }
 
-static s8 e_mk_bo_r04(e_mk_bo_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE s8 e_mk_bo_r04(e_mk_bo_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
     fopAc_ac_c* a_parent = fopAcM_SearchByID(actor->parentActorID);
 
@@ -318,7 +320,8 @@ static s8 e_mk_bo_r04(e_mk_bo_class* i_this) {
     return rt;
 }
 
-static void e_mk_bo_hasira(e_mk_bo_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE void e_mk_bo_hasira(e_mk_bo_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
     fopAc_ac_c* a_parent = fopAcM_SearchByID(actor->parentActorID);
 
@@ -496,7 +499,8 @@ static void e_mk_bo_demo_spin(e_mk_bo_class* i_this) {
     }
 }
 
-static void action(e_mk_bo_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE void action(e_mk_bo_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
     cXyz sp24;
     cXyz sp18;

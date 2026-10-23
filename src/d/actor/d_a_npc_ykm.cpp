@@ -941,7 +941,7 @@ u8 daNpc_ykM_c::getType() {
     }
 }
 
-BOOL daNpc_ykM_c::isDelete() {
+DUSK_NOINLINE BOOL daNpc_ykM_c::isDelete() {
     switch (mType) {
         case TYPE_0:
             return FALSE;

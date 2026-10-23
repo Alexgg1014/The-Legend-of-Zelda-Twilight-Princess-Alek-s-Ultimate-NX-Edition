@@ -297,7 +297,7 @@ void J3DShape::loadCurrentMtx() const {
     mCurrentMtx.load();
 }
 
-void J3DShape::loadPreDrawSetting() const {
+DUSK_NOINLINE void J3DShape::loadPreDrawSetting() const {
     if (sOldVcdVatCmd != mVcdVatCmd) {
         GXCallDisplayList(mVcdVatCmd, kVcdVatDLSize);
         sOldVcdVatCmd = mVcdVatCmd;

@@ -22,6 +22,7 @@ cd "$out"
   "$(w "$root/platforms/switch/source/disc_scan.cpp")" \
   "$(w "$root/platforms/switch/source/disc_header.cpp")" \
   "$(w "$root/platforms/switch/source/disc_container.cpp")" \
+  "$(w "$here/wii_aes_host.cpp")" \
   "$(w "$here/disc_scan_test.cpp")" \
-  -lz -lzstd -lbz2 -llzma -o disc_scan_test
+  -lz -lzstd -lbz2 -llzma -lcrypto -o disc_scan_test
 ./disc_scan_test "$out/scratch"

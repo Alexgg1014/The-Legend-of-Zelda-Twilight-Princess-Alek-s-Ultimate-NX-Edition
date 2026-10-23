@@ -24,10 +24,87 @@ constexpr std::array kZones{
     Zone{"D_MN05", 0, 0, -1, "Forest Temple", "dungeon"},
 };
 
+// aleks2 (SHADERS-c1): the Shader Tour, for building the pipeline list shipped in the NRO
+// (romfs:/initial_pipeline_cache.db). A developer or tester runs it on a console with
+// shader_tour=1 in shader-lab.ini; players never do. It is the six zones above plus the
+// coverage the roadmap asks for (docs/history/switch-v1-roadmap.md, "Shader Tour"): open field,
+// villages, water, snow, sand, lava, the Twilight palace and one entrance per dungeon.
+// Every stage/room/point is in the warp table (map_loader_definitions.h); the host test
+// checks them. Boss arenas are left out on purpose: a warp there starts the fight with the
+// input locked. Day/night, weather, wolf form and cutscenes are not forced: they come from
+// the save the tour is run on (see the shader report for which zones added what).
+constexpr std::array kMasterZones{
+    Zone{"F_SP122", 8, 0, -1, "Outside Castle Town - West", "heavy exterior"},
+    Zone{"F_SP116", 0, 0, -1, "Castle Town", "town"},
+    Zone{"F_SP103", 0, 1, -1, "Ordon Village", "village (medium zone)"},
+    Zone{"R_SP01", 4, 0, -1, "Link's House", "interior"},
+    Zone{"F_SP108", 0, 0, -1, "South Faron Woods", "forest"},
+    Zone{"D_MN05", 0, 0, -1, "Forest Temple", "dungeon"},
+    Zone{"F_SP121", 0, 0, -1, "Hyrule Field", "open field, grass"},
+    Zone{"F_SP109", 0, 0, -1, "Kakariko Village", "village, dust"},
+    Zone{"F_SP110", 0, 0, -1, "Death Mountain Trail", "lava, heat haze"},
+    Zone{"F_SP113", 1, 0, -1, "Zora's Domain", "water, waterfalls"},
+    Zone{"F_SP115", 0, 0, -1, "Lake Hylia", "water, reflections"},
+    Zone{"F_SP124", 0, 0, -1, "Gerudo Desert", "sand"},
+    Zone{"F_SP114", 0, 0, -1, "Snowpeak Mountain", "snow, fog"},
+    Zone{"D_MN04", 1, 0, -1, "Goron Mines", "dungeon, lava"},
+    Zone{"D_MN01", 0, 0, -1, "Lakebed Temple", "dungeon, water"},
+    Zone{"D_MN10", 0, 0, -1, "Arbiter's Grounds", "dungeon, sand"},
+    Zone{"D_MN11", 0, 0, -1, "Snowpeak Ruins", "dungeon, ice"},
+    Zone{"D_MN06", 0, 0, -1, "Temple of Time", "dungeon, stained glass"},
+    Zone{"D_MN07", 0, 0, -1, "City in the Sky", "dungeon, sky"},
+    Zone{"D_MN08", 0, 0, -1, "Palace of Twilight", "Twilight Realm"},
+    Zone{"D_MN09", 1, 0, -1, "Hyrule Castle", "dungeon, castle"},
+};
+
+bool g_master = false;
+std::vector<Zone> g_harvest;
+
 }  // namespace
 
 std::span<const Zone> zones() {
+    if (!g_harvest.empty()) {
+        return g_harvest;
+    }
+    if (g_master) {
+        return kMasterZones;
+    }
     return kZones;
+}
+
+std::span<const Zone> player_zones() {
+    return kZones;
+}
+
+std::span<const Zone> master_zones() {
+    return kMasterZones;
+}
+
+void use_master_tour(bool master) {
+    g_master = master;
+}
+
+bool master_tour() {
+    return g_master || !g_harvest.empty();
+}
+
+void use_harvest_zones(std::vector<Zone> zones) {
+    g_harvest = std::move(zones);
+}
+
+bool harvest_tour() {
+    return !g_harvest.empty();
+}
+
+Timing harvest_timing() {
+    Timing t;
+    t.minRenderSeconds = 6.0;  // long enough for actors and effects to draw once
+    t.quietSeconds = 2.0;
+    t.idleSeconds = 5.0;
+    t.maxZoneSeconds = 60.0;
+    t.loadTimeoutSeconds = 60.0;
+    t.eventWaitSeconds = 20.0;
+    return t;
 }
 
 ZoneEnd decide(const ZoneProgress& p, const Timing& t) {

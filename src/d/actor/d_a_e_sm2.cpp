@@ -833,7 +833,7 @@ static u8 new_col_d[] = {
     TYPE_RARE,   TYPE_RARE,   TYPE_RARE,   TYPE_RARE,   TYPE_RARE,   TYPE_RARE,   TYPE_BLACK,
 };
 
-static void damage_check(e_sm2_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_sm2_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
 
     cXyz work;

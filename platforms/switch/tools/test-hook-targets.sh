@@ -63,6 +63,10 @@ units+=(
   src/d/actor/d_a_e_rdb.cpp src/d/actor/d_a_e_s1.cpp src/d/actor/d_a_e_sf.cpp src/d/actor/d_a_e_th.cpp
   src/d/actor/d_a_e_tt.cpp
 )
+# DM1-c: the units of the 12 local targets catalog mods hook by name (DUSK_NOINLINE since DM1-c); see dm1c_required.
+units+=(src/m_Do/m_Do_graphic.cpp src/d/actor/d_a_ni.cpp src/d/actor/d_a_b_ob.cpp src/d/actor/d_a_e_sg.cpp)
+# DM1-d: and the units of Dawnlight's local targets (d_a_e_mk.cpp is already above).
+units+=(src/d/actor/d_a_b_gm.cpp src/d/actor/d_a_e_hzelda.cpp src/d/actor/d_a_e_kg.cpp src/d/actor/d_a_e_mk_bo.cpp)
 c5_mods=(com.dusklight.twilit_essentials dev.bezide.dawnlight dev.albt.albw)
 c5_hooks=(
   dMenu_Collect2D_c::setHeartPiece canAutoSave src/d/actor/d_a_b_gnd.cpp#damage_check src/d/actor/d_a_e_th.cpp#damage_check
@@ -143,6 +147,83 @@ if [ "$status" -ne 0 ]; then
   exit 1
 fi
 echo "compiled ${#units[@]} game units, and again with inlining off"
+
+# DM1-c (first, so the older blocks' known failures do not hide it): the local functions the 2026-10-14 catalog hooks by name that -O3 had inlined into every caller (DM1B-c1
+# audit), and fish_move, which showed up once fish_normal was out of line. Not in mod_required_symbols.txt (that file
+# is the official packages'), so the lines are written here.
+dm1c_required=(
+  "com.giorgiomendieta.dof_hq hook name drawDepth2"
+  "com.krowten.object_yeet hook name ni_carry"
+  "com.blueflaregames.zora_swim hook name src/d/actor/d_a_b_ob.cpp#core_damage_check"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_damage_check"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#pl_check"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_normal"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_vacume"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#demo_camera"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_move"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_e_sg.cpp#action"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_e_sg.cpp#e_sg_move"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_e_sg.cpp#e_sg_search"
+)
+printf '%s\n' "${dm1c_required[@]}" > "$out/required-dm1c.txt"
+"$py" "$here/hook_inline_audit.py" --symgen "$symgen" --readelf aarch64-linux-gnu-readelf --source-root "$root" \
+  --required "$out/required-dm1c.txt" \
+  --mods com.giorgiomendieta.dof_hq com.krowten.object_yeet com.blueflaregames.zora_swim com.blueflaregames.dark_morpheel \
+  --reference-dir "$out/reference" --report "$out/hook-targets-dm1c.json" "$out"/units/*.elf
+
+# DM1-d: every "<file>#<function>" a catalog mod names as a string (research/catalog-tools/string_hooks.py) for
+# Dark Morpheel 1.0.0, Zora Swim 1.3.0 and Dawnlight 4.0.3, in these units -- all of them, not only the ones DM1-d
+# marked: taking one function out of line can let -O3 inline another (fish_normal -> fish_move in DM1-c). The
+# *_Execute entries are left out: they are reached through the actor profile table, which a unit alone cannot show.
+dm1d_required=(
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#anm_init"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#demo_camera"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_damage_check"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_move"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_normal"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#fish_vacume"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_b_ob.cpp#pl_check"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_e_sg.cpp#action"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_e_sg.cpp#e_sg_move"
+  "com.blueflaregames.dark_morpheel hook name src/d/actor/d_a_e_sg.cpp#e_sg_search"
+  "com.blueflaregames.zora_swim hook name src/d/actor/d_a_b_ob.cpp#core_damage_check"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_b_gm.cpp#action"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_b_ob.cpp#core_action"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_b_ob.cpp#fish_move"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_hzelda.cpp#action"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_kg.cpp#action"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_mk.cpp#action"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_mk.cpp#e_mk_move"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_mk_bo.cpp#action"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_mk_bo.cpp#e_mk_bo_hasira"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_mk_bo.cpp#e_mk_bo_r04"
+  "dev.bezide.dawnlight hook name src/d/actor/d_a_e_mk_bo.cpp#e_mk_bo_shot"
+)
+printf '%s\n' "${dm1d_required[@]}" > "$out/required-dm1d.txt"
+set +e
+"$py" "$here/hook_inline_audit.py" --symgen "$symgen" --readelf aarch64-linux-gnu-readelf --source-root "$root" \
+  --required "$out/required-dm1d.txt" \
+  --mods com.blueflaregames.dark_morpheel com.blueflaregames.zora_swim dev.bezide.dawnlight \
+  --reference-dir "$out/reference" --report "$out/hook-targets-dm1d.json" "$out"/units/*.elf
+set -e
+# One known reading to set aside, and only that one: anm_init is DUSK_NOINLINE, its DWARF has no inlined copy, and
+# fish_normal calls it twice in the source and twice at -O3 -- the inlining-off reference has a third call because jump
+# threading duplicated one there (measured on DM1-d: 21 calls against the reference's 22, every source call present).
+"$py" - "$out/hook-targets-dm1d.json" <<'PYEOF'
+import json, sys
+report = json.load(open(sys.argv[1]))
+waived = {"src/d/actor/d_a_b_ob.cpp#anm_init"}
+bad = []
+for name, verdict in sorted(report.items()):
+    problems = verdict.get("problems", [])
+    if name in waived and verdict.get("inlined_copies") == 0 and problems and all(
+            "direct calls made with inlining off are gone" in problem for problem in problems):
+        continue
+    if problems:
+        bad.append(f"{name}: {problems}")
+print("dm1d hook targets: " + ("ok" if not bad else "FAIL\n  " + "\n  ".join(bad)))
+sys.exit(1 if bad else 0)
+PYEOF
 
 # --- 2. the audit -------------------------------------------------------------------------------
 "$py" "$here/hook_inline_audit.py" --symgen "$symgen" --readelf aarch64-linux-gnu-readelf --source-root "$root" \

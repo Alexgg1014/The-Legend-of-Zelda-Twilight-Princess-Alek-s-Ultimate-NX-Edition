@@ -386,7 +386,7 @@ daNpc_Post_c::~daNpc_Post_c() {
     deleteRes(l_loadResPtrnList[mType], (const char**)l_resNameList);
 }
 
-cPhs_Step daNpc_Post_c::create() {
+DUSK_NOINLINE cPhs_Step daNpc_Post_c::create() {
     daNpcT_ct(this, daNpc_Post_c, l_faceMotionAnmData, l_motionAnmData, l_faceMotionSequenceData,
               4, l_motionSequenceData, 4, l_evtList, l_resNameList);
 
@@ -527,18 +527,18 @@ int daNpc_Post_c::CreateHeap() {
     return 0;
 }
 
-int daNpc_Post_c::Delete() {
+DUSK_NOINLINE int daNpc_Post_c::Delete() {
     OS_REPORT("|%06d:%x|daNpc_Post_c -> Delete\n", g_Counter.mCounter0, this);
     fopAcM_RegisterDeleteID(this, "NPC_POST");
     this->~daNpc_Post_c();
     return 1;
 }
 
-int daNpc_Post_c::Execute() {
+DUSK_NOINLINE int daNpc_Post_c::Execute() {
     return execute();
 }
 
-int daNpc_Post_c::Draw() {
+DUSK_NOINLINE int daNpc_Post_c::Draw() {
     if (mpMatAnm[0] != NULL) {
         J3DModelData* modelData = mpMorf[0]->getModel()->getModelData();
         modelData->getMaterialNodePointer(getEyeballMaterialNo())->setMaterialAnm(mpMatAnm[0]);

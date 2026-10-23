@@ -629,6 +629,13 @@ void dMeterMap_c::_move(u32 param_0) {
 }
 
 void dMeterMap_c::_draw() {
+    #if TARGET_PC
+    // aleks2 (V1-rc10): Settings > Minimap off -- the corner map is neither rendered nor drawn (the full map on
+    // Up is another screen and still opens). In Hyrule Field it is the HUD's largest cost.
+    if (!dusk::getSettings().game.showMinimap) {
+        return;
+    }
+    #endif
     #if DEBUG
     if (!g_meter_mapHIO.mMapRenderingProhibited) {
         mMap->_draw();

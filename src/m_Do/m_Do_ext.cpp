@@ -377,7 +377,7 @@ void mDoExt_modelUpdateDL(J3DModel* i_model) {
     i_model->viewCalc();
 }
 
-void mDoExt_modelEntryDL(J3DModel* i_model) {
+DUSK_NOINLINE void mDoExt_modelEntryDL(J3DModel* i_model) {
 #if TARGET_PC
     if (!dusk::game_clock::is_sim_frame()) {
         // FRAME INTERP NOTE: This fixes issue #355 where some lights would flicker.
@@ -1298,7 +1298,7 @@ void mDoExt_morf_c::setMorf(f32 i_morf) {
     mPrevMorf = mCurMorf;
 }
 
-void mDoExt_morf_c::frameUpdate() {
+DUSK_NOINLINE void mDoExt_morf_c::frameUpdate() {
     if (mCurMorf < 1.0f) {
         mPrevMorf = mCurMorf;
 

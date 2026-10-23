@@ -3457,7 +3457,7 @@ bool daObjCarry_c::bg_damage_proc_Lv8Ball() {
     return false;
 }
 
-void daObjCarry_c::obj_break(bool i_createItem, bool i_cancelCarry, bool i_doBreakEff) {
+DUSK_NOINLINE void daObjCarry_c::obj_break(bool i_createItem, bool i_cancelCarry, bool i_doBreakEff) {
     int item_no = getItemNo();
     int item_bit = getItemBit();
 

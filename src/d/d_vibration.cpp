@@ -7,6 +7,22 @@
 #include "SSystem/SComponent/c_math.h"
 #include "d/d_s_play.h"
 #include <climits>
+#ifdef __SWITCH__
+#include "dusk/hd_rumble.hpp"
+#endif
+
+// aleks2 (V1-rc16): with HD Rumble active the GameCube motor stays still and dusk::hd_rumble plays the vibration
+// instead (vibration_frame() at the end of Run()); otherwise the motor runs as the game always had it.
+static void start_motor_wave(u8* data, JUTGamePad::CRumble::ERumble mode) {
+#ifdef __SWITCH__
+    if (dusk::hd_rumble::active()) {
+        mDoCPd_c::stopMotorWave(PAD_1);
+        mDoCPd_c::stopMotor(PAD_1);
+        return;
+    }
+#endif
+    mDoCPd_c::startMotorWave(PAD_1, data, mode, 60);
+}
 
 #define RESET_FRAME -99
 
@@ -240,7 +256,7 @@ int dVibration_c::Run() {
             pattern = mMotor.mShock.mPattern;
             pattern |= randombit(mMotor.mShock.mRounds, length);
             mMotor.mShock.mStopFrame = length;
-            mDoCPd_c::startMotorWave(PAD_1, (u8*)makedata(data, pattern, length), JUTGamePad::CRumble::VAL_0, 60);
+            start_motor_wave((u8*)makedata(data, pattern, length), JUTGamePad::CRumble::VAL_0);
             
             #if DEBUG
             if (mVibTest.m_displayDbg & 0x8000) {
@@ -256,7 +272,7 @@ int dVibration_c::Run() {
 
             OS_REPORT("d_vibration mDoCPd_c::startMotorWave\n");
 
-            mDoCPd_c::startMotorWave(PAD_1, (u8*)makedata(data, pattern, length), JUTGamePad::CRumble::VAL_1, 60);
+            start_motor_wave((u8*)makedata(data, pattern, length), JUTGamePad::CRumble::VAL_1);
             
             #if DEBUG
             if (mVibTest.m_displayDbg & 0x8000) {
@@ -274,7 +290,7 @@ int dVibration_c::Run() {
             mMotor.mShock.mStopFrame = length;
             mMotor.mShock.mFrame = mMotor.mQuake.mFrame = 0;
 
-            mDoCPd_c::startMotorWave(PAD_1, (u8*)makedata(data, pattern, length), JUTGamePad::CRumble::VAL_0, 60);
+            start_motor_wave((u8*)makedata(data, pattern, length), JUTGamePad::CRumble::VAL_0);
             
             #if DEBUG
             if (mVibTest.m_displayDbg & 0x8000) {
@@ -350,6 +366,10 @@ int dVibration_c::Run() {
     }
 
     mFrame++;
+#ifdef __SWITCH__
+    dusk::hd_rumble::vibration_frame(mMotor.mShock.mVibMode, mMotor.mShock.mFrame, mMotor.mQuake.mVibMode,
+        mMotor.mQuake.mFrame);  // aleks2 (V1-rc16)
+#endif
     return 1;
 }
 
@@ -582,6 +602,9 @@ int dVibration_c::testShake() {
 void dVibration_c::Kill() {
     mDoCPd_c::stopMotorWaveHard(PAD_1);
     mDoCPd_c::stopMotorHard(PAD_1);
+#ifdef __SWITCH__
+    dusk::hd_rumble::stop();  // aleks2 (V1-rc16)
+#endif
     setDefault();
 }   
 
@@ -618,6 +641,9 @@ void dVibration_c::Init() {
 }
 
 void dVibration_c::Pause() {
+#ifdef __SWITCH__
+    dusk::hd_rumble::stop();  // aleks2 (V1-rc16)
+#endif
     if (mMode != MODE_PAUSE) {
         if (mMotor.mShock.mVibMode != VIBMODE_S_NONE || mMotor.mQuake.mVibMode != VIBMODE_Q_NONE) {
             mDoCPd_c::stopMotorWaveHard(PAD_1);

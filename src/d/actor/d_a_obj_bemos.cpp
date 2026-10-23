@@ -1117,7 +1117,7 @@ void daObjBm_c::mode_afl() {
     mModeProcIdx = MODE_AFL_e;
 }
 
-void daObjBm_c::mode_dead_init() {
+DUSK_NOINLINE void daObjBm_c::mode_dead_init() {
     mpBgW->OffPushPullOk();
     fopAcM_SetSpeedF(this, 0.0f);
     mModeProcIdx = MODE_DEAD_e;

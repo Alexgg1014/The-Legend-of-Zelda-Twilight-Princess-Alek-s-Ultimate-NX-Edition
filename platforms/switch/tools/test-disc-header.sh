@@ -25,8 +25,9 @@ cd "$out"
   -I"$(w "$root/platforms/switch/include")" \
   "$(w "$root/platforms/switch/source/disc_header.cpp")" \
   "$(w "$root/platforms/switch/source/disc_container.cpp")" \
+  "$(w "$here/wii_aes_host.cpp")" \
   "$(w "$here/disc_header_test.cpp")" \
-  -lz -lzstd -lbz2 -llzma -o disc_header_test
+  -lz -lzstd -lbz2 -llzma -lcrypto -o disc_header_test
 
 if [ "$#" -gt 0 ]; then
   ./disc_header_test --reference "$@"

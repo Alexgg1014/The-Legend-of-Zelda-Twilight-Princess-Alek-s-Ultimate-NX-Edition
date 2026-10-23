@@ -204,7 +204,9 @@ const ResTIMG* dmapFloorFaceTimgSharp(bool i_wolf) {
 }
 
 const ResTIMG* dmapFloorFaceTimg() {
-    return dmapFloorFaceTimg(daPy_py_c::checkNowWolf());
+    // V1, from igawa6's Dusklight Dual-Screen fork (ds-3.0.3, 39b266c, CC0): null-safe. checkNowWolf() reads the
+    // player with no check, and leaving a dungeon with the floor map open painted a frame after the player was gone.
+    return dmapFloorFaceTimg(companionWolf());
 }
 
 const ResTIMG* dmapFloorBossMarkTimg() {

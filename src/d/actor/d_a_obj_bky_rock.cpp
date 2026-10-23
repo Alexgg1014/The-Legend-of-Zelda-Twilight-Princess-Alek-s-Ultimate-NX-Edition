@@ -56,7 +56,7 @@ int daBkyRock_c::create() {
     return rv;
 }
 
-int daBkyRock_c::execute() {
+DUSK_NOINLINE int daBkyRock_c::execute() {
     middleExe();
     return 1;
 }

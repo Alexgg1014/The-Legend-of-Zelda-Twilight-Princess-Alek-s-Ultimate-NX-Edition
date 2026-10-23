@@ -531,8 +531,11 @@ bool enqueue(Request request, std::string* keyOut) {
             return false;
         }
         // aleks2 (H38-c6): the browser and the update check already refuse these; nothing downloads them.
+        const auto* installed = ModLoader::instance().find_mod(request.id);
         if (hardware::kApplies &&
-            !hardware::catalog_block_reason(request.id, request.version, source->sha256).empty())
+            !hardware::catalog_block_reason(request.id, request.version, source->sha256,
+                installed != nullptr ? std::string_view{installed->metadata.version} : std::string_view{})
+                 .empty())
         {
             return false;
         }

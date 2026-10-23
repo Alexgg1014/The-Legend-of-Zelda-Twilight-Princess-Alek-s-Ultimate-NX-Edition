@@ -1,5 +1,9 @@
 #include "tab_bar.hpp"
 
+#include <borealis/log.hpp>
+
+#include <chrono>
+
 #include "Z2AudioLib/Z2SeMgr.h"
 #include "m_Do/m_Do_audio.h"
 
@@ -172,7 +176,16 @@ bool TabBar::set_active_tab(int index) {
         }
         mProps.selectedTabIndex = index;
         if (tab.callback) {
+            // V1-rc5: a tab is built inside the key event that selects it; a slow build stalls the menu (and,
+            // before input.cpp's hitch rule, made the held D-pad repeat). Logged so the console says which.
+            const auto started = std::chrono::steady_clock::now();
             tab.callback();
+            const auto ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+            if (ms > 100.0) {
+                static constexpr borealis::Log kLog{"dusk::ui"};
+                kLog.warn("tab '{}' took {:.0f} ms to build", tab.title, ms);
+            }
         }
         return true;
     }

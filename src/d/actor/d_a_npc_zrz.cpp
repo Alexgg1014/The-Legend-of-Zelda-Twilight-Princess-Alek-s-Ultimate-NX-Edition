@@ -888,7 +888,7 @@ u8 daNpc_zrZ_c::getTypeFromParam() {
     }
 }
 
-BOOL daNpc_zrZ_c::isDelete() {
+DUSK_NOINLINE BOOL daNpc_zrZ_c::isDelete() {
     if (((mDemoMode == DEMO_COME_HERE || mDemoMode == DEMO_WAIT)
                     && dComIfGs_isSwitch(mSwitch1, fopAcM_GetRoomNo(this)))
         || (mDemoMode == DEMO_COME_HERE_2 && (!dComIfGs_isSwitch(mSwitch1, fopAcM_GetRoomNo(this))

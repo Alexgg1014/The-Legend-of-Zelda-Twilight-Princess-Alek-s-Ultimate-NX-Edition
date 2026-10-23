@@ -88,7 +88,7 @@ int pl_cut_LRC(int index) {
     return plCutLRC[index];
 }
 
-u16 cc_pl_cut_bit_get() {
+DUSK_NOINLINE u16 cc_pl_cut_bit_get() {
     daPy_py_c* player_p = (daPy_py_c*)dComIfGp_getPlayer(0);
 
     u16 bit = 0;

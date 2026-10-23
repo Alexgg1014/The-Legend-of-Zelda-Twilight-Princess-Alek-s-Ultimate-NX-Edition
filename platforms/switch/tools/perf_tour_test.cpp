@@ -73,7 +73,9 @@ void test_plan_against_warp_table(const std::string& mapDefinitionsPath) {
 
 void test_plan_and_order() {
     const auto zones = pt::zones();
-    CHECK(zones.size() == 3);
+    CHECK(zones.size() == 4);
+    CHECK(std::strcmp(zones[3].stage, "F_SP121") == 0 && zones[3].room == 0 && zones[3].point == 0);
+    CHECK(std::strcmp(zones[3].category, "heavy-field") == 0);
     if (zones.size() != 3) {
         return;
     }
@@ -342,6 +344,50 @@ void test_reports() {
 
 }  // namespace
 
+// V1-rc9: tour_matrix -- one factor at a time, heavy zones only, grouped by zone; the report names each config.
+void test_matrix() {
+    using namespace dusk::perf_tour;
+    std::string notes;
+    const auto axes = parse_matrix(" hud_fast:0,1; swap_interval:1,2 ;minimap_pan: 0 , 1;bad;solo:1;hud_fast:1,0", notes);
+    CHECK(axes.size() == 3);
+    CHECK(axes.size() == 3 && axes[0].key == "hud_fast" && axes[1].values[1] == "2" && axes[2].values[0] == "0");
+    CHECK(notes.find("'bad'") != std::string::npos && notes.find("'solo:1'") != std::string::npos &&
+          notes.find("'hud_fast:1,0'") != std::string::npos);
+    const auto base = base_zones();
+    const auto plan = build_plan(base, axes);
+    std::size_t heavy = 0;
+    for (const auto& z : base) {
+        heavy += std::string_view{z.category}.rfind("heavy", 0) == 0;
+    }
+    CHECK(heavy == 2);
+    CHECK(plan.size() == base.size() + heavy * 3);  // baseline everywhere, +1 per extra value in the heavy zones
+    // grouped: a zone's steps are consecutive, its baseline first
+    for (std::size_t i = 1; i < plan.size(); ++i) {
+        CHECK(plan[i].zone >= plan[i - 1].zone);
+    }
+    CHECK(plan[0].label == "hud_fast=0 swap_interval=1 minimap_pan=0");
+    CHECK(plan[1].label == "hud_fast=1 swap_interval=1 minimap_pan=0");
+    CHECK(plan[3].label == "hud_fast=0 swap_interval=1 minimap_pan=1");
+    set_plan(plan, "spec");
+    CHECK(zones().size() == plan.size() && plan_step(0) != nullptr && plan_step(plan.size()) == nullptr);
+    CHECK(std::string_view{zones()[1].stage} == base[plan[1].zone].stage);
+    // the report carries the config of each row
+    TourReport r;
+    r.zones.assign(zones().size(), ZoneResult{});
+    const std::string json = build_report(r, zones());
+    CHECK(json.find("\"config\": \"hud_fast=1 swap_interval=1 minimap_pan=0\"") != std::string::npos ||
+          json.find("\"config\":\"hud_fast=1 swap_interval=1 minimap_pan=0\"") != std::string::npos);
+    // V1-rc10: '|' separates axes too, and the parsed matrix reads back
+    std::string notes2;
+    const auto piped = parse_matrix("hud_fast:1,0|swap_interval:2,1 | minimap_pan:0,1", notes2);
+    CHECK(piped.size() == 3 && notes2.empty());
+    CHECK(describe_axes(piped) == "hud_fast[1,0] swap_interval[2,1] minimap_pan[0,1]");
+    // back to the plain tour
+    set_plan({}, "");
+    CHECK(zones().size() == base.size() && plan_step(0) == nullptr);
+    CHECK(build_plan(base, {}).size() == base.size());
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: perf_tour_test <path to src/dusk/map_loader_definitions.h>\n";
@@ -357,6 +403,7 @@ int main(int argc, char** argv) {
     test_cache_state();
     test_file_name();
     test_reports();
+    test_matrix();
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";
         return 1;

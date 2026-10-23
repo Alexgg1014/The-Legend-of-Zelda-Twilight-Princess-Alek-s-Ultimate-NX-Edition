@@ -166,8 +166,9 @@ SdkService sdk(const std::string& suffix) {
 }
 
 elf::HostServiceLookup switch_host() {
-    // Availability is this platform's: the file service exists without a picker; net and websocket
-    // need a transport the console does not have (borealis_net_switch.cpp, borealis_ws_switch.cpp).
+    // Availability is this platform's: the file service exists without a picker. net and websocket are
+    // modelled unavailable, as a build with ALEKS2_SWITCH_NET=OFF has them (borealis_net_switch.cpp,
+    // borealis_ws_switch.cpp), so the unavailable-service rules keep a test; DM3 builds offer both.
     return [](std::string_view id) {
         std::vector<elf::HostService> known;
         const auto it = g_sdk.find(std::string(id));

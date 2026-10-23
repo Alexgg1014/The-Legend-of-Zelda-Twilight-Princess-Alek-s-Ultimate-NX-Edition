@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """H38: the switch-arm64 mod pipeline (build_switch_mods.py), the H38 gate (check_h38_candidate.py, h38_policy.py) and
 the pinned Twilit source, with fixtures and fake tools -- no devkitA64, no symgen, no network. What this proves is the
-pipeline's logic; that devkitA64 really builds Twilit is for the local run (docs/switch-h38-mods.md).
+pipeline's logic; that devkitA64 really builds Twilit is for the local run (H38 milestone notes).
 
   manifest and pins   the real manifest is valid and pins Twilit Essentials 2.5.0 at its commit and tree; a short
                       hash or a missing field is refused
@@ -354,7 +354,7 @@ with tempfile.TemporaryDirectory() as tmp:
     t = rep["packages"][h38_policy.TWILIT_ID]
     check(t["platform"] == "switch-arm64" and t["rejections"] == [] and t["estimated_pages"] == 269, f"twilit read: {t['rejections']}")
     cap = rep["combined_capacity"]
-    check(cap["pages"] == 269 + 4 and cap["arena_objects"] == 5 and cap["within_arena_table"] and not cap["problems"],
+    check(cap["pages"] == 269 + 4 and cap["arena_objects"] == 1 and cap["within_arena_table"] and not cap["problems"],
           f"combined capacity {cap}")
     check(rep["ready"] is False and any("FINAL ELF VALIDATION PENDING" in p for p in rep["problems"]), "ready stays false until the ELF")
     check("H38 candidate" in out, "the gate says H38")
@@ -380,10 +380,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check(any("pins 2.5.0" in r for r in rep["packages"][h38_policy.TWILIT_ID]["rejections"]), "version pin enforced")
 
     # the combined limit: pages that cannot fit the arena table block, as the loader's table is the real limit
-    check(h38_policy.combined_capacity({"a": 300, "b": 212})["within_arena_table"], "512 pages = 8 objects fit")
-    over = h38_policy.combined_capacity({"a": 300, "b": 213})
-    check(not over["within_arena_table"] and "cannot all be hooked" in over["problems"][0], "513 pages do not")
-    twilit_package(hooks=600)
+    check(h38_policy.combined_capacity({"a": 5000, "b": 3192})["within_arena_table"], "8192 hooks = 8 objects fit (DM2-a)")
+    over = h38_policy.combined_capacity({"a": 5000, "b": 3193})
+    check(not over["within_arena_table"] and "cannot all be hooked" in over["problems"][0], "8193 do not")
+    twilit_package(hooks=8300)
     rc, rep, _ = gate(["--require-twilit"])
     check(any("arena table" in p for p in rep["problems"]) and rep["combined_capacity"]["problems"], "gate reports the combined overflow")
 
@@ -458,7 +458,7 @@ with tempfile.TemporaryDirectory() as tmp:
     albw_package(pk / "albw.dusk", mod_id="dev.someone.else")
     rc, rep, _ = gate(["--require-twilit"])
     check(any("mod.json says dev.someone.else" in r for r in rep["packages"][albw_id]["rejections"]), "ALBW id enforced")
-    albw_package(pk / "albw.dusk", hooks=600)
+    albw_package(pk / "albw.dusk", hooks=8300)
     rc, rep, _ = gate(["--require-twilit"])
     a = rep["packages"][albw_id]
     check(a["blocks_ready"] and any("base + ALBW" in r for r in a["rejections"]) and rep["capacity_profiles"]["albw"]["problems"],
@@ -521,15 +521,16 @@ with tempfile.TemporaryDirectory() as tmp:
           and any("mod.json says dev.someone.else" in r for r in rep["packages"]["dev.automata.deferred_fog"]["rejections"]),
           "a provided optional package with another id blocks ready")
     opt_package("dev.automata.deferred_fog")
-    # the capacity wording at the real sizes: the main set of c4 (467) plus the five (33) is 500 of 512 pages, 8 objects, 12 left
+    # the capacity wording at the real sizes (DM2-a: 1024 hooks per object, 8192 in the table): c4's main set (467)
+    # plus the five (33) is 500 hooks, one object; near the top the note says how few remain
     real = h38_policy.combined_capacity({"main": 467, "optional": 33})
-    check(real["pages"] == 500 and real["arena_objects"] == 8 and real["within_arena_table"] and not real["problems"]
-          and real["remaining_pages"] == 12 and real["table_pages"] == 512, f"500 of 512: {real}")
-    check(any("only 12 remain" in n for n in real["notes"]), "the note says only 12 pages remain")
-    check(h38_policy.combined_capacity({"main": 467})["remaining_pages"] == 45, "c4's main set leaves 45 pages")
+    check(real["pages"] == 500 and real["arena_objects"] == 1 and real["within_arena_table"] and not real["problems"]
+          and real["remaining_pages"] == 7692 and real["table_pages"] == 8192 and real["notes"] == [], f"500 of 8192: {real}")
+    near = h38_policy.combined_capacity({"main": 8180})
+    check(near["remaining_pages"] == 12 and any("only 12 remain" in n for n in near["notes"]), "the note says only 12 remain")
     check(h38_policy.combined_capacity({"main": 10})["notes"] == [], "a small set says nothing about remaining pages")
-    check(not h38_policy.combined_capacity({"main": 513 - 0})["within_arena_table"]
-          and h38_policy.combined_capacity({"main": 513})["remaining_pages"] < 0, "over the table stays a problem")
+    check(not h38_policy.combined_capacity({"main": 8193})["within_arena_table"]
+          and h38_policy.combined_capacity({"main": 8193})["remaining_pages"] < 0, "over the table stays a problem")
     # the H37 profile does not know them
     with contextlib.redirect_stdout(io.StringIO()):
         check_h37_candidate.main(["--packages", str(pk), "--symgen", str(fake_symgen), "--source-root", str(root),

@@ -1,5 +1,7 @@
 #include "mods_window.hpp"
 
+#include <borealis/log.hpp>
+
 #include "clamped_text.hpp"
 #include "dusk/mods/updates.hpp"
 #include "format.hpp"
@@ -22,12 +24,18 @@
 #include "dusk/mods/svc/ui.hpp"
 
 #include "m_Do/m_Do_audio.h"
+#include "dusk/main.h"
+#include "ui.hpp"
+#ifdef __SWITCH__
+extern "C" bool aleks2_relaunch_on_exit(void);  // switch_startup.cpp
+#endif
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <tracy/Tracy.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 
@@ -139,6 +147,8 @@ public:
             append_text(append(heading, "mod-network"), "Network");
         }
         auto* sub = append(info, "mod-meta");
+        // aleks2 (DM1-c): a change to its code that waits for the restart.
+        const bool restartPending = mods::ModLoader::instance().restart_required(mod.metadata.id);
         append_text(append(sub, "mod-author"), mod.metadata.author);
         append_text(append(sub, "span"), "·");
         append_text(append(sub, "mod-version"), fmt::format("v{}", mod.metadata.version));
@@ -148,6 +158,12 @@ public:
             statusElement->SetClass(status.badgeClass, true);
         }
         append_text(statusElement, status.text);
+        if (restartPending) {
+            append_text(append(sub, "span"), "·");
+            auto* restart = append(sub, "status-badge");
+            restart->SetClass("warning", true);
+            append_text(restart, "Restart required");
+        }
         mChildren.emplace_back(
             std::make_unique<ClampedText>(append(info, "p"), mod.metadata.description, 2));
         mRoot->SetClass("inactive", !mod.active);
@@ -469,6 +485,32 @@ void ModsWindow::build_content(Rml::Element* content) {
     mOnlineEntry = &online;
     listPane.register_control(online, detailPane, [this](Pane& pane) { build_online(pane); });
     const bool hasInstalledMods = !mods::ModLoader::instance().mods().empty();
+    // aleks2 (DM1-c): everything that waits for a restart, in one place -- until DM1-b this was a toast and
+    // a log line. It lasts until the game restarts, which is what clears it.
+    if (const auto& pending = mods::ModLoader::instance().pending_restarts(); !pending.empty()) {
+        append(listPane.root(), "mod-list-separator");
+        auto* block = append(listPane.root(), "mod-restart-list");
+        append_text(append(block, "b"),
+            fmt::format("Restart required ({}) · close and reopen the game to apply", pending.size()));
+        for (const auto& [id, reason] : pending) {
+            const auto* pendingMod = mods::ModLoader::instance().find_mod(id);
+            append_text(append(block, "mod-restart-note"),
+                fmt::format("{}: {}", pendingMod != nullptr ? pendingMod->metadata.name : id, reason));
+        }
+#ifdef __SWITCH__
+        // V1-rc10: the same restart as Settings > Aleks, next to what needs it.
+        listPane.add_button({.text = "Restart now"}).on_pressed([] {
+            mDoAud_seStartMenu(kSoundClick);
+            if (aleks2_relaunch_on_exit()) {
+                IsRunning = false;
+            } else {
+                push_toast({.title = "Restart by hand",
+                    .content = "Quit Dusklight and open it again to apply the changes.",
+                    .duration = std::chrono::seconds(6)});
+            }
+        });
+#endif
+    }
     if (hasInstalledMods) {
         append(listPane.root(), "mod-list-separator");
     }
@@ -506,6 +548,18 @@ void ModsWindow::build_content(Rml::Element* content) {
 }
 
 void ModsWindow::build_detail(Pane& pane, mods::LoadedMod& mod) {
+    // V1-rc7: a slow detail page is named in the log (the mod's own panel code is timed separately, in svc/ui.cpp).
+    struct DetailTimer {
+        const std::string& id;
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+        ~DetailTimer() {
+            const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            if (ms > 100.0) {
+                static constexpr borealis::Log kLog{"dusk::ui"};
+                kLog.warn("Mods window: the page of {} took {:.0f} ms to build", id, ms);
+            }
+        }
+    } detailTimer{mod.metadata.id};
     mRoot->SetClass("image-header", !mod.metadata.bannerPath.empty());
     pane.root()->SetAttribute("mod-id", mod.metadata.id);
     pane.add_child<ModDetailHeader>(mod, mod_actions(mod, false));
@@ -527,6 +581,18 @@ void ModsWindow::build_detail(Pane& pane, mods::LoadedMod& mod) {
         badge->SetClass(status.badgeClass, true);
     }
     append_text(badge, status.text);
+
+    const auto& pendingRestarts = mods::ModLoader::instance().pending_restarts();
+    if (const auto it = std::ranges::find_if(
+            pendingRestarts, [&](const auto& entry) { return entry.first == mod.metadata.id; });
+        it != pendingRestarts.end())
+    {
+        auto* row = append(pane.root(), "mod-info-row");
+        auto* label = append(row, "b");
+        label->SetClass("warning", true);
+        append_text(label, "Restart required");
+        append_text(append(row, "span"), it->second);
+    }
 
     if (mod.loadFailed && !mod.failureReason.empty()) {
         auto* row = append(pane.root(), "mod-info-row");

@@ -30,6 +30,14 @@ if(_tracy_dir)
     public/common/TracySystem.cpp "__SWITCH__")
 endif()
 unset(_tracy_dir)
+# DM1-b: Dawn's async worker threads get an explicit stack (dawn-worker-stack.patch says why). Applied to
+# the populated tree, so the FetchContent patch id -- and the fetched Dawn -- stay as they were.
+FetchContent_GetProperties(dawn SOURCE_DIR _dawn_dir)
+if(_dawn_dir)
+  dusk_switch_apply_patch("${_dawn_dir}" "${CMAKE_CURRENT_LIST_DIR}/patches/dawn-worker-stack.patch"
+    src/dawn/platform/WorkerThread.cpp "aleks2::dawn_worker")
+endif()
+unset(_dawn_dir)
 
 # SQLite maps nothing into memory on this platform: devkitA64 is neither Linux nor
 # Darwin, so its default SQLITE_MAX_MMAP_SIZE is already 0 and no call to mmap,
@@ -77,6 +85,11 @@ add_library(dusk_switch_runtime STATIC
   ${_sw_src}/switch_fs.cpp
   ${_sw_src}/switch_vulkan.cpp
   ${_sw_src}/aleks2_elf_stubs.c
+  ${_sw_src}/own_process_handle.c
+  ${_sw_src}/switch_netdb.cpp
+  ${_sw_src}/switch_sockets.cpp
+  ${_sw_src}/switch_abort.cpp
+  ${_sw_src}/switch_threads.cpp
 )
 target_include_directories(dusk_switch_runtime
   PUBLIC ${_sw_inc}
@@ -116,7 +129,32 @@ endfunction()
 dusk_switch_borealis_part(io borealis_io_switch.cpp PRIVATE_LINKS ${AURORA_SDL3_TARGET})
 dusk_switch_borealis_part(data borealis_data_switch.cpp LINKS borealis::core borealis::io)
 dusk_switch_borealis_part(file_select borealis_file_select_switch.cpp)
-dusk_switch_borealis_part(net borealis_net_switch.cpp LINKS borealis::core)
+# aleks2 (DM3): borealis::net is borealis' own POSIX backend (extern/borealis/src/net.cpp) over a Horizon
+# platform layer (source/borealis_net_platform_switch.cpp: availability from the sockets service, a UDP
+# loopback wakeup instead of eventfd/pipe). It was the stub borealis_net_switch.cpp until DM3; ALEKS2_SWITCH_NET
+# =OFF goes back to it.
+option(ALEKS2_SWITCH_NET "DM3: real borealis::net and borealis::ws on Switch (mods' net and websocket services)" ON)
+if(ALEKS2_SWITCH_NET AND NOT TARGET borealis_net)
+  set(_borealis_dir "${CMAKE_SOURCE_DIR}/extern/borealis")
+  add_library(aleks2_net_platform STATIC ${_sw_src}/borealis_net_platform_switch.cpp)
+  target_include_directories(aleks2_net_platform
+    PUBLIC ${_borealis_inc} "${_borealis_dir}/src"
+    PRIVATE "${CMAKE_SOURCE_DIR}/src")
+  target_link_libraries(aleks2_net_platform PUBLIC borealis::core)
+  target_compile_features(aleks2_net_platform PUBLIC cxx_std_20)
+  target_compile_options(aleks2_net_platform PRIVATE ${DUSK_SWITCH_OPT_FLAGS})
+  add_library(borealis_net STATIC "${_borealis_dir}/src/net.cpp")
+  add_library(borealis::net ALIAS borealis_net)
+  target_include_directories(borealis_net PUBLIC ${_borealis_inc} PRIVATE "${_borealis_dir}/src")
+  target_link_libraries(borealis_net
+    PUBLIC borealis::core
+    PRIVATE aleks2_net_platform borealis_task borealis_url borealis_log)
+  target_compile_features(borealis_net PUBLIC cxx_std_20)
+  target_compile_options(borealis_net PRIVATE ${DUSK_SWITCH_OPT_FLAGS})
+  message(STATUS "aleks2 (DM3): borealis::net on Switch = upstream net.cpp + Horizon platform layer")
+else()
+  dusk_switch_borealis_part(net borealis_net_switch.cpp LINKS borealis::core)
+endif()
 
 if(NOT TARGET nlohmann_json::nlohmann_json)
   include(FetchContent)
@@ -154,7 +192,25 @@ if(NOT TARGET borealis_update)
   target_compile_options(borealis_update PRIVATE ${DUSK_SWITCH_OPT_FLAGS})
 endif()
 
-dusk_switch_borealis_part(ws borealis_ws_switch.cpp LINKS borealis::core borealis::http)
+# aleks2 (DM3): borealis::ws is borealis' own WebSocket layer (extern/borealis/src/ws.cpp: state, queues,
+# deadlines, UTF-8) over a Horizon transport (source/ws_transport_switch.cpp: BSD socket + the console's ssl
+# service, RFC 6455 in source/ws_rfc6455.cpp). The stub borealis_ws_switch.cpp stays for ALEKS2_SWITCH_NET=OFF.
+if(ALEKS2_SWITCH_NET AND NOT TARGET borealis_ws)
+  set(_borealis_dir "${CMAKE_SOURCE_DIR}/extern/borealis")
+  add_library(borealis_ws STATIC "${_borealis_dir}/src/ws.cpp" ${_sw_src}/ws_transport_switch.cpp ${_sw_src}/ws_rfc6455.cpp)
+  add_library(borealis::ws ALIAS borealis_ws)
+  target_include_directories(borealis_ws
+    PUBLIC ${_borealis_inc}
+    PRIVATE "${_borealis_dir}/src" "${CMAKE_SOURCE_DIR}/src")
+  target_link_libraries(borealis_ws
+    PUBLIC borealis::core borealis::http borealis_url
+    PRIVATE borealis_log borealis_task fmt::fmt nx)
+  target_compile_features(borealis_ws PUBLIC cxx_std_20)
+  target_compile_options(borealis_ws PRIVATE ${DUSK_SWITCH_OPT_FLAGS})
+  message(STATUS "aleks2 (DM3): borealis::ws on Switch = upstream ws.cpp + RFC 6455 transport over Horizon ssl")
+else()
+  dusk_switch_borealis_part(ws borealis_ws_switch.cpp LINKS borealis::core borealis::http)
+endif()
 
 # --- funchook's OS layer --------------------------------------------------------
 # funchook ships os_unix.c and os_windows.c. Horizon has no mmap, no mprotect and
@@ -246,6 +302,8 @@ if(NOT TARGET aurora_dvd)
     "${CMAKE_SOURCE_DIR}/extern/aurora/lib/dolphin/dvd/fst.cpp"
     ${_sw_src}/iso_nod_shim.cpp
     ${_sw_src}/disc_container.cpp
+    ${_sw_src}/wii_crypto.cpp
+    ${_sw_src}/wii_crypto_switch.cpp
     ${_sw_src}/disc_header.cpp
     ${_sw_src}/disc_scan.cpp)
   add_library(aurora::dvd ALIAS aurora_dvd)
@@ -282,6 +340,30 @@ target_link_libraries(dusklight PRIVATE
   nx
   Naga::vulkan)
 target_link_options(dusklight PRIVATE "-Wl,--gc-sections")
+# aleks2 (V1-rc1): numeric getaddrinfo/getnameinfo answered locally, real lookups bounded in time
+# (source/switch_netdb.cpp says why: Horizon's resolver did reverse lookups for NI_NUMERICHOST).
+target_link_options(dusklight PRIVATE "-Wl,--wrap=getaddrinfo" "-Wl,--wrap=freeaddrinfo" "-Wl,--wrap=getnameinfo")
+# aleks2 (V1-rc5): sockets counted for the heartbeat (source/switch_sockets.cpp: open, made, closed, ENOBUFS).
+target_link_options(dusklight PRIVATE "-Wl,--wrap=socket" "-Wl,--wrap=connect" "-Wl,--wrap=close")
+# aleks2 (V1-rc5): abort() logs its caller and stops with a crash report (source/switch_abort.cpp).
+target_link_options(dusklight PRIVATE "-Wl,--wrap=abort")
+# aleks2 (V1-rc8): threads a mod starts through the NRO's C++ library are counted for the exit guard
+# (source/switch_threads.cpp).
+target_link_options(dusklight PRIVATE "-Wl,--wrap=pthread_create")
+# aleks2 (deko3d P1): the deko3d shadows of Aurora's WebGPU textures, views, samplers and bind groups
+# (extern/aurora/lib/deko/dk_objects.cpp). With the Dawn backend the wrappers only forward.
+if (AURORA_GFX_DEKO3D)
+  foreach (_fn IN LISTS AURORA_DEKO3D_WRAP_FUNCTIONS)
+    target_link_options(dusklight PRIVATE "-Wl,--wrap=${_fn}")
+  endforeach ()
+endif ()
+# aleks2 (DM2-c): the PC-only stubs of src/dusk/mods/compat/mod_compat.cpp. Nothing in the game
+# calls them, so --gc-sections would drop them (this toolchain ignores __attribute__((retain))).
+file(STRINGS "${CMAKE_SOURCE_DIR}/platforms/switch/mod_compat_symbols.txt" _aleks2_pc_only REGEX "^pc-only ")
+foreach (_line IN LISTS _aleks2_pc_only)
+  string(REGEX REPLACE "^pc-only +[^ ]+ +[^ ]+ +([^ ]+) .*$" "\\1" _symbol "${_line}")
+  target_link_options(dusklight PRIVATE "-Wl,--undefined=${_symbol}")
+endforeach ()
 
 # Then keep, through that --gc-sections, what mods need to find.
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/ModAbiExports.cmake)
@@ -294,18 +376,75 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/ModAbiExports.cmake)
 # different driver than the one this NRO carries.
 set(_romfs "${CMAKE_CURRENT_BINARY_DIR}/romfs")
 file(COPY "${CMAKE_SOURCE_DIR}/res" DESTINATION "${_romfs}")
-foreach(_seed IN ITEMS initial_dawn_cache.db initial_pipeline_cache.db)
+foreach(_seed IN ITEMS initial_dawn_cache.db initial_pipeline_cache.db initial_pipeline_cache.db.zst)
   if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/romfs/${_seed}")
     file(COPY "${CMAKE_CURRENT_LIST_DIR}/romfs/${_seed}" DESTINATION "${_romfs}")
     message(STATUS "aleks2: bundling ${_seed}")
   endif()
+endforeach()
+# aleks2 (V1-rc1): a compiled shader cache from outside the tree (75 MB: not kept in git). Made with
+# tools/make-shader-seed.py dawn (it records the driver); the console copies it whole when it has no
+# dawn_cache.db of its own (webgpu/gpu_cache.cpp copy_bundled_cache_if_missing).
+set(ALEKS2_DAWN_CACHE_SEED "" CACHE FILEPATH "V1-rc1: initial_dawn_cache.db to ship in romfs (empty: none)")
+if(ALEKS2_DAWN_CACHE_SEED)
+  if(NOT EXISTS "${ALEKS2_DAWN_CACHE_SEED}")
+    message(FATAL_ERROR "aleks2: ALEKS2_DAWN_CACHE_SEED '${ALEKS2_DAWN_CACHE_SEED}' does not exist")
+  endif()
+  file(SHA256 "${ALEKS2_DAWN_CACHE_SEED}" _dawn_seed_sha)
+  # V1-rc2: the driver it was made with, as text next to it (the console reads it without SQLite).
+  if(NOT EXISTS "${ALEKS2_DAWN_CACHE_SEED}.driver")
+    message(FATAL_ERROR "aleks2: '${ALEKS2_DAWN_CACHE_SEED}.driver' is missing (make-shader-seed.py dawn writes it)")
+  endif()
+  configure_file("${ALEKS2_DAWN_CACHE_SEED}" "${_romfs}/initial_dawn_cache.db" COPYONLY)
+  configure_file("${ALEKS2_DAWN_CACHE_SEED}.driver" "${_romfs}/initial_dawn_cache.db.driver" COPYONLY)
+  # V1-rc5: which seed this is, so that a console can tell a cache copied from it from an older one.
+  file(WRITE "${_romfs}/initial_dawn_cache.db.id" "${_dawn_seed_sha}\n")
+  message(STATUS "aleks2: bundling initial_dawn_cache.db from ${ALEKS2_DAWN_CACHE_SEED} (sha256 ${_dawn_seed_sha})")
+endif()
+# aleks2 (deko3d P1): the offline DKSH cache of the deko3d renderer (research/deko3d/dksh_cache, made
+# on the PC from this tree's Aurora and pipeline list; 13.5 MiB: not kept in git). Without it every
+# shader is compiled on the console by the uam worker.
+set(ALEKS2_DKSH_CACHE "" CACHE FILEPATH "deko3d P1: initial_dksh_cache.bin to ship in romfs (empty: none)")
+if(AURORA_GFX_DEKO3D AND ALEKS2_DKSH_CACHE)
+  if(NOT EXISTS "${ALEKS2_DKSH_CACHE}")
+    message(FATAL_ERROR "aleks2: ALEKS2_DKSH_CACHE '${ALEKS2_DKSH_CACHE}' does not exist")
+  endif()
+  configure_file("${ALEKS2_DKSH_CACHE}" "${_romfs}/initial_dksh_cache.bin" COPYONLY)
+  file(SHA256 "${ALEKS2_DKSH_CACHE}" _dksh_sha)
+  message(STATUS "aleks2: bundling initial_dksh_cache.bin from ${ALEKS2_DKSH_CACHE} (sha256 ${_dksh_sha})")
+endif()
+
+# aleks2 (V1-rc5): the mods that ship with the program, as on PC (upstream's install_bundled_mods: Luau, Cosmetics,
+# Randomizer). romfs:/res/mods is the loader's bundled search dir (m_Do_main.cpp mods_init, base_path_relative):
+# lower priority than the card's mods/, so a player's own copy wins, and a built-in mod's code always comes from
+# the NRO (natives.cpp builtin_mod), whichever package of it is chosen -- a PC cosmetics.dusk without an ARM
+# library loads too. Built-in mods get their mod.json and res/; whole packages come from ALEKS2_BUNDLED_MOD_PACKAGES.
+foreach(_mod IN LISTS ALEKS2_STATIC_MODS)
+  set(_mod_dir "${CMAKE_SOURCE_DIR}/mods/${_mod}")
+  if(EXISTS "${_mod_dir}/mod.json")
+    file(COPY "${_mod_dir}/mod.json" DESTINATION "${_romfs}/res/mods/${_mod}")
+    if(IS_DIRECTORY "${_mod_dir}/res")
+      file(COPY "${_mod_dir}/res" DESTINATION "${_romfs}/res/mods/${_mod}")
+    endif()
+    message(STATUS "aleks2: built-in mod ${_mod} bundled in romfs:/res/mods")
+  endif()
+endforeach()
+set(ALEKS2_BUNDLED_MOD_PACKAGES "" CACHE STRING "V1-rc5: .dusk packages to ship in romfs:/res/mods (; list)")
+foreach(_pkg IN LISTS ALEKS2_BUNDLED_MOD_PACKAGES)
+  if(NOT EXISTS "${_pkg}")
+    message(FATAL_ERROR "aleks2: ALEKS2_BUNDLED_MOD_PACKAGES entry '${_pkg}' does not exist")
+  endif()
+  get_filename_component(_pkg_name "${_pkg}" NAME)
+  configure_file("${_pkg}" "${_romfs}/res/mods/${_pkg_name}" COPYONLY)
+  file(SHA256 "${_pkg}" _pkg_sha)
+  message(STATUS "aleks2: bundling mod package ${_pkg_name} in romfs:/res/mods (sha256 ${_pkg_sha})")
 endforeach()
 
 # The NACP's author field is what Home shows under the title. 56 bytes.
 nx_generate_nacp(
   OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/dusklight.nacp"
   NAME "Dusklight"
-  AUTHOR "Twilit Realm, Aleks"
+  AUTHOR "Twilit Realm, Alexgg1014"
   VERSION "${DUSK_NACP_VERSION}")  # 1.0.0-beta.1, or the numeric 1.0.0.0: never 0.0.0.0 (cmake/DuskAppVersion.cmake)
 nx_create_nro(dusklight
   OUTPUT dusklight.nro

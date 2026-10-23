@@ -8,7 +8,7 @@ For one .dusk (or a loose .so) it reports, from the package alone:
   * what the loader would refuse in it structurally (PT_TLS, relocation types it does not apply,
     DT_NEEDED, refused imports...), from elf_audit.verdict;
   * how many hooks it declares and so how many CodeMemory pages and arena objects it needs: funchook
-    uses one trampoline page per hook target (docs/switch-h37-dynamic-loader.md 6.3) and an arena is
+    uses one trampoline page per hook target (H37 milestone notes, 6.3) and an arena is
     CODE_ARENA_PAGES (64) pages in one kernel object. A mod declares its targets by name, by
     function and by member pointer; the count here is the number of records, an upper bound (a
     target two records share uses one page, and a declared hook the mod never installs costs none);
@@ -33,6 +33,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import elf_audit  # noqa: E402
 
 CODE_ARENA_PAGES = 64          # platforms/switch/source/code_arena.h
+# DM2-a: hooks per arena object. funchook's 12-byte patch lets several trampolines share a page: 16 slots of
+# 256 bytes a page (code_arena.h CODE_ARENA_SLOTS), so one CodeMemory object holds 1024 hooks, not 64.
+HOOKS_PER_ARENA = 1024
 PLANNED_ARENA_OBJECTS = 2      # what H37 plans for (docs 6.3): 128 hooks across at most two kernel objects
 CODE_ARENA_MAX = 8             # the arena table's size; the kernel's pool of CodeMemory objects is smaller (10 observed)
 
@@ -85,7 +88,7 @@ def describe(path: pathlib.Path, symgen: str) -> dict:
         "hooks_declared": {"by_name": kinds["name"], "by_name_targets": len(names), "by_function": kinds["fn"],
                            "by_member": kinds["member"]},
         "estimated_pages": pages,
-        "estimated_arena_objects": -(-pages // CODE_ARENA_PAGES),
+        "estimated_arena_objects": -(-pages // HOOKS_PER_ARENA),
         "services": {"required": sorted(f"{s['service_id']}@{s['major']}.{s['min_minor']}" for s in services
                                         if not s["optional"]),
                      "optional": sorted(f"{s['service_id']}@{s['major']}.{s['min_minor']}" for s in services
@@ -111,7 +114,7 @@ def blocks(tier: str, require_catalog: bool = False, present: bool = True) -> bo
 
 
 def capacity(pages: int) -> dict:
-    objects = -(-pages // CODE_ARENA_PAGES)
+    objects = -(-pages // HOOKS_PER_ARENA)
     return {"pages": pages, "arena_objects": objects,
             "within_planned_budget": objects <= PLANNED_ARENA_OBJECTS,
             "within_arena_table": objects <= CODE_ARENA_MAX}
@@ -127,7 +130,7 @@ def capacity_notes(entries: dict) -> list:
                          f"more than the arena table holds ({CODE_ARENA_MAX}): cannot be hooked")
         elif not cap["within_planned_budget"]:
             notes.append(f"{mod_id}: up to {cap['pages']} hook pages = {cap['arena_objects']} CodeMemory objects; "
-                         f"H37 plans for {PLANNED_ARENA_OBJECTS} ({PLANNED_ARENA_OBJECTS * CODE_ARENA_PAGES} hooks): "
+                         f"H37 plans for {PLANNED_ARENA_OBJECTS} ({PLANNED_ARENA_OBJECTS * HOOKS_PER_ARENA} hooks): "
                          "it may exhaust the kernel's CodeMemory pool next to other mods -- test it alone")
     return notes
 

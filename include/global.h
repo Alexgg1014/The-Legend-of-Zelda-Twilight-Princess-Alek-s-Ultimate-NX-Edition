@@ -135,6 +135,17 @@ inline int __builtin_clz(unsigned int v) {
 #define DUSK_NOINLINE
 #endif
 
+// aleks2 (DM3): a member declared inline in its class that a catalog mod hooks by name
+// (platforms/switch/mod_compat_symbols.txt, "out-of-line"). On Switch it becomes a real function,
+// one copy every caller calls; elsewhere it stays as upstream wrote it.
+#if defined(__SWITCH__)
+#define ALEKS2_OUT_OF_LINE_DECL
+#define ALEKS2_OUT_OF_LINE __attribute__((noinline))
+#else
+#define ALEKS2_OUT_OF_LINE_DECL inline
+#define ALEKS2_OUT_OF_LINE
+#endif
+
 #define FAST_DIV(x, n) (x >> (n / 2))
 
 #define SQUARE(x) ((x) * (x))

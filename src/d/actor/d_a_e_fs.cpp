@@ -416,7 +416,7 @@ static void e_fs_end(e_fs_class* i_this) {
     a_this->shape_angle.y += i_this->mTargetAngleY;
 }
 
-static void damage_check(e_fs_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_fs_class* i_this) {
     fopEn_enemy_c* a_this = (fopEn_enemy_c*)&i_this->mEnemy;
     if (i_this->mAction != e_fs_class::ACT_END && a_this->health < 0) {
         i_this->mAction = e_fs_class::ACT_END;

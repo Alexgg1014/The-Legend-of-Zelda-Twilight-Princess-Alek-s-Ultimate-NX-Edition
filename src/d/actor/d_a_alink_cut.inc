@@ -681,6 +681,7 @@ int daAlink_c::checkCutAction() {
         case dusk::wii::CutStyle::Vertical: return static_cast<int>(CUT_NM_PARAM_VERTICAL);
         case dusk::wii::CutStyle::Left: return static_cast<int>(CUT_NM_PARAM_LEFT);
         case dusk::wii::CutStyle::Right: return static_cast<int>(CUT_NM_PARAM_RIGHT);
+        case dusk::wii::CutStyle::Stab: return static_cast<int>(CUT_NM_PARAM_STAB);  // V1-rc7: a thrust
         default: return vanilla;
         }
     };

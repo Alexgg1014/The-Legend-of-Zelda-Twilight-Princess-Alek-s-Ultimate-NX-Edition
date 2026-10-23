@@ -419,7 +419,8 @@ static void e_mm_mt_drop(e_mm_mt_class* i_this) {
     }
 }
 
-static void action(e_mm_mt_class* i_this) {
+// aleks2 (V1-PGO): Dawnlight 5 hooks it by name (file#function); called once, the profile build inlined it.
+DUSK_NOINLINE static void action(e_mm_mt_class* i_this) {
     fopAc_ac_c* unusedPlayer = dComIfGp_getPlayer(0);
     fopAc_ac_c* actor = static_cast<fopAc_ac_c*>(&i_this->enemy);
     cXyz tgHitPosDist;

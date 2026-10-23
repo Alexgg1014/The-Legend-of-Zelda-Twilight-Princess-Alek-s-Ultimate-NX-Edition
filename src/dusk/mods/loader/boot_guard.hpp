@@ -73,6 +73,11 @@ public:
         uint64_t boot = 0;
         // The previous boot crashed while a mod's code ran (now quarantined).
         std::optional<Incident> crashed;
+        // V1-rc12: the previous boot stopped while a mod was being loaded (mapped and relocated), the first time
+        // for that mod: not quarantined, tried once more. Closing the game during boot looks exactly like a crash
+        // here (rc12 console: Crests quarantined after a boot was closed while it loaded, then loaded fine), and a
+        // real crash in that step -- the loader's own code reading the file -- happens again on the next boot.
+        std::optional<Incident> stoppedOnce;
         // The previous boot crashed with no mod to blame.
         bool unattributedCrash = false;
         // This boot loads no mods, and why.

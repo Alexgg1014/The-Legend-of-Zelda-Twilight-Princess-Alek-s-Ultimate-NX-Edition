@@ -1512,7 +1512,7 @@ if (dusk::getSettings().game.recordingMode) {
     }
 }
 
-void dAttention_c::lockSoundStart(u32 i_sfxID) {
+DUSK_NOINLINE void dAttention_c::lockSoundStart(u32 i_sfxID) {
     if (!chkFlag(0x400000)) {
         mDoAud_seStart(i_sfxID, NULL, 0, 0);
     }
@@ -1636,7 +1636,7 @@ void dAttDraw_c::draw(cXyz& i_pos, Mtx i_mtx) {
     dComIfGd_setList();
 }
 
-fopAc_ac_c* dAttention_c::LockonTarget(s32 i_no) {
+DUSK_NOINLINE fopAc_ac_c* dAttention_c::LockonTarget(s32 i_no) {
     if (dComIfGp_checkPlayerStatus0(0, 0x36A02311) || dComIfGp_checkPlayerStatus1(0, 0x11)) {
         return NULL;
     }
@@ -1718,7 +1718,7 @@ fopAc_ac_c* dAttention_c::CheckObjectTarget(s32 i_no) {
     return mCheckObjectList[listIdx].getActor();
 }
 
-bool dAttention_c::LockonTruth() {
+DUSK_NOINLINE bool dAttention_c::LockonTruth() {
     return (mAttnStatus == EState_LOCK || mAttnStatus == EState_RELEASE) && LockonTarget(0) != NULL;
 }
 

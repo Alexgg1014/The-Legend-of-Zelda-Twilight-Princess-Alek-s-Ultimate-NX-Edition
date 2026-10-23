@@ -4,6 +4,8 @@
 #include "dusk/perf.hpp"
 #include "dusk/settings.h"
 
+#include <aurora/aurora.h>
+
 namespace dusk::display {
 
 respol::Mode mode() {
@@ -35,6 +37,7 @@ void poll() {
 
     static int s_appliedValue = -1;
     static int s_appliedMode = -1;
+    respol::g_deko3dRenderer = aurora_get_backend() == BACKEND_DEKO3D;  // post-rc12: Balanced handheld 720 rows
     const auto& game = getSettings().game;
     const auto m = mode();
     const auto resolved = respol::resolve(

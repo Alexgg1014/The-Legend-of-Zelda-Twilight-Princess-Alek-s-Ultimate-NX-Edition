@@ -475,7 +475,7 @@ void darwFilter(GXColor matColor) {
     GXEnd();
 }
 
-void mDoGph_gInf_c::calcFade() {
+DUSK_NOINLINE void mDoGph_gInf_c::calcFade() {  // aleks2 (rc17): a catalog hook target (twilit_essentials, twilit_essentials), inlined by the PGO build
     if (mFade != 0) {
         mFadeRate += mFadeSpeed IF_DUSK(* dusk::game_clock::original_frames());
 
@@ -1017,7 +1017,8 @@ static void drawDepth_blurTex(TGXTexObj &dst) {
 }
 #endif
 
-static void drawDepth2(view_class* param_0, view_port_class* param_1, int param_2) {
+// DM1-c: Cinematic Depth of Field 1.1.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE void drawDepth2(view_class* param_0, view_port_class* param_1, int param_2) {
     ZoneScoped;
     static GXColorS10 l_tevColor0 = {0, 0, 0, 0};
 

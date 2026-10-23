@@ -56,7 +56,8 @@ static void test_summary_steady() {
     CHECK(near(s.avgFps, 30.0, 1e-3));
     CHECK(near(s.low1PctFps, 30.0, 1e-3));
     CHECK(near(s.medianMs, 1000.0 / 30.0, 1e-3));
-    CHECK(s.over33 == 1800);  // 33.333 > 33.3: a 30 fps tick is "over" by that definition
+    CHECK(s.over33 == 0);  // V1-rc8: a perfect 30 fps frame is not a missed one
+    CHECK(s.vblanks[2] == 1800 && s.vblanks[1] == 0 && s.vblanks[3] == 0);
     CHECK(s.over50 == 0);
     CHECK(near(s.coveredSeconds, 60.0, 1e-2));
 }

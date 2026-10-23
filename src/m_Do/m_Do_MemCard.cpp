@@ -9,6 +9,7 @@
 #include "dusk/main.h"
 #ifdef __SWITCH__
 #include "dusk/benchmark.hpp"
+#include "dusk/director.hpp"
 #endif
 #include "dusk/os.h"
 #include "dusk/version.hpp"
@@ -302,7 +303,7 @@ void mDoMemCd_Ctrl_c::save(void* i_buffer, u32 i_size, u32 i_position) {
 }
 
 #if !PLATFORM_SHIELD
-void mDoMemCd_Ctrl_c::store() {
+DUSK_NOINLINE void mDoMemCd_Ctrl_c::store() {  // aleks2 (rc18): a hook target (trailer director); inlined into main() in rc17
     CARDFileInfo file;
     s32 ret;
     field_0x1fc8 = 0;
@@ -312,7 +313,7 @@ void mDoMemCd_Ctrl_c::store() {
     // must leave nothing of it on the card. Every save path -- the menu, the
     // autosave, a mod -- ends here, so this is the one place that has to know.
     // The caller is told the write succeeded so nothing waits on it.
-    if (dusk::benchmark::saves_blocked()) {
+    if (dusk::benchmark::saves_blocked() || dusk::director::active()) {
         OS_REPORT("CARD Write skipped: benchmark in progress\n");
         if (mCardState == CARD_STATE_READY_e || mCardState == CARD_STATE_NO_FILE_e) {
             mCardState = CARD_STATE_WRITE_e;

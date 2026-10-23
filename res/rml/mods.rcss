@@ -220,6 +220,18 @@ mod-title small {
     color: rgba(var(--color-text-rgb), 55%);
 }
 
+/* aleks2 (DM1-c): the list of changes that wait for a restart, above the installed mods. */
+mod-restart-list {
+    display: block;
+    margin: 0 10dp;
+    padding: var(--space-sm) 0;
+}
+
+mod-restart-list mod-restart-note {
+    display: block;
+    margin-top: 4dp;
+}
+
 mod-restart-note {
     font-size: var(--font-size-base);
     color: var(--color-warning);
@@ -236,6 +248,11 @@ mod-info status-badge {
 
 mod-info-row > b.error {
     color: var(--color-error);
+    opacity: 1;
+}
+
+mod-info-row > b.warning {
+    color: var(--color-warning);
     opacity: 1;
 }
 

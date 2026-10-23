@@ -284,7 +284,7 @@ static void* s_last_sub(void* i_actor, void* i_data) {
     return NULL;
 }
 
-static void damage_check(e_s1_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_s1_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
 

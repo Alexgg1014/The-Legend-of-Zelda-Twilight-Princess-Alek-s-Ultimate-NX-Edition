@@ -15,6 +15,17 @@
 #include "d/d_com_inf_game.h"
 #if TARGET_PC
 #include "dusk/companion.h"
+#include "dusk/settings.h"
+#include "dusk/dev_mode.hpp"
+#include "dusk/frame_telemetry.hpp"
+#include "dusk/minimap_pan.hpp"
+#include "dusk/minimap_stats.hpp"
+#include <aurora/math.hpp>
+#include <aurora/tuning.h>
+#include <cstdlib>
+#include "JSystem/JUtility/JUTVideo.h"
+
+#include <algorithm>
 #include "dusk/dualscreen.h"
 #endif
 #if TARGET_PC
@@ -347,7 +358,16 @@ inline u8 twoValueLineInterpolation(u8 param_0, u8 param_1, f32 param_2) {
     return ((f32)param_0 + (param_2 * ((f32)param_1 - (f32)param_0)));
 }
 
+#if TARGET_PC
 void renderingAmap_c::draw() {
+    animatePalette();
+    GX_DEBUG_GROUP(renderingDAmap_c::draw);
+}
+
+void renderingAmap_c::animatePalette() {
+#else
+void renderingAmap_c::draw() {
+#endif
     f32 tmp = ((f32)(g_Counter.mCounter0 % dMap_HIO_prm_res_dst_s::m_res->field_0x1aa) /
                (f32)dMap_HIO_prm_res_dst_s::m_res->field_0x1aa);
     tmp = tmp;
@@ -382,7 +402,9 @@ void renderingAmap_c::draw() {
                                   dMap_HIO_prm_res_dst_s::m_res->field_0x1a7, tmp);
     setAmapPaletteColor(0x2E, temp_r31, temp_r30, temp_r29, temp_r28);
 
+#if !TARGET_PC
     GX_DEBUG_GROUP(renderingDAmap_c::draw);
+#endif
 }
 
 int renderingAmap_c::getDispType() const {
@@ -1946,7 +1968,227 @@ void dMap_c::_move(f32 i_centerX, f32 i_centerZ, int i_roomNo, f32 param_3) {
 #endif
 }
 
+#if TARGET_PC
+// aleks2 (rc9): minimap counters for the heartbeat (dusk/minimap_stats.hpp).
+namespace {
+dusk::minimap_stats::Counters g_minimapStats;
+}  // namespace
+
+const dusk::minimap_stats::Counters& dusk::minimap_stats::counters() { return g_minimapStats; }
+
+const char* dusk::minimap_stats::reason_name(int reason) {
+    static const char* const kNames[] = {"first", "center", "zoom", "room", "player", "restart", "display", "refresh"};
+    return reason >= 0 && reason < kReasonCount ? kNames[reason] : "?";
+}
+
+const char* dusk::minimap_stats::base_reason_name(int reason) {
+    static const char* const kNames[] = {"first", "key", "margin"};
+    return reason >= 0 && reason < kBaseReasonCount ? kNames[reason] : "?";
+}
+
+aurora::Vec2<u16> map_render_size_for(u16 width, u16 height);  // d_map_path.cpp
+extern bool (*g_dMapPanRender)(dRenderingMap_c* map);         // d_map_path.cpp
+
+// aleks2 (rc9, minimap_pan, perf-lab.ini): the minimap's path, doors and outline passes are
+// rendered once into a base texture kMargin larger on every side (minimap_pan.hpp), and each
+// frame the visible window is drawn from it, then the cursors and treasure icons over it
+// (drawPanDynamic, the same order as afterDrawPath). The base is rendered again only when the
+// window leaves the margin or when something the path is drawn from changed: room, floor,
+// zoom, render size, mirror mode, the second screen, and the groups' switch bits and the
+// floors drawn (hashed by walking the path data, no GX). The map moves in whole render texels.
+namespace {
+dMap_c* g_panMap = nullptr;  // the minimap instance, while minimap_pan is on
+
+struct PanBase {
+    u8* buffer = nullptr;  // the base copy texture's key (Aurora copies are GPU textures)
+    size_t capacity = 0;
+    bool valid = false;
+    f32 centerX = 0.0f, centerZ = 0.0f;
+    struct Key {
+        s32 room, floor;
+        f32 cmPerTexel;
+        u32 renderW, renderH;
+        s32 mirror, companion;
+        u64 pathBits;
+        u32 copyGeneration;  // V1-rc11: Aurora dropped every EFB copy, the base's included (preset/resolution)
+        bool operator==(const Key&) const = default;
+    } key{};
+};
+PanBase g_panBase;
+
+bool pan_render_hook(dRenderingMap_c* map) {
+    if (g_panMap == nullptr || map != static_cast<dRenderingMap_c*>(g_panMap)) {
+        return false;
+    }
+    return g_panMap->renderPanned();
+}
+}  // namespace
+
+bool dMap_c::renderPanned() {
+    namespace pan = dusk::minimap_pan;
+    namespace stats = dusk::minimap_stats;
+    if (mTexWidth == 0 || mTexHeight == 0 || field_0x4 == NULL) {
+        return false;
+    }
+    const u16 baseW = pan::base_size(mTexWidth);
+    const u16 baseH = pan::base_size(mTexHeight);
+    const f32 scaleX = static_cast<f32>(baseW) / mTexWidth;
+    const f32 scaleY = static_cast<f32>(baseH) / mTexHeight;
+    const auto [rw, rh] = map_render_size_for(mTexWidth, mTexHeight);
+    const auto [brw, brh] = map_render_size_for(baseW, baseH);
+    const bool mirror = dusk::getSettings().game.enableMirrorMode;
+
+    // What the path's groups and floors are drawn from, besides the window.
+    u64 bits = 0x9E3779B97F4A7C15ull;
+    const auto mix = [&bits](u64 v) { bits = (bits ^ v) * 0x100000001B3ull; };
+    for (room_class* room = getFirstRoomPointer(); room != NULL; room = getNextRoomPointer()) {
+        mix(reinterpret_cast<uintptr_t>(room));
+        floor_class* floor = room->mpFloor;
+        for (int i = 0; floor != NULL && i < room->mFloorNum; i++, floor++) {
+            const bool drawn = isRenderingFloor(floor->mFloorNo);
+            mix(drawn ? 1 : 0);
+            group_class* group = floor->mpGroup;
+            for (int g = 0; drawn && group != NULL && g < floor->mGroupNum; g++, group++) {
+                mix(isSwitch(group) ? 1 : 0);
+            }
+        }
+    }
+    const PanBase::Key key{mRoomNoSingle, mRenderedFloor, mCmPerTexel, brw, brh, mirror ? 1 : 0,
+                           dusk::dualscreen::hudOnCompanion() ? 1 : 0, bits, aurora_gx_copy_cache_generation()};
+
+    PanBase& base = g_panBase;
+    int reason = -1;
+    if (!base.valid) {
+        reason = stats::kBaseFirst;
+    } else if (!(base.key == key)) {
+        reason = stats::kBaseKey;
+    } else if (!pan::covers(mPosX, mPosZ, base.centerX, base.centerZ, field_0x8, field_0xc, scaleX, scaleY)) {
+        reason = stats::kBaseMargin;
+    }
+    if (reason >= 0) {
+        // GX copies are tiled 8x4 at one byte per texel for R8.
+        const size_t needed = static_cast<size_t>((brw + 7u) & ~7u) * ((brh + 3u) & ~3u);
+        if (needed > base.capacity) {
+            std::free(base.buffer);
+            base.buffer = static_cast<u8*>(std::aligned_alloc(32, (needed + 31u) & ~static_cast<size_t>(31)));
+            base.capacity = base.buffer != NULL ? needed : 0;
+        }
+        if (base.buffer == NULL) {
+            return false;
+        }
+        const u16 texW = mTexWidth, texH = mTexHeight;
+        const f32 extentX = field_0x8, extentZ = field_0xc;
+        u8* const texture = field_0x4;
+        mTexWidth = baseW;
+        mTexHeight = baseH;
+        field_0x8 = extentX * scaleX;
+        field_0xc = extentZ * scaleY;
+        field_0x4 = base.buffer;
+        s_panBasePass = true;
+        preRenderingMap();
+        if (isDrawPath()) {
+            preDrawPath();
+            beforeDrawPath();
+            drawPath();
+            afterDrawPath();
+            postDrawPath();
+        }
+        postRenderingMap();
+        s_panBasePass = false;
+        field_0x4 = texture;
+        field_0x8 = extentX;
+        field_0xc = extentZ;
+        mTexWidth = texW;
+        mTexHeight = texH;
+        base.valid = true;
+        base.key = key;
+        base.centerX = mPosX;
+        base.centerZ = mPosZ;
+        ++g_minimapStats.baseRenders;
+        ++g_minimapStats.baseReasons[reason];
+    }
+
+    // The visible window from the base, then what moves over it.
+    preRenderingMap();
+    const pan::Window w = pan::window(mPosX, mPosZ, base.centerX, base.centerZ, field_0x8, field_0xc, scaleX, scaleY,
+                                      mirror);
+    GXTexObj baseObj;
+    GXInitTexObj(&baseObj, base.buffer, brw, brh, GX_TF_I8, GX_CLAMP, GX_CLAMP, GX_FALSE);
+    GXInitTexObjLOD(&baseObj, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+    GXLoadTexObj(&baseObj, GX_TEXMAP0);
+    GXSetNumChans(0);
+    GXSetNumTexGens(1);
+    GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
+    GXSetNumTevStages(1);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+    // preRenderingMap's projection: x in [-right, right] (right < 0 mirrored), y in
+    // [-top, top] with +y on row 0, identity position matrix.
+    const f32 right = field_0x8 * (mirror ? -0.5f : 0.5f);
+    const f32 top = field_0xc * 0.5f;
+    GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+    GXPosition3f32(-right, top, 0.0f);
+    GXTexCoord2f32(w.u0, w.v0);
+    GXPosition3f32(right, top, 0.0f);
+    GXTexCoord2f32(w.u1, w.v0);
+    GXPosition3f32(right, -top, 0.0f);
+    GXTexCoord2f32(w.u1, w.v1);
+    GXPosition3f32(-right, -top, 0.0f);
+    GXTexCoord2f32(w.u0, w.v1);
+    GXEnd();
+    GXSetNumChans(1);
+    setTevSettingNonTextureDirectColor();
+    preDrawPath();
+    drawPanDynamic();
+    postDrawPath();
+    postRenderingMap();
+    ++g_minimapStats.composes;
+    (void)rw;
+    (void)rh;
+    return true;
+}
+#endif
+
 void dMap_c::_draw() {
+#if TARGET_PC
+    // aleks2 (rc9): minimap_pan follows perf-lab.ini; the base is dropped whenever it turns on.
+    if (dusk::frame_telemetry::lab().minimapPan) {
+        if (g_panMap != this) {
+            g_panBase.valid = false;
+        }
+        g_panMap = this;
+        g_dMapPanRender = pan_render_hook;
+    } else if (g_panMap == this) {
+        g_panMap = nullptr;
+        g_dMapPanRender = nullptr;
+    }
+#endif
+#if TARGET_PC
+    // aleks2 (V1-rc6): Minimap Refresh (settings.h minimapRedrawDivisor). A room or floor change always renders.
+    {
+        static u32 s_tick = 0;
+        static int s_lastRoom = -1;
+        static int s_lastFloor = -1;
+        // V1-rc8: developer mode only: the rc6 tours had worse 1 % lows with 2.
+        const int divisor =
+            dusk::dev_mode() ? std::clamp(dusk::getSettings().game.minimapRedrawDivisor.getValue(), 1, 3) : 1;
+        const int floor = dMapInfo_c::getNowStayFloorNo();
+        const bool changed = mStayRoomNo != s_lastRoom || floor != s_lastFloor;
+        s_lastRoom = mStayRoomNo;
+        s_lastFloor = floor;
+        if (divisor > 1 && !changed && (s_tick++ % static_cast<u32>(divisor)) != 0) {
+            return;
+        }
+    }
+#endif
     if (mStayRoomNo >= 0 && field_0x8d != 0) {
         f32 centerX = mCenterX;
         f32 centerZ = mCenterZ;
@@ -1961,6 +2203,79 @@ void dMap_c::_draw() {
             centerZ += offZ;
             cmPerTexel *= texelScale;
         }
+#endif
+#if TARGET_PC
+        // aleks2 (hud_fast, perf-lab.ini): the minimap texture is redrawn only when
+        // something it is drawn from changed: the render window, the room and floor, the
+        // player and restart cursors, mirror mode, the render height (line widths) and
+        // the second screen. The path's switch and visited bits are not in the key, so a
+        // render is forced every kHudFastRefresh frames anyway. A kept frame still runs
+        // the palette animation, which draw() does along with the render. With Minimal
+        // HUD off the minimap is most of the HUD's FIFO cost (hundreds of line, point and
+        // polygon draws, the outline passes drawing every decoration again).
+        if (dusk::frame_telemetry::lab().hudFast) {
+            struct Key {
+                f32 centerX, centerZ, cmPerTexel;
+                s32 room, floor;
+                Vec player, restart;
+                s32 playerAngle, restartAngle, restartRoom;
+                s32 mirror, renderHeight, companion;
+            };
+            constexpr u32 kHudFastRefresh = 15;
+            static Key s_last{};
+            static bool s_valid = false;
+            static u32 s_kept = 0;
+            Key key{};
+            key.centerX = centerX;
+            key.centerZ = centerZ;
+            key.cmPerTexel = cmPerTexel;
+            key.room = mStayRoomNo;
+            key.floor = dMapInfo_c::getNowStayFloorNo();
+            key.player = dMapInfo_n::getMapPlayerPos();
+            key.restart = dMapInfo_n::getMapRestartPos();
+            key.playerAngle = dMapInfo_n::getMapPlayerAngleY();
+            key.restartAngle = dMapInfo_n::getMapRestartAngleY();
+            key.restartRoom = dComIfGs_getRestartRoomNo();
+            key.mirror = dusk::getSettings().game.enableMirrorMode ? 1 : 0;
+            key.renderHeight = static_cast<s32>(JUTVideo::getManager()->getRenderHeight());
+            key.companion = dusk::dualscreen::hudOnCompanion() ? 1 : 0;
+            if (s_valid && s_kept < kHudFastRefresh && std::memcmp(&key, &s_last, sizeof(Key)) == 0) {
+                ++s_kept;
+                ++g_minimapStats.kept;
+                animatePalette();
+                return;
+            }
+            // rc9: the first key field that changed, for the heartbeat.
+            namespace stats = dusk::minimap_stats;
+            int reason = stats::kFirst;
+            if (s_valid) {
+                const auto same = [](const auto& a, const auto& b) { return std::memcmp(&a, &b, sizeof(a)) == 0; };
+                if (!same(key.centerX, s_last.centerX) || !same(key.centerZ, s_last.centerZ)) {
+                    reason = stats::kCenter;
+                } else if (!same(key.cmPerTexel, s_last.cmPerTexel)) {
+                    reason = stats::kZoom;
+                } else if (key.room != s_last.room || key.floor != s_last.floor) {
+                    reason = stats::kRoomFloor;
+                } else if (!same(key.player, s_last.player) || key.playerAngle != s_last.playerAngle) {
+                    reason = stats::kPlayer;
+                } else if (!same(key.restart, s_last.restart) || key.restartAngle != s_last.restartAngle ||
+                           key.restartRoom != s_last.restartRoom) {
+                    reason = stats::kRestart;
+                } else if (key.mirror != s_last.mirror || key.renderHeight != s_last.renderHeight ||
+                           key.companion != s_last.companion) {
+                    reason = stats::kDisplay;
+                } else {
+                    reason = stats::kRefresh;
+                }
+            }
+            ++g_minimapStats.reasons[reason];
+            s_last = key;
+            s_valid = true;
+            s_kept = 0;
+        }
+#endif
+#if TARGET_PC
+        ++g_minimapStats.renders;
 #endif
         entry(centerX, centerZ, cmPerTexel, mStayRoomNo, dMapInfo_c::getNowStayFloorNo());
 #if DEBUG

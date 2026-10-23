@@ -54,7 +54,11 @@ set(_aleks2_pinned_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_abi_pinned.txt")
 # H37-c5: and game functions the linker would drop because the Switch build never calls them but a mod
 # hooks by name (mod_hook_roots.txt, written by hand): same treatment, a root that stays in the image.
 set(_aleks2_hook_roots_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_hook_roots.txt")
-foreach (_pinned IN ITEMS "${_aleks2_pinned_file}" "${_aleks2_hook_roots_file}")
+# V1-rc1: whole families rather than names one at a time (tools/gen-mod-abi-wholesale.py).
+set(_aleks2_wgpu_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_abi_wgpu.txt")
+set(_aleks2_libm_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_abi_libm.txt")
+foreach (_pinned IN ITEMS "${_aleks2_pinned_file}" "${_aleks2_hook_roots_file}" "${_aleks2_wgpu_file}"
+         "${_aleks2_libm_file}")
     if (EXISTS "${_pinned}")
         file(STRINGS "${_pinned}" _aleks2_pinned_lines)
         foreach (_line IN LISTS _aleks2_pinned_lines)
@@ -128,7 +132,8 @@ file(REMOVE "${_aleks2_undefined_file}.tmp")
 target_link_options(dusklight PRIVATE "-Wl,@${_aleks2_undefined_file}")
 set_property(TARGET dusklight APPEND PROPERTY LINK_DEPENDS "${_aleks2_undefined_file}")
 # The lists are read at configure time: editing one must reconfigure, not only relink.
-foreach (_list IN ITEMS "${_aleks2_pinned_file}" "${_aleks2_hook_roots_file}" "${_aleks2_required_file}")
+foreach (_list IN ITEMS "${_aleks2_pinned_file}" "${_aleks2_hook_roots_file}" "${_aleks2_required_file}"
+         "${_aleks2_wgpu_file}" "${_aleks2_libm_file}")
     if (EXISTS "${_list}")  # Ninja refuses a dependency on a file that is not there
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_list}")
     endif ()
@@ -154,6 +159,58 @@ list(LENGTH _aleks2_required_imports _required_count)
 message(STATUS "aleks2: ${_required_count} import(s) required by the native mods exported by name")
 
 list(LENGTH _aleks2_mod_abi_symbols _count)
+
+# DM1-b: the game's whole surface, derived from the build. The lists above name what known mods
+# asked for, so a mod update calling one more game function failed until a new NRO shipped. Here
+# every strong global the GAME defines -- the dusklight and dusk_internal objects, JSystem and
+# Aurora's Dolphin API archives -- is exported and kept, through one more --dynamic-list. Third-party
+# archives (abseil, Dawn, Rust std, SDL, curl, Mesa) stay out: rooting them is what broke
+# --export-dynamic (see the top of this file). The list is rebuilt by a PRE_LINK step from the
+# objects actually being linked, so it cannot drift from the code; game_surface.py documents the
+# filter (no weak/inline definitions). Off with -DALEKS2_GAME_SURFACE=OFF to get the H38 surface.
+option(ALEKS2_GAME_SURFACE "Export every strong global symbol the game defines (DM1-b)" ON)
+if (ALEKS2_GAME_SURFACE)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(_aleks2_game_surface "${CMAKE_CURRENT_BINARY_DIR}/game_surface.txt")
+    set(_aleks2_surface_size 0)
+    if (EXISTS "${_aleks2_game_surface}")
+        file(SIZE "${_aleks2_game_surface}" _aleks2_surface_size)
+    endif ()
+    if (_aleks2_surface_size LESS 64)
+        # ld needs the file (with at least one name: "{ };" is a syntax error) on the very first link;
+        # PRE_LINK fills it before that link runs. A name nothing defines is ignored.
+        file(WRITE "${_aleks2_game_surface}" "{\n  aleks2_game_surface_placeholder;\n};\n")
+    endif ()
+    set(_aleks2_surface_archives "")
+    foreach (_lib IN LISTS JSYSTEM_LIBRARIES ITEMS aurora_card aurora_core aurora_gd aurora_gx aurora_mtx
+             aurora_os aurora_pad aurora_si aurora_thp aurora_vi aurora_dvd)
+        if (TARGET ${_lib})
+            list(APPEND _aleks2_surface_archives --archive "$<TARGET_FILE:${_lib}>")
+        endif ()
+    endforeach ()
+    # A PRE_LINK step can only be added from the directory that created the target (the top level), so
+    # the call is written to a file and included there once this directory is done.
+    set(_aleks2_surface_command
+            "${Python3_EXECUTABLE}" -I "${CMAKE_CURRENT_LIST_DIR}/../tools/game_surface.py" generate
+            --nm "${CMAKE_NM}" --out "${_aleks2_game_surface}"
+            --report "${CMAKE_CURRENT_BINARY_DIR}/game_surface.json"
+            --objdir "${CMAKE_BINARY_DIR}/CMakeFiles/dusklight.dir"
+            --objdir "${CMAKE_BINARY_DIR}/CMakeFiles/dusk_internal.dir"
+            ${_aleks2_surface_archives})
+    set(_aleks2_surface_text "add_custom_command(TARGET dusklight PRE_LINK COMMAND")
+    foreach (_arg IN LISTS _aleks2_surface_command)
+        string(APPEND _aleks2_surface_text " [==[${_arg}]==]")
+    endforeach ()
+    string(APPEND _aleks2_surface_text "\n    COMMENT [==[aleks2: game export surface (DM1-b)]==] VERBATIM)\n")
+    set(_aleks2_surface_cmake "${CMAKE_CURRENT_BINARY_DIR}/game_surface_prelink.cmake")
+    file(WRITE "${_aleks2_surface_cmake}" "${_aleks2_surface_text}")
+    # Deferred arguments are evaluated in the top-level scope, where this file's variables do not exist:
+    # the paths go in as literals.
+    cmake_language(EVAL CODE
+            "cmake_language(DEFER DIRECTORY [==[${CMAKE_SOURCE_DIR}]==] CALL include [==[${_aleks2_surface_cmake}]==])")
+    target_link_options(dusklight PRIVATE "-Wl,--dynamic-list=${_aleks2_game_surface}")
+    message(STATUS "aleks2: game export surface ON (generated at link time into ${_aleks2_game_surface})")
+endif ()
 
 # The generated surface, if it has been generated. Without it the pinned symbols
 # above still work, so a fresh checkout builds and only loses what mods would

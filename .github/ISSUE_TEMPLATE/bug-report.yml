@@ -1,23 +1,20 @@
 name: Bug Report
-description: Report an issue with Dusklight
+description: Report a problem with Alek's Ultimate NX Edition (the Switch port)
 type: Bug
 body:
-- type: checkboxes
-  id: official-build-certification
+- type: markdown
   attributes:
-    label: Mods and Forks
-    description: Certify that this issue exists on the official builds of Dusklight
-    options:
-    - label: The bug occurs on an **official release** of Dusklight, without any forks or third-party patches installed
-      required: true
-  validations:
-    required: true
+    value: |
+      This is an unofficial Switch port of Dusklight. Please report problems with this port here, not to the
+      Dusklight team. A problem that also happens on PC Dusklight belongs to Dusklight; a problem with one mod that
+      also happens on PC belongs to that mod's author.
 
 - type: input
-  id: dusklight-version
+  id: port-version
   attributes:
-    label: Dusklight Version
-    placeholder: ex. 1.3.1
+    label: Port Version
+    description: Shown on the main menu and in hbmenu/Sphira
+    placeholder: ex. 1.0.0
   validations:
     required: true
 
@@ -51,19 +48,13 @@ body:
     placeholder: Describe what is happening instead
 
 - type: dropdown
-  id: system-os-architecture
+  id: play-mode
   attributes:
-    label: OS / Architecture
-    description: The operating system and architecture you are running Dusklight on
+    label: How You Play
     options:
-    - Windows x86-64
-    - Windows ARM64
-    - MacOS ARM64
-    - MacOS x86-64
-    - Linux ARM64
-    - Linux x84-64
-    - Android ARM64
-    - iOS ARM64
+    - Docked
+    - Handheld
+    - Flip Grip
   validations:
     required: true
 
@@ -94,25 +85,24 @@ body:
   attributes:
     label: Graphics Backend
     options:
+    - deko3d (default)
     - Vulkan
-    - D3D12
-    - Metal
-    - D3D11
-    - OpenGL ES
-    - Unsure / Default
-    default: 5
+    - Unsure
+    default: 0
 
 - type: textarea
   id: texture-packs-mods
   attributes:
     label: Texture Packs and Mods
-    placeholder: List any texture packs or mods you had installed
+    placeholder: List any texture packs or mods you had installed, with their versions
 
 - type: upload
   id: logs-upload
   attributes:
     label: Logs and Other Files
-    description: Include any relevant logs, config files, or saves to reproduce the bug
+    description: |
+      The newest log from sdmc:/switch/dusklight/cache/logs/, and if the game crashed, the newest file in
+      sdmc:/atmosphere/crash_reports/
 
 - type: textarea
   id: additional-context

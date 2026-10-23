@@ -76,3 +76,6 @@ void try_push_verification_modal(Document& host);
 void try_push_language_unavailable_modal(Document& host);
 
 }  // namespace dusk::ui
+
+// aleks2 (rc17): the boot phase timing, here at the end so no line above moves (PGO).
+#include "dusk/boot_timing.hpp"

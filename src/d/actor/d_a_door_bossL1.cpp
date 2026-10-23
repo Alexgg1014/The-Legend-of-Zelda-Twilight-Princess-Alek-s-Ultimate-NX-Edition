@@ -909,7 +909,7 @@ int daBdoorL1_c::actionEnd() {
     return 1;
 }
 
-int daBdoorL1_c::execute() {
+DUSK_NOINLINE int daBdoorL1_c::execute() {
     static actionFunc l_action[4] = {&daBdoorL1_c::actionWait, &daBdoorL1_c::actionCloseWait, &daBdoorL1_c::actionOpen, &daBdoorL1_c::actionEnd};
     if (fopAcM_CheckStatus(this, fopAcStts_STAFF_SHUTTER_e)) {
         field_0x5a0 = dComIfGp_evmng_getMyStaffId(l_staff_name, 0, 0);

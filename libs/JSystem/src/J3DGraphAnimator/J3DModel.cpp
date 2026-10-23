@@ -432,7 +432,7 @@ s32 J3DModel::setSkinDeform(J3DSkinDeform* p_skinDeform, u32 flags) {
     return ret;
 }
 
-void J3DModel::calcAnmMtx() {
+DUSK_NOINLINE void J3DModel::calcAnmMtx() {
     j3dSys.setModel(this);
 
     if (checkFlag(J3DMdlFlag_UseDefaultJ3D)) {

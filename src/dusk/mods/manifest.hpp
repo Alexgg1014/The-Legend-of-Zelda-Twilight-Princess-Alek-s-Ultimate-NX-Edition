@@ -47,4 +47,10 @@ ResolveStatus resolve(const char* name, void** outAddr, HookSymbolFlags* outFlag
 // when known. False when no manifest is loaded.
 bool has_inline_sites(const void* addr, const char** outName = nullptr);
 
+// V1-rc16: the code symbol at exactly `addr` (reports only; nullptr when unknown).
+const char* name_at(const void* addr);
+
 }  // namespace dusk::mods::manifest
+
+// aleks2 (rc17): the boot phase timing, here at the end so no line above moves (PGO).
+#include "dusk/boot_timing.hpp"

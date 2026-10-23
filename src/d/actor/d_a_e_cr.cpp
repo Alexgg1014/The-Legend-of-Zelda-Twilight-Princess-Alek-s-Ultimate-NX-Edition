@@ -104,7 +104,7 @@ static BOOL pl_check(e_cr_class* a_this, f32 i_range, s16 i_angle) {
     return FALSE;
 }
 
-static void damage_check(e_cr_class* a_this) {
+static DUSK_NOINLINE void damage_check(e_cr_class* a_this) {
     fopAc_ac_c* actor = &a_this->enemy;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
 

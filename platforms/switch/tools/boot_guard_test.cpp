@@ -103,6 +103,56 @@ void crashes_in_mods(const fs::path& dir) {
     std::printf("mod crashes  initialize and constructor crashes quarantine the mod, across boots, until released\n");
 }
 
+// V1-rc12: a stop in the load step quarantines only the second time in a row for the same mod.
+void load_step_stops(const fs::path& dir) {
+    crashing_boot(dir, [](BootGuard& g) { g.enter("dev.test.big", Stage::Load); });
+    {
+        BootGuard guard(dir);
+        const auto start = guard.begin_boot();
+        CHECK(!start.crashed);
+        CHECK(start.stoppedOnce && start.stoppedOnce->modId == "dev.test.big");
+        CHECK(!guard.quarantined("dev.test.big"));
+        // the same mod stops loading again, before this boot finishes
+        guard.enter("dev.test.big", Stage::Load);
+    }
+    {
+        BootGuard guard(dir);
+        const auto start = guard.begin_boot();
+        CHECK(start.crashed && start.crashed->modId == "dev.test.big" && start.crashed->stage == "load");
+        CHECK(!start.stoppedOnce);
+        CHECK(guard.quarantined("dev.test.big"));
+        guard.release("dev.test.big");
+        guard.end_boot();
+    }
+    // a stop, then a boot that gets through: the next stop is a first one again
+    crashing_boot(dir, [](BootGuard& g) { g.enter("dev.test.big", Stage::Load); });
+    {
+        BootGuard guard(dir);
+        CHECK(guard.begin_boot().stoppedOnce);
+        guard.enter("dev.test.big", Stage::Load);
+        guard.leave();
+        guard.end_boot();
+    }
+    crashing_boot(dir, [](BootGuard& g) { g.enter("dev.test.big", Stage::Load); });
+    {
+        BootGuard guard(dir);
+        const auto start = guard.begin_boot();
+        CHECK(start.stoppedOnce && !start.crashed && !guard.quarantined("dev.test.big"));
+        guard.end_boot();
+    }
+    // two different mods in a row: each a first stop
+    crashing_boot(dir, [](BootGuard& g) { g.enter("dev.test.a", Stage::Load); });
+    crashing_boot(dir, [](BootGuard& g) { g.enter("dev.test.b", Stage::Load); });
+    {
+        BootGuard guard(dir);
+        const auto start = guard.begin_boot();
+        CHECK(start.stoppedOnce && start.stoppedOnce->modId == "dev.test.b" && !start.crashed);
+        CHECK(!guard.quarantined("dev.test.a") && !guard.quarantined("dev.test.b"));
+        guard.end_boot();
+    }
+    std::printf("load stops   a stop in the load step quarantines only the second time in a row\n");
+}
+
 void unattributed_crashes(const fs::path& dir) {
     crashing_boot(dir, [](BootGuard&) {});
     {
@@ -265,6 +315,7 @@ int main(int argc, char** argv) {
     fs::remove_all(root);
     clean_boot(root / "clean");
     crashes_in_mods(root / "mods");
+    load_step_stops(root / "load-stops");
     unattributed_crashes(root / "unattributed");
     player_asks(root / "player");
     reports(root / "reports");

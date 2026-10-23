@@ -127,7 +127,7 @@ dGov_HIO_c::dGov_HIO_c() {
     mWhite.a = 255;
 }
 
-int dGameover_c::_create() {
+DUSK_NOINLINE int dGameover_c::_create() {
     int phase = dComIfG_resLoad(&mPhase, "Gover");
 
     if (dComIfGp_isPauseFlag() ||
@@ -202,7 +202,7 @@ int dGameover_c::_create() {
 }
 
 
-int dGameover_c::_execute() {
+DUSK_NOINLINE int dGameover_c::_execute() {
     JKRHeap* old_heap = mDoExt_setCurrentHeap(mpHeap);
     u8 old_proc = mProc;
 

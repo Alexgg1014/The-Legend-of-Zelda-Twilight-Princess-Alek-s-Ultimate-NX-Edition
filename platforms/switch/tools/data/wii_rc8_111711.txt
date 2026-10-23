@@ -1,0 +1,103 @@
+wii sword R: generic Ev=0.025 Eh=0.208 yaw=0.00 yawPeak=0.00 aPeak=1.96g wPeak=4.25 act=120ms firstVert=-0.63 gravityAxis=2 gyroHand=0
+wii sword R: thrust Ev=0.052 Eh=0.285 yaw=0.00 yawPeak=0.00 aPeak=2.40g wPeak=2.76 act=120ms firstVert=1.21 gravityAxis=2 gyroHand=0
+wii sword R: generic Ev=0.038 Eh=0.309 yaw=0.00 yawPeak=0.00 aPeak=2.42g wPeak=5.53 act=125ms firstVert=0.95 gravityAxis=2 gyroHand=0
+wii sword R: generic Ev=0.034 Eh=0.324 yaw=0.00 yawPeak=0.00 aPeak=2.68g wPeak=4.91 act=125ms firstVert=0.83 gravityAxis=2 gyroHand=0
+wii sword R rejected (windup): Ev=0.985 Eh=0.198 yaw=0.00 aPeak=4.36g wPeak=19.46 act=125ms firstVert=4.18
+wii sword R: generic Ev=0.351 Eh=0.224 yaw=0.00 yawPeak=0.00 aPeak=2.51g wPeak=18.59 act=125ms firstVert=-1.98 gravityAxis=2 gyroHand=0
+wii sword R rejected (windup): Ev=1.228 Eh=0.214 yaw=0.00 aPeak=4.70g wPeak=20.86 act=125ms firstVert=4.21
+wii sword R rejected (windup): Ev=0.188 Eh=0.380 yaw=0.00 aPeak=2.64g wPeak=20.86 act=125ms firstVert=1.94
+wii sword R: vertical Ev=0.346 Eh=0.028 yaw=0.08 yawPeak=2.01 aPeak=1.77g wPeak=3.46 act=125ms firstVert=-1.75 gravityAxis=2 gyroHand=-1
+wii sword R rejected (windup): Ev=1.054 Eh=0.310 yaw=-0.15 aPeak=4.70g wPeak=18.60 act=125ms firstVert=4.49
+wii sword R rejected (windup): Ev=0.105 Eh=0.075 yaw=0.07 aPeak=2.10g wPeak=14.95 act=125ms firstVert=1.84
+wii sword R: generic Ev=0.085 Eh=0.071 yaw=-0.03 yawPeak=1.06 aPeak=1.54g wPeak=6.67 act=125ms firstVert=-1.00 gravityAxis=1 gyroHand=-1
+wii sword R rejected (rotation-only): Ev=0.014 Eh=0.036 yaw=-0.32 aPeak=0.68g wPeak=3.53 act=125ms firstVert=-0.36
+wii sword R: left-to-right Ev=0.264 Eh=1.087 yaw=-0.87 yawPeak=-11.06 aPeak=4.55g wPeak=15.28 act=125ms firstVert=-1.74 gravityAxis=1 gyroHand=-1
+wii sword R rejected (rebound): Ev=0.285 Eh=0.223 yaw=-0.08 aPeak=2.57g wPeak=4.69 act=125ms firstVert=-1.55
+wii sword R: left-to-right Ev=0.018 Eh=0.448 yaw=-0.65 yawPeak=-11.74 aPeak=2.55g wPeak=12.00 act=125ms firstVert=0.49 gravityAxis=2 gyroHand=-1
+wii sword R: left-to-right Ev=0.015 Eh=0.542 yaw=-0.53 yawPeak=-10.09 aPeak=3.32g wPeak=10.55 act=125ms firstVert=-0.44 gravityAxis=2 gyroHand=-1
+wii sword R: right-to-left Ev=0.011 Eh=0.748 yaw=0.67 yawPeak=15.12 aPeak=3.64g wPeak=15.27 act=125ms firstVert=-0.17 gravityAxis=2 gyroHand=-1
+wii sword R: right-to-left Ev=0.005 Eh=0.360 yaw=0.63 yawPeak=10.05 aPeak=2.70g wPeak=11.36 act=125ms firstVert=-0.40 gravityAxis=2 gyroHand=-1
+wii sword R: left-to-right Ev=0.002 Eh=0.609 yaw=-0.66 yawPeak=-10.98 aPeak=2.93g wPeak=11.02 act=125ms firstVert=0.16 gravityAxis=2 gyroHand=-1
+wii sword R: left-to-right Ev=0.023 Eh=0.449 yaw=-0.38 yawPeak=-7.98 aPeak=3.19g wPeak=8.96 act=125ms firstVert=-0.49 gravityAxis=2 gyroHand=-1
+wii sword R: right-to-left Ev=0.019 Eh=0.301 yaw=0.88 yawPeak=11.24 aPeak=1.77g wPeak=12.50 act=125ms firstVert=0.35 gravityAxis=2 gyroHand=-1
+wii sword R rejected (rebound): Ev=0.002 Eh=0.064 yaw=0.37 aPeak=0.96g wPeak=5.30 act=125ms firstVert=0.22
+wii sword R: left-to-right Ev=0.002 Eh=0.242 yaw=-0.52 yawPeak=-6.75 aPeak=1.63g wPeak=6.83 act=125ms firstVert=0.16 gravityAxis=2 gyroHand=-1
+wii sword R: left-to-right Ev=0.011 Eh=0.490 yaw=-0.86 yawPeak=-8.41 aPeak=2.19g wPeak=8.44 act=125ms firstVert=-0.29 gravityAxis=2 gyroHand=-1
+wii sword R rejected (rebound): Ev=0.002 Eh=0.073 yaw=-0.08 aPeak=1.00g wPeak=1.57 act=120ms firstVert=-0.15
+wii sword R rejected (rotation-only): Ev=0.000 Eh=0.047 yaw=-0.49 aPeak=0.67g wPeak=5.66 act=120ms firstVert=0.05
+wii sword R: right-to-left Ev=0.043 Eh=0.706 yaw=1.51 yawPeak=21.64 aPeak=3.80g wPeak=23.94 act=120ms firstVert=0.82 gravityAxis=2 gyroHand=1
+wii sword R rejected (rotation-only): Ev=0.001 Eh=0.053 yaw=-0.87 aPeak=0.89g wPeak=10.28 act=120ms firstVert=0.20
+wii sword R: right-to-left Ev=0.044 Eh=0.675 yaw=1.56 yawPeak=22.08 aPeak=3.34g wPeak=23.45 act=120ms firstVert=0.75 gravityAxis=2 gyroHand=1
+wii sword R rejected (rotation-only): Ev=0.006 Eh=0.062 yaw=-0.72 aPeak=0.90g wPeak=10.14 act=100ms firstVert=0.36
+wii sword R: right-to-left Ev=0.067 Eh=0.712 yaw=1.81 yawPeak=22.74 aPeak=3.67g wPeak=24.52 act=120ms firstVert=-1.03 gravityAxis=1 gyroHand=-1
+wii sword R rejected (rebound): Ev=0.027 Eh=0.143 yaw=-0.86 aPeak=1.25g wPeak=12.90 act=120ms firstVert=-0.53
+wii sword R rejected (windup): Ev=0.082 Eh=0.221 yaw=-1.26 aPeak=2.15g wPeak=20.21 act=120ms firstVert=1.25
+wii sword R: left-to-right Ev=0.015 Eh=0.085 yaw=-0.32 yawPeak=-8.55 aPeak=1.42g wPeak=11.13 act=120ms firstVert=0.45 gravityAxis=2 gyroHand=-1
+wii sword R: left-to-right Ev=0.090 Eh=0.406 yaw=-1.41 yawPeak=-17.38 aPeak=2.56g wPeak=21.81 act=120ms firstVert=1.13 gravityAxis=2 gyroHand=-1
+wii sword R: generic Ev=0.000 Eh=0.112 yaw=0.14 yawPeak=7.67 aPeak=1.37g wPeak=7.91 act=120ms firstVert=-0.10 gravityAxis=2 gyroHand=-1
+wii sword R rejected (windup): Ev=0.340 Eh=0.238 yaw=-0.07 aPeak=2.88g wPeak=17.85 act=120ms firstVert=2.73
+wii sword R rejected (rotation-only): Ev=0.003 Eh=0.023 yaw=0.02 aPeak=0.85g wPeak=16.23 act=115ms firstVert=0.40
+wii sword R rejected (windup): Ev=0.346 Eh=0.272 yaw=-0.44 aPeak=3.95g wPeak=22.77 act=120ms firstVert=1.50
+wii sword R rejected (windup): Ev=0.671 Eh=1.442 yaw=-1.18 aPeak=5.44g wPeak=23.63 act=120ms firstVert=4.26
+wii sword R: generic Ev=0.003 Eh=0.508 yaw=0.25 yawPeak=4.35 aPeak=3.47g wPeak=5.62 act=120ms firstVert=0.43 gravityAxis=0 gyroHand=-1
+wii sword R rejected (rotation-only): Ev=0.054 Eh=0.012 yaw=-0.09 aPeak=0.83g wPeak=4.25 act=120ms firstVert=0.75
+wii sword R: generic Ev=0.031 Eh=0.063 yaw=-0.38 yawPeak=-4.36 aPeak=1.09g wPeak=4.97 act=120ms firstVert=-0.66 gravityAxis=2 gyroHand=-1
+wii sword R rejected (windup): Ev=0.525 Eh=0.663 yaw=1.28 aPeak=4.49g wPeak=24.52 act=120ms firstVert=2.07
+wii sword R rejected (windup): Ev=0.266 Eh=0.334 yaw=0.94 aPeak=4.41g wPeak=22.01 act=120ms firstVert=3.09
+wii sword R rejected (rotation-only): Ev=0.001 Eh=0.033 yaw=0.24 aPeak=0.81g wPeak=3.48 act=85ms firstVert=0.24
+wii sword R rejected (windup): Ev=1.547 Eh=0.364 yaw=0.18 aPeak=6.45g wPeak=32.73 act=120ms firstVert=3.74
+wii sword R: generic Ev=0.510 Eh=2.555 yaw=0.16 yawPeak=3.35 aPeak=7.25g wPeak=32.88 act=120ms firstVert=5.23 gravityAxis=1 gyroHand=-1
+wii sword R rejected (windup): Ev=1.359 Eh=0.881 yaw=1.07 aPeak=6.26g wPeak=29.00 act=120ms firstVert=3.35
+wii sword R rejected (windup): Ev=0.354 Eh=0.758 yaw=0.62 aPeak=5.87g wPeak=25.63 act=120ms firstVert=4.02
+wii sword R: right-to-left Ev=0.010 Eh=0.270 yaw=0.28 yawPeak=3.83 aPeak=1.80g wPeak=5.36 act=120ms firstVert=-0.36 gravityAxis=2 gyroHand=-1
+wii sword R: left-to-right Ev=0.199 Eh=0.618 yaw=-1.31 yawPeak=-17.63 aPeak=3.53g wPeak=20.30 act=120ms firstVert=1.13 gravityAxis=2 gyroHand=-1
+wii sword R rejected (rotation-only): Ev=0.003 Eh=0.040 yaw=-0.11 aPeak=0.66g wPeak=3.84 act=55ms firstVert=-0.19
+wii sword R: right-to-left Ev=0.268 Eh=0.838 yaw=0.36 yawPeak=9.48 aPeak=4.53g wPeak=17.20 act=120ms firstVert=2.09 gravityAxis=2 gyroHand=-1
+wii sword R rejected (rebound): Ev=0.035 Eh=0.176 yaw=0.06 aPeak=1.43g wPeak=4.48 act=120ms firstVert=-0.63
+wii sword R: generic Ev=0.023 Eh=0.052 yaw=0.14 yawPeak=1.87 aPeak=0.93g wPeak=7.23 act=120ms firstVert=-0.42 gravityAxis=2 gyroHand=1
+wii sword R rejected (windup): Ev=1.285 Eh=0.452 yaw=0.08 aPeak=5.54g wPeak=21.57 act=120ms firstVert=5.39
+wii sword R: vertical Ev=0.680 Eh=0.282 yaw=0.09 yawPeak=3.52 aPeak=4.59g wPeak=20.85 act=120ms firstVert=-4.45 gravityAxis=1 gyroHand=1
+wii sword R rejected (windup): Ev=0.837 Eh=0.347 yaw=0.10 aPeak=4.03g wPeak=22.36 act=120ms firstVert=3.92
+wii sword R: vertical Ev=0.471 Eh=0.132 yaw=0.35 yawPeak=6.58 aPeak=3.64g wPeak=21.60 act=120ms firstVert=-3.54 gravityAxis=1 gyroHand=1
+wii sword R: generic Ev=0.358 Eh=0.342 yaw=-0.54 yawPeak=-7.45 aPeak=3.42g wPeak=15.21 act=120ms firstVert=-2.66 gravityAxis=0 gyroHand=1
+wii sword R: generic Ev=1.219 Eh=1.324 yaw=-0.20 yawPeak=-4.84 aPeak=6.87g wPeak=31.04 act=125ms firstVert=-3.69 gravityAxis=2 gyroHand=1
+wii sword R: generic Ev=0.591 Eh=0.785 yaw=0.02 yawPeak=3.16 aPeak=5.04g wPeak=29.43 act=125ms firstVert=-1.81 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.109 Eh=1.009 yaw=1.34 yawPeak=23.45 aPeak=4.71g wPeak=23.47 act=125ms firstVert=2.22 gravityAxis=2 gyroHand=1
+wii sword R rejected (rebound): Ev=0.007 Eh=0.068 yaw=-0.85 aPeak=1.15g wPeak=11.10 act=125ms firstVert=0.37
+wii sword R: right-to-left Ev=0.109 Eh=0.696 yaw=1.55 yawPeak=23.04 aPeak=3.43g wPeak=23.88 act=125ms firstVert=1.79 gravityAxis=2 gyroHand=1
+wii sword R: left-to-right Ev=0.054 Eh=0.296 yaw=-0.35 yawPeak=-15.67 aPeak=2.35g wPeak=16.66 act=125ms firstVert=1.26 gravityAxis=2 gyroHand=1
+wii sword R rejected (rebound): Ev=0.005 Eh=0.129 yaw=0.06 aPeak=1.39g wPeak=10.52 act=125ms firstVert=0.36
+wii sword R: right-to-left Ev=0.082 Eh=1.068 yaw=1.70 yawPeak=21.61 aPeak=3.82g wPeak=21.70 act=125ms firstVert=1.72 gravityAxis=2 gyroHand=1
+wii sword R rejected (rebound): Ev=0.013 Eh=0.103 yaw=-1.00 aPeak=1.22g wPeak=14.45 act=125ms firstVert=0.35
+wii sword R: right-to-left Ev=0.134 Eh=1.285 yaw=1.59 yawPeak=22.03 aPeak=4.07g wPeak=23.25 act=125ms firstVert=1.63 gravityAxis=2 gyroHand=1
+wii sword R rejected (rotation-only): Ev=0.001 Eh=0.040 yaw=-0.89 aPeak=0.72g wPeak=9.73 act=125ms firstVert=-0.29
+wii sword R: right-to-left Ev=0.085 Eh=1.346 yaw=1.75 yawPeak=20.15 aPeak=4.21g wPeak=20.64 act=125ms firstVert=1.41 gravityAxis=2 gyroHand=1
+wii sword R rejected (rotation-only): Ev=0.005 Eh=0.010 yaw=-0.42 aPeak=0.75g wPeak=5.15 act=125ms firstVert=-0.43
+wii sword R: right-to-left Ev=0.078 Eh=1.124 yaw=1.06 yawPeak=14.24 aPeak=3.61g wPeak=14.34 act=125ms firstVert=1.14 gravityAxis=2 gyroHand=1
+wii sword R rejected (rebound): Ev=0.006 Eh=0.108 yaw=-0.08 aPeak=1.71g wPeak=1.87 act=115ms firstVert=-0.29
+wii sword R: right-to-left Ev=0.080 Eh=1.348 yaw=1.02 yawPeak=18.15 aPeak=5.23g wPeak=19.04 act=125ms firstVert=1.17 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.012 Eh=0.504 yaw=0.43 yawPeak=7.86 aPeak=3.38g wPeak=8.25 act=125ms firstVert=-0.47 gravityAxis=2 gyroHand=1
+wii sword R: left-to-right Ev=0.044 Eh=0.952 yaw=-0.79 yawPeak=-14.74 aPeak=4.13g wPeak=16.78 act=125ms firstVert=0.35 gravityAxis=2 gyroHand=1
+wii sword R rejected (rebound): Ev=0.042 Eh=0.163 yaw=-0.53 aPeak=2.09g wPeak=7.55 act=125ms firstVert=0.82
+wii sword R: left-to-right Ev=0.606 Eh=2.908 yaw=-0.98 yawPeak=-18.90 aPeak=8.22g wPeak=27.34 act=125ms firstVert=1.11 gravityAxis=1 gyroHand=1
+wii sword R rejected (windup): Ev=0.094 Eh=0.077 yaw=-0.64 aPeak=2.24g wPeak=9.57 act=125ms firstVert=1.40
+wii sword R: right-to-left Ev=0.145 Eh=0.712 yaw=0.82 yawPeak=9.36 aPeak=4.48g wPeak=13.66 act=125ms firstVert=0.84 gravityAxis=0 gyroHand=1
+wii sword R: generic Ev=0.023 Eh=0.030 yaw=0.12 yawPeak=2.73 aPeak=0.93g wPeak=3.74 act=125ms firstVert=0.63 gravityAxis=1 gyroHand=1
+wii sword R rejected (windup): Ev=0.302 Eh=0.581 yaw=0.12 aPeak=3.76g wPeak=21.71 act=125ms firstVert=1.93
+wii sword R: generic Ev=0.056 Eh=0.173 yaw=-0.18 yawPeak=-5.75 aPeak=1.80g wPeak=13.54 act=125ms firstVert=-1.42 gravityAxis=1 gyroHand=1
+wii sword R rejected (windup): Ev=0.405 Eh=0.717 yaw=-0.32 aPeak=4.55g wPeak=26.97 act=125ms firstVert=2.66
+wii sword R: generic Ev=0.027 Eh=0.112 yaw=-0.02 yawPeak=-6.98 aPeak=1.87g wPeak=10.19 act=125ms firstVert=-1.03 gravityAxis=1 gyroHand=1
+wii sword R: left-to-right Ev=0.010 Eh=0.217 yaw=-1.56 yawPeak=-16.34 aPeak=1.80g wPeak=16.83 act=125ms firstVert=0.49 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.015 Eh=0.363 yaw=1.63 yawPeak=18.97 aPeak=2.10g wPeak=19.59 act=125ms firstVert=-0.55 gravityAxis=2 gyroHand=1
+wii sword R: left-to-right Ev=0.007 Eh=0.329 yaw=-1.64 yawPeak=-17.32 aPeak=2.16g wPeak=18.94 act=125ms firstVert=-0.21 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.015 Eh=0.363 yaw=1.60 yawPeak=18.75 aPeak=2.17g wPeak=19.76 act=125ms firstVert=-0.45 gravityAxis=2 gyroHand=1
+wii sword R: left-to-right Ev=0.011 Eh=0.263 yaw=-1.48 yawPeak=-16.58 aPeak=2.05g wPeak=18.09 act=125ms firstVert=0.19 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.022 Eh=0.283 yaw=1.02 yawPeak=17.48 aPeak=2.16g wPeak=18.34 act=125ms firstVert=-0.54 gravityAxis=2 gyroHand=1
+wii sword R rejected (rebound): Ev=0.003 Eh=0.048 yaw=0.12 aPeak=1.25g wPeak=4.33 act=105ms firstVert=0.26
+wii sword R: left-to-right Ev=0.017 Eh=0.317 yaw=-1.64 yawPeak=-16.88 aPeak=2.30g wPeak=19.21 act=125ms firstVert=0.63 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.010 Eh=0.831 yaw=1.87 yawPeak=25.19 aPeak=3.47g wPeak=26.58 act=125ms firstVert=-0.45 gravityAxis=2 gyroHand=1
+wii sword R: left-to-right Ev=0.154 Eh=0.695 yaw=-1.70 yawPeak=-19.95 aPeak=3.59g wPeak=26.02 act=125ms firstVert=1.89 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.057 Eh=0.482 yaw=1.30 yawPeak=17.22 aPeak=2.62g wPeak=19.82 act=125ms firstVert=-0.93 gravityAxis=2 gyroHand=1
+wii sword R: left-to-right Ev=0.026 Eh=0.147 yaw=-1.52 yawPeak=-14.79 aPeak=1.44g wPeak=16.81 act=125ms firstVert=0.80 gravityAxis=2 gyroHand=1
+wii sword R: right-to-left Ev=0.007 Eh=0.493 yaw=1.60 yawPeak=20.11 aPeak=2.64g wPeak=20.36 act=125ms firstVert=0.39 gravityAxis=2 gyroHand=1
+wii sword R rejected (rotation-only): Ev=0.007 Eh=0.025 yaw=0.03 aPeak=0.70g wPeak=4.75 act=125ms firstVert=0.41

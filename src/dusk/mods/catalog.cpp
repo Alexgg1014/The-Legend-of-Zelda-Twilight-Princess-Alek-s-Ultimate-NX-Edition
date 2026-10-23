@@ -58,6 +58,14 @@ std::string_view catalog_platform() noexcept {
     return "linux-aarch64";
 #elif defined(__linux__) && defined(__x86_64__)
     return "linux-x86_64";
+#elif defined(__SWITCH__)
+    // aleks2 (DM1-b): the PACKAGE platform the console asks for, not a claim about the device.
+    // The catalog has no Switch entry (it answers 400 "platform must be one of ..." to
+    // switch-arm64, checked 2026-10-14), and the Switch loader runs the lib/linux-aarch64 library
+    // of a package in compatibility mode (switch_native_loader.cpp). Every such package still goes
+    // through hardware_findings, the Switch-variant guard and switchelf::check_package before it is
+    // installed. device_platform() names the device itself, for logs.
+    return "linux-aarch64";
 #else
     // The catalog rejects platforms outside its published package matrix.
     return {};
@@ -457,6 +465,14 @@ borealis::Task<DetailFetchResult> fetch_detail(std::string id) {
 
 std::string_view platform() noexcept {
     return catalog_platform();
+}
+
+std::string_view device_platform() noexcept {
+#if defined(__SWITCH__)
+    return "switch-arm64";
+#else
+    return catalog_platform();
+#endif
 }
 
 bool supports_native_installs() noexcept {

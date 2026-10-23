@@ -671,7 +671,7 @@ void dCamera_c::Stay() {
     mCurState = 1;
 }
 
-bool dCamera_c::ChangeModeOK(s32 param_0) {
+DUSK_NOINLINE bool dCamera_c::ChangeModeOK(s32 param_0) {
     if (dComIfGp_evmng_cameraPlay() || chkFlag(0x20000000)) {
         return 0;
     }
@@ -1650,7 +1650,7 @@ void dCamera_c::setStageMapToolData() {
     }
 }
 
-void dCamera_c::setMapToolData() {
+DUSK_NOINLINE void dCamera_c::setMapToolData() {  // aleks2 (rc17): a catalog hook target (hyrule_hide_and_seek, dawnlight), inlined by the PGO build
     int room_no = dComIfGp_roomControl_getStayNo();
     stage_camera_class* camera = dComIfGp_getRoomCamera(room_no);
     stage_arrow_class* arrow = dComIfGp_getRoomArrow(room_no);
@@ -2354,7 +2354,7 @@ int dCamera_c::GetCameraTypeFromCameraName(char const* i_name) {
     return i;
 }
 
-int dCamera_c::GetCameraTypeFromToolData(stage_camera2_data_class* i_data) {
+DUSK_NOINLINE int dCamera_c::GetCameraTypeFromToolData(stage_camera2_data_class* i_data) {
     if (i_data->field_0x16 != 0xFFFF) {
         return i_data->field_0x16;
     } else {

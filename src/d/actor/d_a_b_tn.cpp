@@ -910,7 +910,7 @@ int daB_TN_c::checkBck(int i_index) {
     return mpModelMorf2->getAnm() == dComIfG_getObjectRes("B_tn", i_index);
 }
 
-void daB_TN_c::setActionMode(int i_mode1, int i_mode2) {
+DUSK_NOINLINE void daB_TN_c::setActionMode(int i_mode1, int i_mode2) {
     offHeadLockFlg();
     mActionMode1 = i_mode1;
     mActionMode2 = i_mode2;
@@ -1222,7 +1222,7 @@ void daB_TN_c::setDamage(dCcD_Sph* i_sph, int param_2) {
     }
 }
 
-void daB_TN_c::setShieldEffect(dCcD_Sph* i_sph) {
+DUSK_NOINLINE void daB_TN_c::setShieldEffect(dCcD_Sph* i_sph) {
     def_se_set(&mSound, mAtInfo.mpCollider, 42, this);
     dComIfGp_setHitMark(2, this, i_sph->GetTgHitPosP(), NULL, NULL, 0);
 }
@@ -3192,7 +3192,7 @@ void daB_TN_c::initChaseL(int param_1) {
     }
 }
 
-bool daB_TN_c::checkAttackAble() {
+DUSK_NOINLINE bool daB_TN_c::checkAttackAble() {
     if (fopAcM_searchPlayerDistance(this) < 500.0f &&
         abs((s16)(fopAcM_searchPlayerAngleY(this) - shape_angle.y)) < 0x3000)
     {
@@ -4909,7 +4909,7 @@ static int daB_TN_IsDelete(daB_TN_c* i_this) {
     return 1;
 }
 
-int daB_TN_c::_delete() {
+DUSK_NOINLINE int daB_TN_c::_delete() {
     dComIfG_resDelete(&mPhaseReq1, "B_tn");
     dComIfG_resDelete(&mPhaseReq2, mArcName);
     if (mHioInit) {

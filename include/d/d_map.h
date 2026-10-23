@@ -101,6 +101,11 @@ public:
     int getStayType() const;
     renderingAmap_c() {}
 
+#if TARGET_PC
+    // aleks2 (hud_fast): the palette animation of draw(), on its own, for a frame that
+    // keeps the last minimap render.
+    void animatePalette();
+#endif
     virtual void draw();
     virtual ~renderingAmap_c() {}
     virtual GXColor* getLineColor(int, int);
@@ -141,6 +146,10 @@ public:
 
 class dMap_c : public renderingAmap_c {
 public:
+#if TARGET_PC
+    // aleks2 (rc9, minimap_pan): the panned render (d_map.cpp).
+    bool renderPanned();
+#endif
     void copyPalette();
     void copyPalette(int, int, f32);
     void setMapPaletteColorAlphaPer(int, f32);

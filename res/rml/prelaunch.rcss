@@ -241,23 +241,26 @@ body.mirrored #menu-list button.mod-update-link {
     font-size: var(--font-size-md);
 }
 
+/* aleks2 (V1-rc10): top right, away from the menu (bottom left it covered Quit once the menu grew). */
 disc-info {
     position: absolute;
-    left: 96dp;
-    right: auto;
-    bottom: 72dp;
+    left: auto;
+    right: 96dp;
+    top: 72dp;
     display: flex;
     flex-direction: column;
+    align-items: flex-end;
     gap: var(--space-md);
     font-size: var(--font-size-4xl);
     font-effect: glow(0dp 4dp 0dp 4dp black);
-    text-align: left;
+    text-align: right;
 }
 
 body.mirrored disc-info {
-    left: auto;
-    right: 96dp;
-    text-align: right;
+    left: 96dp;
+    right: auto;
+    align-items: flex-start;
+    text-align: left;
 }
 
 version-info {

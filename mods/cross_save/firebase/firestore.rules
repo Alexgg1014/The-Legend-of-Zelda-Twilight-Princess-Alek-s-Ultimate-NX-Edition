@@ -1,0 +1,113 @@
+rules_version = '2';
+
+// Cross-save for Dusklight (Firebase Spark, no server). PROPOSAL: review before deploying.
+// Layout and protocol: mods/cross_save/firebase/firebase_backend.hpp.
+// tests/fake_firestore.hpp transcribes these rules for the host tests; keep both in step.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function anonymous() {
+      return request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+    // The account owner, signed in with email/password on this device.
+    function isOwner(owner) {
+      return signedIn() && request.auth.uid == owner && !anonymous();
+    }
+    // A device the owner approved through a link code (it keeps its own anonymous identity;
+    // the owner revokes it by deleting users/{owner}/devices/{uid}).
+    function isLinkedDevice(owner) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(owner)/devices/$(request.auth.uid));
+    }
+    function canSync(owner) {
+      return isOwner(owner) || isLinkedDevice(owner);
+    }
+
+    function validHistoryEntry(e) {
+      return e is map && e.snapshotId is string && e.revision is int && e.digest is string &&
+        e.blobSha256 is string && e.size is int && e.chunkCount is int;
+    }
+    function validHead(d) {
+      return d.keys().hasOnly(['revision', 'snapshotId', 'digest', 'blobSha256', 'size',
+                               'chunkCount', 'deviceId', 'deviceName', 'platform', 'game',
+                               'createdAt', 'format', 'history']) &&
+        d.format == 'dusksave-1' &&
+        d.revision is int && d.revision >= 1 &&
+        d.snapshotId is string && d.snapshotId.matches('^[0-9a-f]{32}$') &&
+        d.digest is string && d.digest.size() == 64 &&
+        d.blobSha256 is string && d.blobSha256.size() == 64 &&
+        d.size is int && d.size > 0 && d.size <= 16777216 &&
+        d.chunkCount is int && d.chunkCount >= 1 && d.chunkCount <= 32 &&
+        d.deviceName is string && d.deviceName.size() <= 64 &&
+        d.history is list && d.history.size() >= 1 && d.history.size() <= 5 &&
+        validHistoryEntry(d.history[0]);
+    }
+    function validChunk(d, id) {
+      return d.keys().hasOnly(['data', 'sha256', 'size', 'snapshotId', 'index']) &&
+        id.matches('^[0-9a-f]{32}_[0-9]{4}$') &&
+        d.data is bytes && d.data.size() >= 1 && d.data.size() <= 524288 &&
+        d.size == d.data.size() &&
+        d.sha256 is string && d.sha256.size() == 64 &&
+        d.snapshotId is string && id.matches('^' + d.snapshotId + '_[0-9]{4}$') &&
+        d.index is int && d.index >= 0 && d.index < 32;
+    }
+
+    match /users/{owner}/devices/{device} {
+      allow get: if isOwner(owner) || (signedIn() && request.auth.uid == device);
+      allow list: if isOwner(owner);
+      allow create, update: if isOwner(owner) &&
+        request.resource.data.keys().hasOnly(['name', 'platform', 'linkedAt', 'pairingCode']) &&
+        request.resource.data.name is string && request.resource.data.name.size() <= 64;
+      allow delete: if isOwner(owner);
+    }
+
+    match /users/{owner}/saves/{key} {
+      allow read: if canSync(owner);
+      allow create: if canSync(owner) && key.matches('^[A-Za-z0-9]{3}-[0-9A-Za-z]{2}-[A-Za-z0-9._-]{1,31}$') &&
+        validHead(request.resource.data);
+      // The client already sends an updateTime precondition (compare-and-swap); the rule adds
+      // that a revision only moves forward. Measured against the real service (2026-10-16): rules
+      // run before the precondition, and an updateTime write to a deleted head is judged as an
+      // update with resource == null. Without that case the rule errors and the client sees 403
+      // instead of the lost CAS it is (the precondition then fails as it should).
+      allow update: if canSync(owner) && validHead(request.resource.data) &&
+        (resource == null || request.resource.data.revision > resource.data.revision);
+      allow delete: if canSync(owner);
+
+      match /chunks/{chunk} {
+        allow read: if canSync(owner);
+        allow create: if canSync(owner) && validChunk(request.resource.data, chunk);
+        allow update: if false;  // fragments are immutable
+        allow delete: if canSync(owner);
+      }
+    }
+
+    match /pairings/{code} {
+      // The requesting device, or any signed-in owner who knows the code. A missing code reads
+      // as "not found" instead of "denied", so the device can tell it expired.
+      allow get: if signedIn() &&
+        (resource == null || resource.data.deviceUid == request.auth.uid || !anonymous());
+      allow list: if false;
+      allow create: if signedIn() &&
+        code.matches('^[A-HJ-NP-Z2-9]{8}$') &&
+        request.resource.data.keys().hasOnly(['deviceUid', 'deviceName', 'platform',
+                                              'createdAt', 'expiresAt']) &&
+        request.resource.data.deviceUid == request.auth.uid &&
+        request.resource.data.deviceName is string && request.resource.data.deviceName.size() <= 64 &&
+        request.resource.data.expiresAt is timestamp &&
+        request.resource.data.expiresAt > request.time &&
+        request.resource.data.expiresAt <= request.time + duration.value(15, 'm');
+      // An owner approves once, before the code expires, and only by writing its own UID.
+      allow update: if signedIn() && !anonymous() &&
+        !('ownerUid' in resource.data) &&
+        request.time < resource.data.expiresAt &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.ownerLabel is string && request.resource.data.ownerLabel.size() <= 128 &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerUid', 'ownerLabel']);
+      allow delete: if signedIn() && resource.data.deviceUid == request.auth.uid;
+    }
+  }
+}

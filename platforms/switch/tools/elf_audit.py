@@ -22,6 +22,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import struct
 import sys
 import zipfile
@@ -53,11 +54,12 @@ STT = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 3: "SECTION", 4: "FILE", 5: "COMMON"
 # Kept in step by platforms/switch/tools/test-elf-loader.sh, which compares this tool's verdict
 # with the loader's own Dry Run on the same files.
 LOADER_RELOCATIONS = {"NONE", "ABS64", "GLOB_DAT", "JUMP_SLOT", "RELATIVE"}
-# DT_NEEDED a Linux-built package may name: the game image stands in for these five.
-PROVIDED_NEEDED = {"libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1", "ld-linux-aarch64.so.1"}
-# The loader's own shims.
+# DT_NEEDED a Linux-built package may name: the game image stands in for these.
+PROVIDED_NEEDED = {"libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1", "ld-linux-aarch64.so.1",
+                   "libpthread.so.0", "libdl.so.2", "librt.so.1"}  # V1-rc1: merged into glibc 2.34
+# The loader's own shims (for Linux-built packages; DM1-c's readdir/closedir are for them only).
 LOADER_SHIMS = {"__cxa_finalize", "__errno_location", "__libc_single_threaded", "__stack_chk_guard",
-                "stdin", "stdout", "stderr"}
+                "stdin", "stdout", "stderr", "readdir", "closedir"}
 # glibc-only names the NRO itself defines (src/dusk/switch_mod_libc.cpp, switch_mod_libstdcxx.cpp).
 NRO_GLIBC_COMPAT = {"__ctype_b_loc", "__ctype_tolower_loc", "__ctype_toupper_loc", "__isoc23_strtol",
                     "__isoc23_strtoll", "__isoc23_strtoul", "__isoc23_strtoull", "__isoc23_sscanf",
@@ -78,12 +80,22 @@ CAVEATS = ["pthread_*", "sem_*"]
 # plain library call on a small object, Cosmetics ran on the console, and the crash evidence implicates ios_base. Substrings of the Itanium-mangled names (a
 # vtable, a VTT, a constructor and a member of the family all contain them); ios_base::Init, the static
 # initialiser <iostream> adds to every translation unit, is a plain library call and stays allowed.
-UNSAFE_LIBSTDCXX_ABI = ("8ios_base", "9basic_ios", "basic_ifstream", "basic_ofstream", "basic_fstream",
-                        "basic_stringstream", "basic_ostringstream", "basic_istringstream")
+#
+# DM2-b, measured (research/plan-mods-100/iolayout): ios_base, basic_ios, the streambufs, istream/ostream, the
+# string streams, locale and string are laid out alike in GCC 13/glibc and devkitA64/newlib; only basic_filebuf
+# differs (glibc's 48-byte __c_lock: everything from _M_file on moves 32 bytes), and with it the file streams.
+# So only those are refused, and only when the game image has no glibc-layout instance of the name
+# (LINUX_STREAMS: src/dusk/mods/loader/linux_fstream.cpp, renamed aleks2lx_<name>, in a build with
+# ALEKS2_MOD_LINUX_STREAMS; set_linux_streams(image_linux_streams(elf))). src/dusk/mods/loader/
+# elf_runtime_policy.cpp (kUnsafeAbi) says the same.
+UNSAFE_LIBSTDCXX_ABI = ("13basic_filebuf", "14basic_ifstream", "14basic_ofstream", "13basic_fstream", "13stdio_filebuf")
 UNSAFE_LIBSTDCXX_ABI_EXEMPT = ("ios_base4Init",)
 UNSAFE_LIBSTDCXX_ABI_REASON = (
-    "libstdc++ ABI not safe: a Linux-built module's inline std::ios_base/basic_ios/fstream/stringstream "
-    "code is laid out for the libstdc++ it was compiled with, not the game's; a switch-arm64 library is required")
+    "libstdc++ ABI not safe: std::basic_filebuf and the file streams are laid out for glibc (48-byte __c_lock) in "
+    "a Linux-built module, and this game image has no glibc-layout instance of this one; a switch-arm64 library "
+    "is required")
+LINUX_STREAMS = frozenset()
+LINUX_STREAMS_PREFIX = "aleks2lx_"
 # Version prefixes that only a glibc/GNU userland defines.
 LINUX_VERSIONS = ("GLIBC_", "GLIBCXX_", "CXXABI_", "GCC_")
 # Imports that are glibc's own (not ISO C/POSIX), whatever their version.
@@ -94,10 +106,139 @@ GLIBC_ONLY = {"__cxa_finalize", "__libc_start_main", "__errno_location", "__stac
               "__isoc23_strtoul", "__isoc23_sscanf", "__isoc99_sscanf"}
 
 
+# TLS-lab: the dynamic TLS of src/dusk/mods/loader/elf_tls.cpp, in a build with ALEKS2_MOD_TLS. Off by
+# default, as in that build: a gate turns it on only for a game image that has the runtime
+# (image_provides_tls), so the gate says what that image's loader would do. It is given to linux-aarch64
+# modules only (switch_native_loader.cpp), for TLSDESC and the traditional dialect; initial-exec
+# (TLS_TPREL64, DF_STATIC_TLS) stays refused, and the only thread-locals a module may import are the game's
+# std::call_once pair, through accessors.
+MOD_TLS = False
+TLS_RUNTIME_SYMBOL = "aleks2_tlsdesc_dynamic"
+TLS_RELOCATIONS = {"TLSDESC", "TLS_DTPMOD64", "TLS_DTPREL64"}
+TLS_SHIMS = {"__tls_get_addr", "__cxa_thread_atexit", "__cxa_thread_atexit_impl", "__once_proxy", "pthread_once"}
+TLS_GAME_VARIABLES = {"_ZSt11__once_call", "_ZSt15__once_callable"}
+
+
+def set_mod_tls(enabled):
+    """Judge packages as a loader with (True) or without (False) dynamic TLS does."""
+    global MOD_TLS
+    MOD_TLS = bool(enabled)
+
+
+def image_provides_tls(elf) -> bool:
+    """True if the game image (its .symtab) has the TLS runtime's resolver, i.e. was built with ALEKS2_MOD_TLS."""
+    section = getattr(elf, "section", None)  # a test's stand-in image may have no sections at all
+    symtab, strtab = (section(".symtab"), section(".strtab")) if section else (None, None)
+    if symtab is None or strtab is None:
+        return False
+    name = TLS_RUNTIME_SYMBOL.encode()
+    start, end = strtab["offset"], strtab["offset"] + strtab["size"]
+    for i in range(symtab["size"] // 24):
+        n = struct.unpack_from("<I", elf.data, symtab["offset"] + 24 * i)[0]
+        if elf.data[start + n:start + n + len(name) + 1] == name + b"\0":
+            return True
+    return False
+
+
+# DM2-d: the general glibc ABI layer (src/dusk/mods/loader/glibc_abi.cpp) and the synthetic dl_iterate_phdr
+# (elf_dl.cpp), for linux-aarch64 modules, in an image that has them (image_has_symbol). Off by default.
+MOD_GLIBC_ABI = False
+MOD_DL = False
+GLIBC_ABI_SYMBOL = "aleks2_glibc_open"
+DL_SYMBOL = "aleks2_dl_iterate_phdr"
+GLIBC_ABI_SHIMS = {"open", "open64", "fcntl", "fcntl64", "fopen", "fopen64", "opendir", "remove", "rename", "mbrtowc",
+                   "mbtowc", "mbsrtowcs", "mbsnrtowcs", "wcrtomb", "wcsnrtombs", "pthread_cond_timedwait", "strerror",
+                   "strerror_r", "perror", "clock_gettime", "clock_getres", "localtime_r", "gmtime_r", "localtime",
+                   "gmtime"}
+DL_SHIMS = {"dl_iterate_phdr", "_dl_find_object"}
+
+# DM3: the sockets layer (src/dusk/mods/loader/glibc_net.cpp) for linux-aarch64 modules, in an image that has it.
+# The names are read from that source's shim table, so the audit cannot drift from the loader.
+MOD_GLIBC_NET = False
+GLIBC_NET_SYMBOL = "aleks2_glibc_socket"
+_GLIBC_NET_SOURCE = pathlib.Path(__file__).resolve().parents[3] / "src" / "dusk" / "mods" / "loader" / "glibc_net.cpp"
+
+
+def _glibc_net_shims():
+    try:
+        text = _GLIBC_NET_SOURCE.read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    return frozenset(re.findall(r'\{"([A-Za-z_0-9]+)", addr\(&aleks2_glibc_', text))
+
+
+GLIBC_NET_SHIMS = _glibc_net_shims()
+
+
+def set_dm3(net):
+    """Judge packages as a loader with (True) or without the DM3 sockets layer."""
+    global MOD_GLIBC_NET
+    MOD_GLIBC_NET = bool(net)
+
+
+def image_has_symbol(elf, wanted) -> bool:
+    """True if the game image's .symtab defines `wanted`."""
+    section = getattr(elf, "section", None)
+    symtab, strtab = (section(".symtab"), section(".strtab")) if section else (None, None)
+    if symtab is None or strtab is None:
+        return False
+    name = wanted.encode()
+    start = strtab["offset"]
+    for i in range(symtab["size"] // 24):
+        n = struct.unpack_from("<I", elf.data, symtab["offset"] + 24 * i)[0]
+        if elf.data[start + n:start + n + len(name) + 1] == name + b"\0":
+            return True
+    return False
+
+
+def image_shim(name) -> bool:
+    """True if the loader of the image being judged supplies `name` to a linux-aarch64 module itself: the fixed
+    shims plus those the image has (TLS, glibc-layout streams, the DM2-d glibc ABI layer and dl_iterate_phdr)."""
+    return (name in LOADER_SHIMS or (MOD_TLS and name in TLS_SHIMS) or name in LINUX_STREAMS
+            or (MOD_GLIBC_ABI and name in GLIBC_ABI_SHIMS) or (MOD_DL and name in DL_SHIMS)
+            or (MOD_GLIBC_NET and name in GLIBC_NET_SHIMS))
+
+
+def set_dm2d(glibc_abi, dl):
+    """Judge packages as a loader with (True) or without the DM2-d glibc ABI layer and dl_iterate_phdr."""
+    global MOD_GLIBC_ABI, MOD_DL
+    MOD_GLIBC_ABI, MOD_DL = bool(glibc_abi), bool(dl)
+
+
+def newlib_spelling(name):
+    """DM2-b: a Linux module's name as the game spells it -- glibc's __mbstate_t is newlib's _mbstate_t (the same 8-byte
+    layout); src/dusk/mods/loader/elf_runtime_policy.cpp (newlib_spelling) looks imports up this way."""
+    return name.replace("11__mbstate_t", "10_mbstate_t")
+
+
+def set_linux_streams(names):
+    """DM2-b: the names the game image has a glibc-layout instance of (image_linux_streams)."""
+    global LINUX_STREAMS
+    LINUX_STREAMS = frozenset(names)
+
+
+def image_linux_streams(elf) -> set:
+    """DM2-b: original names of the glibc-layout file-stream symbols in the game image's .symtab (aleks2lx_<name>)."""
+    section = getattr(elf, "section", None)
+    symtab, strtab = (section(".symtab"), section(".strtab")) if section else (None, None)
+    if symtab is None or strtab is None:
+        return set()
+    prefix = LINUX_STREAMS_PREFIX.encode()
+    start = strtab["offset"]
+    out = set()
+    for i in range(symtab["size"] // 24):
+        n = struct.unpack_from("<I", elf.data, symtab["offset"] + 24 * i)[0]
+        if elf.data[start + n:start + n + len(prefix)] == prefix:
+            end = elf.data.index(b"\0", start + n)
+            out.add(elf.data[start + n + len(prefix):end].decode())
+    return out
+
+
 def unsafe_libstdcxx_abi(name):
-    """True for an import whose layout depends on the libstdc++ version (see UNSAFE_LIBSTDCXX_ABI)."""
+    """True for an import whose layout depends on the libstdc++ version (see UNSAFE_LIBSTDCXX_ABI) and that the
+    game image has no glibc-layout instance of (LINUX_STREAMS)."""
     return (name.startswith("_Z") and any(p in name for p in UNSAFE_LIBSTDCXX_ABI)
-            and not any(e in name for e in UNSAFE_LIBSTDCXX_ABI_EXEMPT))
+            and not any(e in name for e in UNSAFE_LIBSTDCXX_ABI_EXEMPT) and name not in LINUX_STREAMS)
 
 
 def library_platform(label):
@@ -258,6 +399,8 @@ def audit_elf(elf: Elf) -> dict:
         ("_ZNSt", "_ZSt", "_ZNKSt", "_ZTVSt", "_ZTISt", "_ZTSSt", "_ZNSs", "_ZNK9__gnu", "_ZN9__gnu", "__cxa_",
          "__gxx_", "_Unwind_", "__gcc_")))
     out["tls_symbols"] = sorted(s["name"] for s in named if s["type"] == "TLS")
+    out["tls_imports"] = sorted(s["name"] for s in imports if s["type"] == "TLS")
+    out["static_tls"] = bool(dyn.get("FLAGS", 0) & 0x10)
     out["ifunc_symbols"] = sorted(s["name"] for s in named if s["type"] == "GNU_IFUNC")
     out["unique_symbols"] = sum(1 for s in exports if s["bind"] == "GNU_UNIQUE")
     out["weak_exports"] = sum(1 for s in exports if s["bind"] == "WEAK")
@@ -323,11 +466,12 @@ def verdict(a: dict, imports: list) -> dict:
         structural.append(f"type {a['type']}, not a shared object (ET_DYN)")
     if a["has"]["INTERP"]:
         structural.append("PT_INTERP: an executable")
-    if a["has"]["TLS"] or a["tls_symbols"]:
+    tls_present = bool(a["has"]["TLS"] or a["tls_symbols"] or set(a["relocations"]) & (TLS_RELOCATIONS | {"TLS_TPREL64"}))
+    if tls_present and not MOD_TLS:
         structural.append("thread-local storage (PT_TLS / TLS symbols): the loader provides no TLS blocks")
     if a["ifunc_symbols"] or "IRELATIVE" in a["relocations"]:
         structural.append("GNU indirect functions (IFUNC/IRELATIVE)")
-    unsupported = sorted(set(a["relocations"]) - LOADER_RELOCATIONS)
+    unsupported = sorted(set(a["relocations"]) - LOADER_RELOCATIONS - (TLS_RELOCATIONS if MOD_TLS else set()))
     if unsupported:
         structural.append("relocation types the loader does not apply: " + ", ".join(unsupported))
     if a["relr"]:
@@ -346,6 +490,8 @@ def verdict(a: dict, imports: list) -> dict:
         structural.append("missing mod exports: " + ", ".join(missing_exports))
 
     switch = list(structural)
+    if MOD_TLS and tls_present:
+        switch.append("thread-local storage: dynamic TLS is provided to linux-aarch64 modules only")
     if a["needed"]:
         switch.append("DT_NEEDED " + ", ".join(a["needed"]) + ": a Switch package may not depend on a library")
     versioned = sorted({s["version"] for s in imports if s["version"]})
@@ -354,15 +500,23 @@ def verdict(a: dict, imports: list) -> dict:
                       "built against glibc, not newlib")
 
     linux = list(structural)
+    if MOD_TLS and a.get("static_tls"):
+        linux.append("initial-exec TLS (DF_STATIC_TLS): the loader provides only dynamic TLS")
+    foreign_tls = [n for n in a.get("tls_imports", []) if n not in TLS_GAME_VARIABLES]
+    if MOD_TLS and foreign_tls:
+        linux.append("thread-local imports the game does not offer: " + ", ".join(foreign_tls[:6]))
     extra = [n for n in a["needed"] if n not in PROVIDED_NEEDED]
     if extra:
         linux.append("DT_NEEDED " + ", ".join(extra) + ": not one of the Linux runtime libraries the game stands in for")
     resolution = {"shim": [], "nro_glibc_compat": [], "weak_null_if_absent": [], "denied": [],
-                  "caveat": [], "game_must_define": []}
+                  "caveat": [], "game_must_define": [], "tls_accessor": []}
     for s in imports:
         name = s["name"]
-        if name in LOADER_SHIMS:
+        if image_shim(name):
             resolution["shim"].append(name)
+        elif MOD_TLS and s["type"] == "TLS":
+            if name in TLS_GAME_VARIABLES:
+                resolution["tls_accessor"].append(name)
         elif matches(name, DENIED) or unsafe_libstdcxx_abi(name):
             resolution["denied"].append(name)
         elif name in NRO_GLIBC_COMPAT:
@@ -385,8 +539,7 @@ def verdict(a: dict, imports: list) -> dict:
     if a["init"]["init_array"] or a["init"]["DT_INIT"]:
         notes.append(f"{a['init']['init_array']} constructor(s) in .init_array, run after relocation")
     if resolution["caveat"]:
-        notes.append("glibc pthread objects on newlib: " + ", ".join(sorted(resolution["caveat"])[:6]) +
-                     " (see docs/switch-h37-dynamic-loader.md)")
+        notes.append("glibc pthread objects on newlib: " + ", ".join(sorted(resolution["caveat"])[:6]))
     return {
         "switch_package": {"loadable": not switch, "blockers": switch},
         "linux_compat": {"loadable_if_game_defines_imports": not linux, "blockers": linux,

@@ -174,6 +174,14 @@ public:
     void drawCursor(Vec const&, s16, int, f32);
     renderingPlusDoorAndCursor_c() {}
 
+#if TARGET_PC
+    // aleks2 (rc9, minimap_pan): what afterDrawPath draws after the doors (restart and
+    // player cursors, treasure icons), in the same order. The panned minimap renders the
+    // path and doors once into a base texture (s_panBasePass skips these there) and draws
+    // these over it every frame.
+    static bool s_panBasePass;
+    void drawPanDynamic();
+#endif
     virtual ~renderingPlusDoorAndCursor_c() {}
     virtual void afterDrawPath();
     virtual f32 getIconSize(u8) const = 0;

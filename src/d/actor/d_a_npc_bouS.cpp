@@ -422,7 +422,7 @@ int daNpcBouS_c::Delete() {
     return 1;
 }
 
-int daNpcBouS_c::Execute() {
+DUSK_NOINLINE int daNpcBouS_c::Execute() {
     execute();
     return 1;
 }

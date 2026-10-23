@@ -1,32 +1,56 @@
 #pragma once
 
-// aleks2 (performance): stepped dynamic resolution.
+// aleks2 (performance): dynamic resolution.
 //
-// Not per-frame scaling -- Aurora's frame buffer is resized through the
-// deferred surface-resize path, which costs a synchronize and a target
-// rebuild, so a change is a small hitch. This controller therefore moves one
-// rung at a time on a 2 s cadence with hysteresis, and refuses to sacrifice
-// resolution when the drop did not buy any frames (main-thread bound), which
-// on this console is most of the heavy places.
+// V1-c1: "Auto -- only when the GPU is the limit". Off by default. The decisions are made in
+// perf_core.hpp (DrsPolicy) from per-frame telemetry (frame_telemetry.hpp): a few fixed steps
+// below the ceiling (100/85/75 % of its rows by default, perf-lab.ini drs_steps), down only
+// when frames are missed and the GPU explains them, never on a CPU/render-worker limit, with
+// hysteresis both ways and no change during loads or pipeline compiles. Without GPU timing it
+// never moves.
 //
-// Rungs are the existing internalResolutionScale values 1x (~480 rows),
-// 540, 720, 900, 1080. The ceiling is the user's own internalResolutionScale
-// (or what "auto" resolves to); the floor is 1x.
+// The ceiling is what the user's internalResolutionScale renders after the resolution policy
+// (900 docked, 720 handheld, 540 Flip Grip with Auto). Steps below it are exact row counts;
+// at the ceiling the user's own value is handed back. While Auto (or the stress mode) is on,
+// Aurora keeps a render-target set per size (aurora_set_render_target_pool) so going back to a
+// step already visited allocates nothing.
+
+#include <string>
 
 namespace dusk::dynres {
 
-// Once per presented frame, main thread, after the frame was presented.
+// Once per presented frame, main thread, after frame_telemetry::tick().
 void update();
 
 // Forget history and return to the ceiling (preset applied, feature toggled).
 void reset();
 
-// The internalResolutionScale value in effect, 0 when the controller is idle
-// (disabled, or at the ceiling with nothing overridden).
+// Rows the controller (or the stress mode) imposes right now, 0 when the user's value is in
+// effect.
 int currentOverride();
 
-// H28: how many times the controller has changed the resolution since launch.
-// Only ever grows, so a benchmark reads it before and after its window.
+// H28: how many times the resolution was changed by the controller or the stress mode since
+// launch. Only ever grows, so a benchmark reads it before and after its window.
 unsigned transitionCount();
+
+// V1-c1: for the settings screen, the benchmark report and the log.
+struct Status {
+    bool enabled = false;
+    bool gpuTiming = false;  // GPU figures have arrived since Auto was turned on
+    int percent = 100;
+    int rows = 0;            // in effect (the ceiling when not overridden)
+    int ceilingRows = 0;
+    std::string state;       // DrsPolicy::state(), or why it is idle
+};
+Status status();
+
+// The ceiling rows for the current mode and settings (what 100 % means).
+int ceilingRows();
+
+// Stress mode (drs_stress.cpp) owns the resolution while it runs: rows > 0 imposes that many
+// rows, 0 hands the user's value back. The controller stays out of the way meanwhile.
+void stress_begin();
+void stress_apply_rows(int rows);
+void stress_end();
 
 }  // namespace dusk::dynres

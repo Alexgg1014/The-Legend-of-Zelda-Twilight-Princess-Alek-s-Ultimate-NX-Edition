@@ -150,7 +150,7 @@ int dFile_info_c::setSaveData(dSv_save_c* i_savedata, BOOL i_validChksum, u8 i_d
     return result;
 }
 
-void dFile_info_c::setHeartCnt(dSv_save_c* i_savedata) {
+DUSK_NOINLINE void dFile_info_c::setHeartCnt(dSv_save_c* i_savedata) {  // aleks2 (rc17): a catalog hook target (cosmetics), inlined by the PGO build
     static u64 l_htag[] = {
         MULTI_CHAR('hear_20'), MULTI_CHAR('hear_21'), MULTI_CHAR('hear_22'), MULTI_CHAR('hear_23'), MULTI_CHAR('hear_24'), MULTI_CHAR('hear_25'), MULTI_CHAR('hear_26'),
         MULTI_CHAR('hear_27'), MULTI_CHAR('hear_28'), MULTI_CHAR('hear_29'), MULTI_CHAR('hear_30'), MULTI_CHAR('hear_31'), MULTI_CHAR('hear_32'), MULTI_CHAR('hear_33'),

@@ -43,7 +43,7 @@ static void anm_init(e_ms_class* i_this, int param_2, f32 param_3, u8 param_4, f
     i_this->mNextSound = param_2;
 }
 
-static int pl_check(e_ms_class* i_this, f32 i_dist) {
+static DUSK_NOINLINE int pl_check(e_ms_class* i_this, f32 i_dist) {
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (i_this->mPlayerDistance < i_dist && !fopAcM_otherBgCheck(i_this, player)) {
         return 1;
@@ -506,7 +506,7 @@ static void e_ms_dokuro(e_ms_class* i_this) {
     }
 }
 
-static void e_ms_damage(e_ms_class* i_this) {
+static DUSK_NOINLINE void e_ms_damage(e_ms_class* i_this) {
     i_this->mCooldown1 = 6;
     switch (i_this->mMode) {
     case 0:
@@ -585,7 +585,7 @@ static void e_ms_standby(e_ms_class* i_this) {
     }
 }
 
-static void damage_check(e_ms_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_ms_class* i_this) {
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     if (i_this->mCooldown1 == 0) {
         i_this->mDStts.Move();

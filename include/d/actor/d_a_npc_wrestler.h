@@ -152,12 +152,12 @@ public:
     inline bool gotoLiving(void*);
     inline bool sumouReady(void*);
     inline bool sumouWait(void*);
-    inline bool checkOutOfArenaP();
-    inline bool setNextAction();
+    ALEKS2_OUT_OF_LINE_DECL bool checkOutOfArenaP();
+    ALEKS2_OUT_OF_LINE_DECL bool setNextAction();
     inline bool sumouPunchHit(void*);
     inline bool sumouPunchChaseHit(void*);
     inline bool sumouPunchMiss(void*);
-    inline bool checkOutOfArenaW();
+    ALEKS2_OUT_OF_LINE_DECL bool checkOutOfArenaW();
     cXyz getJointPos(int);
     inline bool sumouPunchDraw(void*);
     inline bool sumouTackleHit(void*);
@@ -215,15 +215,15 @@ public:
     inline BOOL chkFindPlayer();
     inline BOOL step(s16, int);
     inline bool setTalkAngle();
-    inline void setStepAngle();
+    ALEKS2_OUT_OF_LINE_DECL void setStepAngle();
     inline void setExpressionTalkAfter();
     void initTalkAngle() { mTurnMode = 0; }
     inline void setNextSumouEvent(int);
-    inline void setBackToLiving();
+    ALEKS2_OUT_OF_LINE_DECL void setBackToLiving();
     void offWrestlerNoDraw() { mWrestlerNoDraw = 0; }
     void onWrestlerNoDraw() { mWrestlerNoDraw = 1; }
     inline void initDemoCamera_ArenaSide();
-    inline void sumouAI();
+    ALEKS2_OUT_OF_LINE_DECL void sumouAI();
     inline s16 oppositeToPlayer();
     inline void correctGraspPosAngle(bool);
     inline void initDemoCamera_ReadyLink();

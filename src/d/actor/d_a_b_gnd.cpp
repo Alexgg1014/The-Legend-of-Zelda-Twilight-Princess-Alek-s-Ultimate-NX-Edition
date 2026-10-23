@@ -1361,7 +1361,7 @@ static void b_gnd_g_wait(b_gnd_class* i_this) {
     }
 }
 
-static BOOL b_gnd_g_attack(b_gnd_class* i_this) {
+static DUSK_NOINLINE BOOL b_gnd_g_attack(b_gnd_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = daPy_getPlayerActorClass();
 

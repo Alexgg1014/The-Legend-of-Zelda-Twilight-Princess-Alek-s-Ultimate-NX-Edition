@@ -1035,7 +1035,7 @@ static DUSK_NOINLINE void damage_check(e_sf_class* i_this) {
     }
 }
 
-static void action(e_sf_class* i_this) {
+static DUSK_NOINLINE void action(e_sf_class* i_this) {
     fopEn_enemy_c* a_this = (fopEn_enemy_c*)&i_this->actor;
     fopAc_ac_c* player = (fopAc_ac_c*)dComIfGp_getPlayer(0);
     cXyz spcc, spd8;

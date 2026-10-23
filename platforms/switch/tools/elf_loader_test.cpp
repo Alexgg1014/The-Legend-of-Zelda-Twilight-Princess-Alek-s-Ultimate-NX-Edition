@@ -130,11 +130,16 @@ void check_library(const fs::path& dir, const std::string& name, bool expectLoad
     const auto bytes = read_file(so);
     const auto parsed = parse(bytes);
     if (!expectLoadable) {
-        // The Randomizer as published: thread-local storage, refused by name.
-        CHECK(!parsed.image);
-        CHECK(parsed.diagnostic.error == Error::TlsUnsupported);
-        std::printf("%-14s refused as expected: %s (%s)\n", name.c_str(), error_code(parsed.diagnostic.error),
-            parsed.diagnostic.message.c_str());
+        // The Randomizer as published: thread-local storage, refused by name -- by plan() since TLS-lab
+        // (parse() keeps PT_TLS as the module's template), and first, without a TLS provider.
+        CHECK(parsed.image.has_value());
+        if (!parsed.image) return;
+        const auto p = plan(*parsed.image, {}, {});
+        CHECK(!p.ok() && p.problems.front().error == Error::TlsUnsupported);
+        if (!p.ok()) {
+            std::printf("%-14s refused as expected: %s (%s)\n", name.c_str(), error_code(p.problems.front().error),
+                p.problems.front().message.c_str());
+        }
         return;
     }
     CHECK(parsed.image.has_value());
@@ -393,7 +398,7 @@ void check_corruptions(const fs::path& dir) {
                                                         expect("memsz wraps", parse_error(b), Error::SegmentOverflow);
     b = original; put<uint64_t>(b, h1 + 40, 1ull << 40); expect("image too large", parse_error(b), Error::ImageTooLarge);
     if (l.stackHeader) {
-        b = original; put<uint32_t>(b, l.stackHeader, 7);  expect("PT_TLS", parse_error(b), Error::TlsUnsupported);
+        b = original; put<uint32_t>(b, l.stackHeader, 7);  expect("PT_TLS", plan_error(b), Error::TlsUnsupported);
         b = original; put<uint32_t>(b, l.stackHeader, 3);  expect("PT_INTERP", parse_error(b), Error::InterpreterPresent);
     }
     if (l.relroHeader) {  // the fuzz corpus's first find: a wild PT_GNU_RELRO used to hang protections()
@@ -576,7 +581,8 @@ int main(int argc, char** argv) {
     // published (one thread_local) is refused for its PT_TLS: if that is what is here, expect it.
     {
         const auto bytes = read_file(dir / "randomizer.so");
-        const bool published = !bytes.empty() && parse(bytes).diagnostic.error == Error::TlsUnsupported;
+        const auto parsed = bytes.empty() ? ParseResult{} : parse(bytes);
+        const bool published = parsed.image && (parsed.image->tls || parsed.image->tlsSymbols);
         check_library(dir, "randomizer", !published);
     }
     check_missing_and_dry_run(dir);

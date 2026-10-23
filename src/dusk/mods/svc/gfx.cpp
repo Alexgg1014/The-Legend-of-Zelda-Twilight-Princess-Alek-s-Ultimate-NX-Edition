@@ -3,6 +3,7 @@
 #include "window.hpp"
 
 #include <borealis/log.hpp>
+#include "dusk/deko3d_policy.hpp"
 #include "dusk/gfx.hpp"
 #include "dusk/mods/loader/loader.hpp"
 #include "mods/svc/gfx.h"
@@ -601,6 +602,9 @@ ModResult gfx_unregister_draw_type(LoadedMod& mod, uint64_t handle) {
 }
 
 ModResult gfx_push_draw(LoadedMod& mod, uint64_t handle, const void* payload, size_t payloadSize) {
+    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
+        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "a draw");
+    }
     aurora::gfx::DrawTypeId auroraId = aurora::gfx::InvalidDrawType;
     {
         std::lock_guard lock{s_mutex};
@@ -667,6 +671,9 @@ ModResult gfx_unregister_stage_hook(LoadedMod& mod, uint64_t handle) {
 }
 
 ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolvedTargets& out) {
+    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
+        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "a scene pass resolve");
+    }
     out = GfxResolvedTargets{.struct_size = sizeof(GfxResolvedTargets)};
     if (aurora::gfx::is_offscreen() && !s_modOffscreenOpen) {
         Log.error(
@@ -704,6 +711,9 @@ ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolv
 }
 
 ModResult gfx_create_pass(LoadedMod& mod, uint32_t width, uint32_t height) {
+    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
+        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "an offscreen pass");
+    }
     if (aurora::gfx::is_offscreen()) {
         Log.error("[{}] create_pass: an offscreen pass is already active", mod.metadata.id);
         return MOD_UNAVAILABLE;
@@ -770,6 +780,9 @@ ModResult gfx_unregister_compute_type(LoadedMod& mod, uint64_t handle) {
 
 ModResult gfx_push_compute(
     LoadedMod& mod, uint64_t handle, const void* payload, size_t payloadSize) {
+    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
+        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "a compute task");
+    }
     aurora::gfx::EncoderTaskId auroraId = aurora::gfx::InvalidEncoderTask;
     {
         std::lock_guard lock{s_mutex};
@@ -888,6 +901,9 @@ ModResult gfx_resize_present_target(
 
 ModResult gfx_push_present(
     LoadedMod& mod, uint64_t handle, const void* payload, size_t payloadSize) {
+    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
+        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "a present");
+    }
     WindowHandle window = 0;
     {
         std::lock_guard lock{s_mutex};
@@ -1081,6 +1097,10 @@ ModResult gfx_get_device_info(ModContext* context, GfxDeviceInfo* outInfo) {
     }
 
     const auto device = aurora::gfx::device();
+    if (!device) {
+        // aleks2 (loader-only lab mode): no graphics were initialised; the out fields stay empty.
+        return MOD_UNAVAILABLE;
+    }
     outInfo->device = device.Get();
     outInfo->queue = aurora::gfx::queue().Get();
     outInfo->color_format = static_cast<WGPUTextureFormat>(aurora::gfx::color_format());

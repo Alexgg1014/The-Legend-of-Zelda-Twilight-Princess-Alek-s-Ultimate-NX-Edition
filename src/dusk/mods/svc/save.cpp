@@ -65,6 +65,16 @@ int32_t s_currentSlot = -1;
 bool s_legacyMigrationChecked = false;
 std::vector<SaveObserverRecord> s_observers;
 uint64_t s_nextHandle = 1;
+std::map<std::string, uint64_t, std::less<>> s_changeCounts;
+
+void count_change(std::string_view saveName) {
+    const auto it = s_changeCounts.find(saveName);
+    if (it != s_changeCounts.end()) {
+        ++it->second;
+    } else {
+        s_changeCounts.emplace(std::string{saveName}, 1);
+    }
+}
 
 std::filesystem::path legacy_sidecar_path() {
     return ConfigPath / kLegacySidecarName;
@@ -441,8 +451,12 @@ void save_slot_written(uint32_t slot) {
         return;
     }
     s_currentSlot = static_cast<int32_t>(slot);
+    const auto saveName = current_save_name();
+    if (saveName) {
+        count_change(*saveName);
+    }
     notify(slot, &SaveObserverRecord::onWritten, "save-written");
-    if (const auto saveName = current_save_name()) {
+    if (saveName) {
         auto& store = load_save_store(*saveName);
         flush_save_sidecars(*saveName, store);
     }
@@ -463,6 +477,7 @@ void save_slot_copied(uint32_t fromSlot, uint32_t toSlot) {
     mark_slot_dirty(save, save.slots[toSlot]);
     toMods = fromMods;
     flush_save_sidecars(*saveName, save);
+    count_change(*saveName);
     Log.info("mod save data copied in {} with slot {} -> {}", *saveName, fromSlot, toSlot);
 }
 
@@ -479,6 +494,7 @@ void save_slot_erased(uint32_t slot) {
     mark_slot_dirty(save, save.slots[slot]);
     mods.clear();
     flush_save_sidecars(*saveName, save);
+    count_change(*saveName);
     Log.info("mod save data erased in {} with slot {}", *saveName, slot);
 }
 
@@ -489,6 +505,16 @@ void save_no_slot() {
 
 void invalidate_save(std::string_view saveName) {
     s_saves.erase(std::string{saveName});
+    count_change(saveName);
+}
+
+uint64_t save_change_count(std::string_view saveName) {
+    const auto it = s_changeCounts.find(saveName);
+    return it != s_changeCounts.end() ? it->second : 0;
+}
+
+bool save_slot_active() {
+    return s_currentSlot >= 0;
 }
 
 namespace {

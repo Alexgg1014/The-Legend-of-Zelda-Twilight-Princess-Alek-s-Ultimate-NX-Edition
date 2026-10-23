@@ -9,7 +9,7 @@ bool Z2SoundStarter::startSound(JAISoundID soundID, JAISoundHandle* handlePtr, c
     return Z2SoundStarter::startSound(soundID, handlePtr, posPtr, 0, 0.0f, 1.0f, 1.0f, -1.0f, -1.0f, 0);
 }
 
-bool Z2SoundStarter::startSound(JAISoundID soundID, JAISoundHandle* handlePtr,
+DUSK_NOINLINE bool Z2SoundStarter::startSound(JAISoundID soundID, JAISoundHandle* handlePtr,
                                 const JGeometry::TVec3<f32>* posPtr, u32 mapinfo, f32 fxMix,
                                 f32 pitch, f32 volume, f32 pan, f32 dolby, u32 moveSteps) {
     JUT_ASSERT(45, handlePtr);

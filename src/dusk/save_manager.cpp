@@ -3,6 +3,7 @@
 #include "aurora/card.h"
 #include "borealis/io.hpp"
 #include "borealis/version.h"
+#include "dusk/hash.hpp"
 #include "dusk/main.h"
 #include "dusk/mod_loader.hpp"
 #include "dusk/mods/svc/save.hpp"
@@ -667,19 +668,8 @@ ValueResult<std::filesystem::path> backup_existing_save(
     } catch (const std::exception& exception) {
         return {failure(fmt::format("Backup failed: {}", exception.what())), {}};
     }
-    std::filesystem::path temporary{destination};
-    temporary += ".tmp";
-    const Result packed = pack_dusksave(temporary, current.value, modFiles.value);
-    if (!packed) {
-        std::error_code ec;
-        std::filesystem::remove(temporary, ec);
+    if (const Result packed = write_dusksave(destination, current.value, modFiles.value); !packed) {
         return {failure(fmt::format("Backup failed: {}", packed.message)), {}};
-    }
-    std::string replaceError;
-    if (!borealis::io::atomic_replace(temporary, destination, replaceError)) {
-        std::error_code ec;
-        std::filesystem::remove(temporary, ec);
-        return {failure(fmt::format("Backup failed: {}", replaceError)), {}};
     }
 
     auto backups = list_backups(storage, identity);
@@ -696,38 +686,83 @@ ValueResult<std::filesystem::path> backup_existing_save(
     return {success(), std::move(destination)};
 }
 
+// aleks2 (cross-save): puts the previous GCI back after a failed mod-data replacement, so the card
+// never pairs the new GCI with the old sidecars. An empty previous means there was no save.
+Result restore_previous_gci(
+    const Storage& storage, const SaveIdentity& identity, const std::vector<uint8_t>& previous) {
+    if (!previous.empty()) {
+        return write_gci(storage, identity, previous);
+    }
+    if (storage.kind == StorageKind::RawImage) {
+        const std::string path = borealis::io::fs_path_to_string(storage.path);
+        return aurora_card_raw_delete(path.c_str(), identity.game.c_str(), identity.maker.c_str(),
+                   identity.saveName.c_str()) ?
+                   success() :
+                   failure("The new save could not be removed from the card image.");
+    }
+    std::error_code ec;
+    std::filesystem::remove(gci_path(storage, identity), ec);
+    return ec ? failure(fmt::format("The new save could not be removed: {}", ec.message())) :
+                success();
+}
+
 Result apply_artifact(const Storage& storage, const SaveIdentity& identity,
-    const Artifact& artifact, ModDataAction modDataAction, bool backupCurrentSave) {
+    const Artifact& artifact, ModDataAction modDataAction, bool backupCurrentSave,
+    ApplyOutcome* outcome = nullptr, bool allowConversion = true) {
+    const auto fail = [outcome](ApplyStage stage, Result result) {
+        if (outcome != nullptr) {
+            outcome->failedStage = stage;
+        }
+        return result;
+    };
     if (const Result allowed = ensure_write_allowed(storage); !allowed) {
-        return allowed;
+        return fail(ApplyStage::Busy, allowed);
     }
 
     if (artifact.kind != ArtifactKind::Gci && artifact.kind != ArtifactKind::DuskSave) {
-        return failure("The selected artifact is not an individual save.");
+        return fail(ApplyStage::Validate, failure("The selected artifact is not an individual save."));
     }
     auto parsed = parse_gci(artifact.gci);
     if (!parsed) {
-        return parsed.result;
+        return fail(ApplyStage::Validate, parsed.result);
     }
     const auto compatibility = disc_compatibility(parsed.value, identity);
+    if (outcome != nullptr) {
+        outcome->compatibility = compatibility;
+    }
     if (compatibility == DiscCompatibility::Incompatible) {
-        return failure(fmt::format("This save is for {}-{}, but the configured disc uses {}-{}.",
-            parsed.value.maker, parsed.value.game, identity.maker, identity.game));
+        return fail(ApplyStage::Validate,
+            failure(fmt::format("This save is for {}-{}, but the configured disc uses {}-{}.",
+                parsed.value.maker, parsed.value.game, identity.maker, identity.game)));
     }
     if (!utils::is_valid_save_name(parsed.value.saveName) ||
         parsed.value.saveName != identity.saveName)
     {
-        return failure("The imported save name does not match its destination.");
+        return fail(ApplyStage::Validate,
+            failure("The imported save name does not match its destination."));
+    }
+    if (compatibility != DiscCompatibility::Exact && !allowConversion) {
+        return fail(ApplyStage::Validate,
+            failure(fmt::format("This save is for {}-{} and needs converting to {}-{}.",
+                parsed.value.maker, parsed.value.game, identity.maker, identity.game)));
+    }
+    auto previous = read_current_gci(storage, identity);
+    if (!previous) {
+        return fail(ApplyStage::Backup, previous.result);
     }
     if (backupCurrentSave) {
-        if (auto backup = backup_existing_save(storage, identity); !backup) {
-            return backup.result;
+        auto backup = backup_existing_save(storage, identity);
+        if (!backup) {
+            return fail(ApplyStage::Backup, backup.result);
+        }
+        if (outcome != nullptr) {
+            outcome->backup = std::move(backup.value);
         }
     }
     auto gci = artifact.gci;
     std::ranges::copy(identity.game, gci.begin());
     if (const Result written = write_gci(storage, identity, gci); !written) {
-        return written;
+        return fail(ApplyStage::Write, written);
     }
 
     if (artifact.kind == ArtifactKind::DuskSave) {
@@ -738,11 +773,20 @@ Result apply_artifact(const Storage& storage, const SaveIdentity& identity,
         const auto& files =
             modDataAction == ModDataAction::Replace ? artifact.modFiles : noModFiles;
         if (const Result sidecars = replace_sidecars(storage, identity, files); !sidecars) {
+            Result reported = sidecars;
+            if (const Result restored = restore_previous_gci(storage, identity, previous.value);
+                !restored)
+            {
+                reported.message += fmt::format(" The previous save could not be put back ({}); "
+                                                "restore it from the backups.",
+                    restored.message);
+            }
             finish_write(storage, identity);
-            return sidecars;
+            return fail(ApplyStage::ModData, reported);
         }
     }
-    return finish_write(storage, identity);
+    const Result finished = finish_write(storage, identity);
+    return finished ? finished : fail(ApplyStage::Remount, finished);
 }
 
 }  // namespace
@@ -1258,6 +1302,75 @@ Result delete_backup(const Storage& storage, const std::filesystem::path& path) 
                             "The backup no longer exists.");
     }
     return success();
+}
+
+ValueResult<std::vector<uint8_t>> read_save_gci(const Storage& storage, const SaveIdentity& identity) {
+    return read_current_gci(storage, identity);
+}
+
+ValueResult<std::map<std::string, std::vector<uint8_t>>> read_save_mod_files(
+    const Storage& storage, const SaveIdentity& identity) {
+    return read_mod_files(storage, identity);
+}
+
+Result write_dusksave(const std::filesystem::path& destination, const std::vector<uint8_t>& gci,
+    const std::map<std::string, std::vector<uint8_t>>& modFiles) {
+    std::filesystem::path temporary{destination};
+    temporary += ".tmp";
+    const Result packed = pack_dusksave(temporary, gci, modFiles);
+    std::string replaceError;
+    if (!packed || !borealis::io::atomic_replace(temporary, destination, replaceError)) {
+        std::error_code ec;
+        std::filesystem::remove(temporary, ec);
+        return packed ? failure(std::move(replaceError)) : packed;
+    }
+    return success();
+}
+
+ValueResult<std::filesystem::path> backup_save(const Storage& storage, const SaveIdentity& identity) {
+    if (const Result allowed = ensure_write_allowed(storage); !allowed) {
+        return {allowed, {}};
+    }
+    return backup_existing_save(storage, identity);
+}
+
+Result ensure_card_idle(const Storage& storage) {
+    return ensure_write_allowed(storage);
+}
+
+std::string snapshot_digest(
+    const std::vector<uint8_t>& gci, const std::map<std::string, std::vector<uint8_t>>& modFiles) {
+    hash::Sha256 hasher;
+    const auto put_size = [&hasher](uint64_t value) {
+        std::array<uint8_t, 8> bytes{};
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            bytes[i] = static_cast<uint8_t>(value >> (8 * i));
+        }
+        hasher.update(bytes);
+    };
+    constexpr std::string_view kTag{"dusklight-save-snapshot-1"};
+    hasher.update(std::span{reinterpret_cast<const uint8_t*>(kTag.data()), kTag.size()});
+    put_size(gci.size());
+    hasher.update(gci);
+    put_size(modFiles.size());
+    for (const auto& [id, data] : modFiles) {  // std::map: sorted by ID
+        put_size(id.size());
+        hasher.update(std::span{reinterpret_cast<const uint8_t*>(id.data()), id.size()});
+        put_size(data.size());
+        hasher.update(data);
+    }
+    return hasher.finish();
+}
+
+ApplyOutcome apply_snapshot(const Storage& storage, const SaveIdentity& identity,
+    const Artifact& artifact, bool allowConversion) {
+    ApplyOutcome outcome;
+    outcome.result = apply_artifact(
+        storage, identity, artifact, ModDataAction::Replace, true, &outcome, allowConversion);
+    if (outcome.result) {
+        outcome.failedStage = ApplyStage::None;
+    }
+    return outcome;
 }
 
 std::string format_gc_time(uint32_t value) {

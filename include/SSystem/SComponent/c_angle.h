@@ -190,4 +190,12 @@ public:
     cSGlobe& Invert(void);
 };
 
+#if defined(__SWITCH__)
+// aleks2 (DM2-c): template instances catalog mods hook by name, out of line
+// (platforms/switch/mod_compat_symbols.txt).
+#define ALEKS2_MOD_COMPAT_C_ANGLE_H
+#include "aleks2/mod_compat_templates.inc"
+#undef ALEKS2_MOD_COMPAT_C_ANGLE_H
+#endif
+
 #endif /* C_ANGLE_H */

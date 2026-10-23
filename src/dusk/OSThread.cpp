@@ -123,6 +123,13 @@ static std::atomic<s32> sActiveThreadCount{0};
 
 // Switch thread callback
 static OSSwitchThreadCallback sSwitchThreadCallback = nullptr;
+#ifdef __SWITCH__
+// aleks2 (V1-rc8): where the game's OS threads run; set from perf-lab.ini (logic_core) before they start.
+extern "C" {
+u32 g_duskOsThreadCoreMask = 0x2;
+s32 g_duskOsThreadStartCore = 1;
+}
+#endif
 
 // ============================================================================
 // Internal helpers
@@ -131,7 +138,8 @@ static OSSwitchThreadCallback sSwitchThreadCallback = nullptr;
 // Thread entry wrapper - runs on the new std::thread
 static void ThreadEntryWrapper(OSThread* thread, PCThreadData* data) {
 #ifdef __SWITCH__
-    svcSetThreadCoreMask(threadGetCurHandle(), 1, 0x2);
+    // aleks2 (V1-rc8): core 1 unless perf-lab.ini's logic_core says otherwise (frame_telemetry.cpp).
+    svcSetThreadCoreMask(threadGetCurHandle(), g_duskOsThreadStartCore, g_duskOsThreadCoreMask);
 #endif
     // Set thread-local pointer
     tls_currentThread = thread;

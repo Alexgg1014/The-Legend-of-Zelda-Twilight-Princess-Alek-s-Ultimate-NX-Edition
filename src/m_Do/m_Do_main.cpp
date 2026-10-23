@@ -41,16 +41,30 @@
 #include "dusk/audio/DuskDsp.hpp"
 #include "dusk/commands.hpp"
 #include "dusk/config.hpp"
+#include "dusk/deko3d_policy.hpp"
 #include "dusk/data.hpp"
 #include "dusk/discord_presence.hpp"
 #include "dusk/dusk.h"
 #include "dusk/dualscreen.h"
+#include "dusk/drs_stress.hpp"
 #include "dusk/dynres.hpp"
+#include "dusk/frame_telemetry.hpp"
+#include "dusk/hd_rumble.hpp"
+#include "dusk/gpu_boost.hpp"
+#include "dusk/pgo_dump.hpp"
 #include "dusk/guide/fetch.hpp"
 #include "dusk/guide/store.hpp"
 #include "dusk/session_log.hpp"
+#include "dusk/ui/boot_splash.hpp"
+#include "dusk/self_update.hpp"
+#include "dusk/dev_mode.hpp"
+#include "dusk/shader_warmup_runtime.hpp"
 #ifdef __SWITCH__
 #include "dusk/benchmark.hpp"
+#include "dusk/director.hpp"
+#endif
+#ifdef __SWITCH__
+extern "C" void aleks2_exit_trace(const char* line);  // platforms/switch/source/switch_startup.cpp
 #endif
 #include "dusk/game_clock.h"
 #include "dusk/game_combos.h"
@@ -75,6 +89,10 @@
 #include "switch/pad_port.hpp"
 #include "switch/startup.hpp"
 #include "switch/touch.hpp"
+#if ALEKS2_NATIVE_MOD_LOADER
+#include "dusk/mods/svc/hook.hpp"
+#include "dusk/switch_native_loader.hpp"
+#endif
 #endif
 #include "dusk/speedrun.h"
 #include "dusk/texture_replacements.hpp"
@@ -310,9 +328,17 @@ void main01(void) {
         mDoGph_gInf_c::updateRenderSize();
 #ifdef __SWITCH__
         dusk::display::poll();
+        dusk::frame_telemetry::tick();
+        dusk::hd_rumble::tick();  // aleks2 (V1-rc16)
+        dusk::gpu_boost::tick();  // aleks2 (V1-rc16)
+        dusk::pgo_dump::tick();   // aleks2 (V1-PGO): nothing unless ALEKS2_PGO=GENERATE
         dusk::dynres::update();
-        dusk::session_log::tick();
+        dusk::drs_stress::tick();
+        dusk::session_log::tick(); dusk::boot_timing::frame();  // rc17: boot timing, first frame
+        dusk::self_update::game_frame();  // V1-rc8
         dusk::benchmark::tick();
+        dusk::director::tick();
+        dusk::shader_warmup::tick();
         dusk::sw::bind_pad_to_port_one();
 #endif
 
@@ -416,6 +442,9 @@ void main01(void) {
     } while (dusk::IsRunning);
 
     exit:;
+#ifdef __SWITCH__
+    aleks2_exit_trace("main loop ended: quitting (mods unload next)");  // V1-rc11: before anything can stop us
+#endif
     dusk::mods::ModLoader::instance().shutdown();
     dusk::ui::shutdown();
 }
@@ -595,6 +624,134 @@ static void mods_init(const std::filesystem::path& mods_dir) {
     dusk::mods::ModLoader::instance().init();
 }
 
+#if defined(__SWITCH__) && ALEKS2_NATIVE_MOD_LOADER
+// aleks2 (loader-only lab mode): the native mod loader without the game, to test it where the game
+// itself cannot start (Ryujinx: no usable GPU device). On when sdmc:/switch/dusklight/loader-only.txt
+// exists (an emulator passes no arguments) or with --loader-only; otherwise nothing here runs.
+//
+// It does what a boot does for mods and nothing else: boot guard and update journal, the TLS
+// self-test if tls-selftest/ is there, discovery in mods/, every enabled mod.so through the real
+// loader in Execute (this session only; the saved Loader Mode is untouched), imports, relocations,
+// constructors, mod_initialize and the hooks it installs. Then one summary line per mod, to the
+// game's log and to svcOutputDebugString (an emulator's log), and the process ends. No Aurora, no
+// window, no GPU, no disc: the hooks are installed but the game code they patch never runs, so a
+// mod that loads here is statically loadable on this build -- not tested, not "working on console".
+static bool loader_only_requested(int argc, char* argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i] != nullptr && std::string_view(argv[i]) == "--loader-only") {
+            return true;
+        }
+    }
+    std::error_code ec;
+    return dusk::dev_mode() && std::filesystem::exists(dusk::ConfigPath / "loader-only.txt", ec);
+}
+
+static void loader_only_line(const std::string& line) {
+    DuskLog.info("{}", line);
+    dusk::sw::debug_print(line);
+}
+
+// The "tls" object of the mod's loader report (switch_native_loader.cpp writes one per mod), if any.
+static std::string loader_only_tls(const std::filesystem::path& modsDir, const std::string& id) {
+    std::string text;
+    if (std::FILE* f = std::fopen((modsDir / ".reports" / (id + ".json")).string().c_str(), "rb")) {
+        char buf[4096];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) {
+            text.append(buf, n);
+        }
+        std::fclose(f);
+    } else {
+        return "no report";
+    }
+    const auto at = text.find("\"tls\":{");
+    if (at == std::string::npos) {
+        return "none";
+    }
+    const auto end = text.find('}', at);
+    return text.substr(at + 6, end == std::string::npos ? 64 : end - at - 5);
+}
+
+static int run_loader_only(const std::filesystem::path& modsDir) {
+    loader_only_line(fmt::format("LOADER-ONLY lab mode, build {}: no graphics, no game code; mods in {}",
+        dusk::benchmark::build_id(), modsDir.string()));
+    dusk::switchelf::force_execute_this_session();
+    mods_init(modsDir);
+    int total = 0, loaded = 0, refused = 0, disabled = 0;
+    for (const auto& mod : dusk::mods::ModLoader::instance().mods()) {
+        ++total;
+        const auto hooks = dusk::mods::svc::hook_counts(mod);
+        const char* state = "REFUSED";
+        if (!mod.is_enabled()) {
+            state = "DISABLED (config)";
+            ++disabled;
+        } else if (mod.active) {
+            state = "LOADED";
+            ++loaded;
+        } else {
+            ++refused;
+        }
+        loader_only_line(fmt::format("LOADER-ONLY mod {} v{}: {} | native {} | hooks {} installed, {} callbacks, "
+                                     "{} declared | TLS {}{}{}",
+            mod.metadata.id, mod.metadata.version, state, mod.native ? "yes" : "no", hooks.installed,
+            hooks.callbacks, hooks.declared, loader_only_tls(modsDir, mod.metadata.id),
+            mod.failureReason.empty() ? "" : " | reason: ", mod.failureReason));
+    }
+    // The TLS self-test's verdict (switch_tls_selftest.cpp), if it ran: its last line.
+    if (std::FILE* f = std::fopen((modsDir.parent_path() / "tls-selftest" / "result.txt").string().c_str(), "rb")) {
+        char buf[512];
+        std::string last;
+        while (std::fgets(buf, sizeof buf, f) != nullptr) {
+            last = buf;
+        }
+        std::fclose(f);
+        while (!last.empty() && (last.back() == '\n' || last.back() == '\r')) {
+            last.pop_back();
+        }
+        loader_only_line("LOADER-ONLY " + last + " (tls-selftest/result.txt)");
+    }
+    // DM3: the net self-test (switch_net_selftest.cpp) runs on its own thread; wait for its verdict (90 s at
+    // most), then show its failures, its INFO lines and the verdict.
+    if (std::filesystem::exists(modsDir.parent_path() / "net-selftest" / "net_lab.so")) {
+        const auto result = (modsDir.parent_path() / "net-selftest" / "result.txt").string();
+        std::vector<std::string> lines;
+        for (int waited = 0; waited < 180; ++waited) {
+            lines.clear();
+            if (std::FILE* f = std::fopen(result.c_str(), "rb")) {
+                char buf[512];
+                while (std::fgets(buf, sizeof buf, f) != nullptr) {
+                    std::string l = buf;
+                    while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+                    lines.push_back(std::move(l));
+                }
+                std::fclose(f);
+            }
+            if (!lines.empty() && lines.back().rfind("NET SELFTEST RESULT", 0) == 0) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+        int passes = 0;
+        for (const auto& l : lines) {
+            if (l.rfind("PASS ", 0) == 0) {
+                ++passes;
+            } else if (l.rfind("FAIL", 0) == 0 || l.rfind("INFO", 0) == 0 || l.rfind("layer:", 0) == 0) {
+                loader_only_line("LOADER-ONLY net " + l);
+            }
+        }
+        loader_only_line("LOADER-ONLY net " + std::to_string(passes) + " check(s) passed; " +
+                         (lines.empty() ? std::string{"no result.txt"} : lines.back()) + " (net-selftest/result.txt)");
+    }
+    // A clean end of this boot for the boot guard: the next start is not counted as a crash.
+    if (auto* guard = dusk::switchelf::boot_guard()) {
+        guard->end_boot();
+    }
+    loader_only_line(fmt::format("LOADER-ONLY RESULT: {} mod(s): {} loaded, {} refused, {} disabled -- static "
+                                 "load only: hooks installed, the game never ran; not a console test",
+        total, loaded, refused, disabled));
+    return 0;
+}
+#endif
+
 // =========================================================================
 // PC ENTRY POINT
 // =========================================================================
@@ -607,6 +764,9 @@ int game_main(int argc, char* argv[]) {
     mainCalled = true;
 
 #if defined(__SWITCH__)
+    // aleks2 (DM1-c): first, so an emulator's log names the build and what it passed in.
+    dusk::sw::debug_print(fmt::format("Dusklight {} starting: argc {}, argv[0] {}", dusk::benchmark::build_id(), argc,
+        argv != nullptr && argc > 0 && argv[0] != nullptr ? argv[0] : "(null)"));
     if (!dusk::sw::begin_session()) {
         return 0;
     }
@@ -633,6 +793,22 @@ int game_main(int argc, char* argv[]) {
         arg_options.positional_help("<dvd-image>");
         arg_options.allow_unrecognised_options();
 
+#if defined(__SWITCH__)
+        // An NRO started without hbloader (Eden/yuzu) can get an argc that counts null argv entries;
+        // hbmenu always passes the NRO path, so on the console this changes nothing.
+        static char kProgramName[] = "dusklight";
+        static char* kFallbackArgv[] = {kProgramName, nullptr};
+        int validArgc = 0;
+        while (argv != nullptr && validArgc < argc && argv[validArgc] != nullptr) {
+            ++validArgc;
+        }
+        if (validArgc == 0) {
+            argc = 1;
+            argv = kFallbackArgv;
+        } else {
+            argc = validArgc;
+        }
+#endif
         parsed_arg_options = arg_options.parse(argc, argv);
         standardOptions = borealis::cli::parse(parsed_arg_options);
 
@@ -693,6 +869,9 @@ int game_main(int argc, char* argv[]) {
     dusk::CachePath = dataPaths.cachePath;
     dusk::InitializeLogging(dusk::CachePath, standardOptions);
     const auto startupLogLevel = borealis::log::level();
+#ifdef __SWITCH__
+    dusk::pgo_dump::start();  // aleks2 (V1-PGO): nothing unless ALEKS2_PGO=GENERATE
+#endif
 
     // Development Mode
     if (parsed_arg_options.count("develop")) {
@@ -701,6 +880,10 @@ int game_main(int argc, char* argv[]) {
     }
 
     log_build_info();
+#ifdef __SWITCH__
+    dusk::session_log::installTerminateLogger();
+    dusk::session_log::stampBoot(dusk::dev_mode() ? "game_main (developer mode: dev.txt)" : "game_main"); dusk::boot_timing::entry_report();
+#endif
 
     dusk::config::load_from_user_preferences();
     // aleks2 (companion): one-shot migrations for configs written by older
@@ -733,6 +916,14 @@ int game_main(int argc, char* argv[]) {
     }
 #endif
     ApplyCVarOverrides(parsed_arg_options["cvar"]);
+#if defined(__SWITCH__) && ALEKS2_NATIVE_MOD_LOADER
+    // aleks2 (loader-only lab mode): before anything graphical; see run_loader_only.
+    if (loader_only_requested(argc, argv)) {
+        return run_loader_only(parsed_arg_options.count("mods") ?
+                                   std::filesystem::path(parsed_arg_options["mods"].as<std::string>()) :
+                                   dusk::ConfigPath / "mods");
+    }
+#endif
 #ifdef __SWITCH__
     // aleks2: touchscreen + psm battery for the companion.
     dusk::switch_touch::initialize();
@@ -769,6 +960,15 @@ int game_main(int argc, char* argv[]) {
     // Set SDL metadata for audio mixers and macOS "About" menu
     SDL_SetAppMetadata("Dusklight", BOREALIS_APP_VERSION, "dev.twilitrealm.dusk");
 
+#ifdef __SWITCH__
+    // aleks2 (SHADERS-c1): cache options for Aurora must be in the environment before it
+    // opens its caches; without shader-lab.ini nothing changes.
+    dusk::shader_warmup::load_lab_options();
+    // aleks2 (V1-c1): perf-lab.ini (GPU timing, DRS steps, stress mode); gpu_timing=off must be
+    // in the environment before Aurora picks the device features.
+    dusk::frame_telemetry::load_lab_options();
+    dusk::session_log::stampBoot("lab options and SQLite check");
+#endif
     {
         const auto userPathString = dusk::ConfigPath.u8string();
         const auto cachePathString = dusk::CachePath.u8string();
@@ -795,7 +995,8 @@ int game_main(int argc, char* argv[]) {
             config.windowHeight = defaultWindowHeight * 2;
         }
 
-        config.desiredBackend = ResolveDesiredBackend(parsed_arg_options);
+        // aleks2 (deko3d rc12): deko3d only when nothing this start needs Dawn/NVK (dusk/deko3d_policy.hpp)
+        config.desiredBackend = dusk::deko3d_policy::boot_backend(ResolveDesiredBackend(parsed_arg_options));
         config.logCallback = borealis::log::aurora_callback();
         config.logLevel = borealis::log::to_aurora_level(startupLogLevel);
         config.mem1Size = 256 * 1024 * 1024;
@@ -810,6 +1011,25 @@ int game_main(int argc, char* argv[]) {
         }
         auroraInfo = aurora_initialize(argc, argv, &config);
     }
+#ifdef __SWITCH__
+    // aleks2 (deko3d P1, rc12): two starts in a row with deko3d never showed a frame, so this one runs on
+    // Vulkan (Dawn/NVK), and so do the next ones: the setting becomes Vulkan, not Auto (Auto is deko3d when
+    // it is the default). With deko3d, one screen and the normal layout (its present has no companion
+    // window and no Flip Grip rotation yet).
+    if (aurora_deko3d_fell_back()) {
+        DuskLog.warn("deko3d did not start twice in a row: Graphics Backend set to Vulkan");
+        dusk::getSettings().backend.graphicsBackend.setValue("vulkan");
+        dusk::config::save();
+    }
+    dusk::deko3d_policy::after_boot(auroraInfo.backend);
+    if (auroraInfo.backend == BACKEND_DEKO3D) {
+        // deko3d rc12: Flip Grip and the companion screen are composited by its present (lib/deko/dk_present.cpp)
+        DuskLog.info("deko3d renderer");
+    }
+    dusk::session_log::stampBoot("aurora_initialize (GPU, caches, recipe list)");
+    // The startup shader pass is queued by now: decide whether to show the screen.
+    dusk::shader_warmup::begin();
+#endif
 
     dusk::presentation::update_frame_rate_preference();
 
@@ -852,8 +1072,11 @@ int game_main(int argc, char* argv[]) {
         dusk::hq_minimap::set_active(true);
     }
 
-    dusk::texture_replacements::reload();
-    dusk::ui::initialize();
+#ifdef __SWITCH__
+    dusk::session_log::stampBoot("audio, presence, settings");
+#endif
+    { const auto bootT = dusk::boot_timing::now(); dusk::texture_replacements::reload(); dusk::boot_timing::phase("texture directory load", bootT); }
+    { const auto bootT = dusk::boot_timing::now(); dusk::ui::initialize(); dusk::boot_timing::phase("RmlUi and fonts (ui::initialize)", bootT); }
     dusk::ui::apply_scale();
     dusk::ui::push_document(std::make_unique<dusk::ui::Overlay>(), true, true);
     dusk::ui::push_document(std::make_unique<dusk::ui::TouchControls>(), false, true);
@@ -876,7 +1099,7 @@ int game_main(int argc, char* argv[]) {
         return dvdPathAccess ? borealis::io::fs_path_to_string(dvdPathAccess.path()) : location;
     };
 
-    const std::string savedLocation = dusk::getSettings().backend.isoPath;
+    const std::string savedLocation = dusk::getSettings().backend.isoPath; const auto bootDiscT = dusk::boot_timing::now();
     dusk::iso::DiscInfo discInfo{};
     if (!savedLocation.empty() &&
         dusk::iso::inspect(savedLocation.c_str(), discInfo) != dusk::iso::ValidationError::Success)
@@ -887,7 +1110,7 @@ int game_main(int argc, char* argv[]) {
         dusk::getSettings().backend.isoVerification.setValue(dusk::DiscVerificationState::Unknown);
         forcePreLaunchUI = true;
         saveConfigBeforePrelaunch = true;
-    }
+    } dusk::boot_timing::phase_if(!savedLocation.empty(), "disc check (saved image header)", bootDiscT);
 
     bool skipPreLaunchUI = dusk::getSettings().backend.skipPreLaunchUI.getValue();
 
@@ -968,7 +1191,7 @@ int game_main(int argc, char* argv[]) {
             }
 
             // pre game launch ui main loop
-            if (!launchUILoop()) {
+            const auto bootMenuT = dusk::boot_timing::now(); if (!launchUILoop()) {
                 borealis::shutdown();
                 borealis::sentry::shutdown();
                 borealis::log::shutdown();
@@ -981,7 +1204,7 @@ int game_main(int argc, char* argv[]) {
                 dusk::config::shutdown();
                 aurora_shutdown();
                 return 0;
-            }
+            } dusk::boot_timing::menu_wait(bootMenuT);
         }
 
         dvdLocation = dusk::getSettings().backend.isoPath;
@@ -995,9 +1218,9 @@ int game_main(int argc, char* argv[]) {
             DuskLog.fatal("DVD image failed validation: {}", dvdPath);
         }
         DuskLog.info("Loading DVD image: {}", dvdPath);
-        if (!aurora_dvd_open(dvdPath.c_str())) {
+        const auto bootDvdT = dusk::boot_timing::now(); if (!aurora_dvd_open(dvdPath.c_str())) {
             DuskLog.fatal("Failed to open DVD image: {}", dvdPath);
-        }
+        } dusk::boot_timing::phase("disc open", bootDvdT);
 
         dusk::IsGameLaunched = true;
     }
@@ -1016,7 +1239,7 @@ int game_main(int argc, char* argv[]) {
     mDoRst::setLogoScnFlag(0);
 
     // Global Context Init
-    dComIfG_ct();
+    { const auto bootT = dusk::boot_timing::now(); dComIfG_ct(); dusk::boot_timing::phase("game globals (dComIfG_ct)", bootT); }
 
     mDoDvdThd::SyncWidthSound = false;
 
@@ -1031,8 +1254,14 @@ int game_main(int argc, char* argv[]) {
     {
         mods_init(parsed_arg_options["mods"].as<std::string>());
     } else {
-        mods_init(dusk::ConfigPath / "mods");
+        dusk::ui::boot_splash::show();  // V1-rc19: the boot splash covers the mod loading
+        { const auto bootT = dusk::boot_timing::now(); mods_init(dusk::ConfigPath / "mods"); dusk::boot_timing::phase("mods, all (mods_init)", bootT); }
+        dusk::ui::boot_splash::hide();
     }
+#ifdef __SWITCH__
+    dusk::deko3d_policy::after_mods_loaded();
+    dusk::session_log::stampBoot("disc check and mods");
+#endif
 
     if (!skipPreLaunchUI && showPrelaunchAfterInit) {
         dusk::ui::push_document(std::make_unique<dusk::ui::Prelaunch>(), true);
@@ -1061,6 +1290,10 @@ int game_main(int argc, char* argv[]) {
     OSReport("Starting main01 (Game Loop)...\n");
 
     main01();
+#ifdef __SWITCH__
+    dusk::gpu_boost::restore();  // aleks2 (V1-rc16): the clocks as they were before the boost, if it was on
+    dusk::pgo_dump::shutdown();  // aleks2 (V1-PGO): the last profile snapshot
+#endif
     borealis::shutdown();
 
     // We need to cleanly shut down the threads to avoid crashes on shutdown.

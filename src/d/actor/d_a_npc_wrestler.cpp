@@ -773,7 +773,7 @@ int daNpcWrestler_c::Execute() {
     return 1;
 }
 
-int daNpcWrestler_c::Draw() {
+DUSK_NOINLINE int daNpcWrestler_c::Draw() {
     if (mWrestlerNoDraw != 0) {
         return 0;
     }
@@ -1106,7 +1106,7 @@ bool daNpcWrestler_c::setExpressionBtp(int param_1) {
     return 0;
 }
 
-void daNpcWrestler_c::setBackToLiving() {
+ALEKS2_OUT_OF_LINE void daNpcWrestler_c::setBackToLiving() {
     if (mType == 1) {
         return;
     }
@@ -1621,7 +1621,7 @@ void daNpcWrestler_c::lookat() {
     mLookAt.calc(this, model->getBaseTRMtx(), lookat_angle, snap, angle_delta, FALSE);
 }
 
-bool daNpcWrestler_c::setNextAction() {
+ALEKS2_OUT_OF_LINE bool daNpcWrestler_c::setNextAction() {
     daPy_py_c* player = daPy_getPlayerActorClass();
 
     if (mType == 1 && !player->checkEquipHeavyBoots()) {
@@ -2303,7 +2303,7 @@ bool daNpcWrestler_c::sumouReady(void* param_1) {
     return 1;
 }
 
-void daNpcWrestler_c::sumouAI() {
+ALEKS2_OUT_OF_LINE void daNpcWrestler_c::sumouAI() {
     if (mType == 1 && !daPy_getPlayerActorClass()->checkEquipHeavyBoots()) {
         // The following is to force dbg asm stack to use r31:
         int unused;
@@ -2353,7 +2353,7 @@ void daNpcWrestler_c::correctGraspPosAngle(bool param_1) {
     }
 }
 
-bool daNpcWrestler_c::checkOutOfArenaP() {
+ALEKS2_OUT_OF_LINE bool daNpcWrestler_c::checkOutOfArenaP() {
     if (mArenaInfo.chkFlag == 0) {
         return false;
     }
@@ -2654,7 +2654,7 @@ bool daNpcWrestler_c::sumouPunchChaseHit(void* param_1) {
     return true;
 }
 
-bool daNpcWrestler_c::checkOutOfArenaW() {
+ALEKS2_OUT_OF_LINE bool daNpcWrestler_c::checkOutOfArenaW() {
     if (mArenaInfo.chkFlag == 0) {
         return false;
     }
@@ -3099,7 +3099,7 @@ bool daNpcWrestler_c::sumouTackleDraw(void* param_1) {
     return true;
 }
 
-void daNpcWrestler_c::setStepAngle() {
+ALEKS2_OUT_OF_LINE void daNpcWrestler_c::setStepAngle() {
     f32 fVar1[2];
     int var_r25 = 0;
     (void) var_r25;

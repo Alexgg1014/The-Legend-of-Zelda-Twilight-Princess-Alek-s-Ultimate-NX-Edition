@@ -130,6 +130,9 @@ std::string set_image(Rml::Element* element, const mods::catalog::Image& image,
     if (source.empty()) {
         return {};
     }
+#ifdef __SWITCH__
+    limitToPreferred = true;  // V1-rc5: detail pages and screenshots too: a full-size capture is ~8 MB decoded
+#endif
     source = remote_image_source(
         source, image.width, image.height, limitToPreferred ? preferredWidth : 0);
     std::string key = escape(source);
@@ -185,12 +188,18 @@ struct HardwareBlock {
     Rml::String caption;
 };
 
+// The version of `id` installed on the card, or empty.
+std::string installed_version(std::string_view id) {
+    const auto* mod = mods::ModLoader::instance().find_mod(std::string{id});
+    return mod != nullptr ? mod->metadata.version : std::string{};
+}
+
 std::optional<HardwareBlock> hardware_block(
     std::string_view id, std::string_view version, std::string_view sha256) {
     if (!mods::hardware::kApplies) {
         return std::nullopt;
     }
-    if (const auto note = mods::hardware::switch_variant(id); !note.empty()) {
+    if (const auto note = mods::hardware::switch_variant(id, version, installed_version(id)); !note.empty()) {
         return HardwareBlock{"Switch build included", Rml::String{note}};
     }
     if (const auto found = mods::hardware::verdict(id, version, sha256);
@@ -206,8 +215,23 @@ Rml::String hardware_note(std::string_view id, std::string_view version, std::st
     if (!mods::hardware::kApplies) {
         return {};
     }
-    if (const auto note = mods::hardware::switch_variant(id); !note.empty()) {
+    const auto installed = installed_version(id);
+    if (const auto note = mods::hardware::switch_variant(id, version, installed); !note.empty()) {
         return Rml::String{note};
+    }
+    if (const auto bundled = mods::hardware::switch_variant_version(id); !bundled.empty()) {
+        if (installed.empty()) {
+            // V1-rc5: nothing installed: the catalog's build installs; ours stays an option.
+            return fmt::format("Installs the catalog's Linux build, which runs through the compatibility layer. "
+                               "This release also has a Switch package (v{}) tested on the console: to use it "
+                               "instead, copy it from the release zip into sdmc:/switch/dusklight/mods/.",
+                bundled);
+        }
+        // V1-rc5: newer than this build's own Switch package: installing it replaces that one.
+        return fmt::format("Newer than this build's own Switch package (v{}). Installing it replaces that one with "
+                           "the catalog's Linux build, which runs through the compatibility layer. To go back, copy "
+                           "the Switch package from the release zip into sdmc:/switch/dusklight/mods/.",
+            bundled);
     }
     const auto found = mods::hardware::verdict(id, version, sha256);
     if (!found.listed) {
@@ -240,6 +264,10 @@ public:
 
         auto* art = append(mRoot, "catalog-card-art");
         auto* artImage = append(art, "catalog-card-art-image");
+        // V1-rc5: shown when the card's image cannot be fetched.
+        auto* placeholder = append(art, "catalog-card-art-placeholder");
+        append_text(append(placeholder, "icon"), material_icon("image_not_supported"));
+        mArt = art;
         auto* icon = append(art, "mod-icon");
         auto* iconImage = append(icon, "mod-icon-image");
 
@@ -267,6 +295,7 @@ public:
         } else if (mod.icon) {
             add_source(set_image(artImage, *mod.icon, 256, "cover", true));
         }
+        mArtSource = mImageSources.empty() ? std::string{} : mImageSources.front();
         if (mod.icon) {
             add_source(set_image(iconImage, *mod.icon, 128, "cover", true));
         }
@@ -289,6 +318,10 @@ public:
             mStatus->SetClass("update-available", hasUpdate);
             mLabel = label;
         }
+        if (const bool failed = !mArtSource.empty() && remote_image_failed(mArtSource); failed != mArtFailed) {
+            mArtFailed = failed;
+            mArt->SetClass("image-failed", failed);
+        }
         Button::update();
     }
 
@@ -303,6 +336,9 @@ private:
     }
 
     std::vector<std::string> mImageSources;
+    Rml::Element* mArt = nullptr;
+    std::string mArtSource;
+    bool mArtFailed = false;
     std::string mId;
     std::string mPackageSize;
     bool mNativeCodeBlocked = false;
@@ -599,7 +635,16 @@ public:
             const bool current = local != nullptr && versionOrder == 0;
             const bool updateable = local != nullptr && versionOrder > 0 &&
                                     mods::ModLoader::instance().can_update(*local);
-            if (activationPending) {
+            // aleks2 (DM1-c): this version (or a newer one) is already on the card, waiting for the restart.
+            const auto staged = mods::ModLoader::instance().staged_version(mRequest.id);
+            if (!staged.empty() && mods::compare_package_versions(mRequest.version, staged) <= 0) {
+                mAction = Action::OpenManager;
+                icon = "schedule";
+                label = "Restart to finish";
+                caption = fmt::format("v{} installed · restart the game to run it", staged);
+                state = "installed";
+                progress = 1.0f;
+            } else if (activationPending) {
                 icon = "schedule";
                 label = "Activating…";
                 caption = "Retrying mod activation";

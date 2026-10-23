@@ -78,7 +78,7 @@ int daObjDrop_c::Create() {
     return 1;
 }
 
-int daObjDrop_c::create() {
+DUSK_NOINLINE int daObjDrop_c::create() {
     fopAcM_ct(this, daObjDrop_c);
 
     if (dComIfGs_isTbox(getSave())) {
@@ -136,7 +136,7 @@ BOOL daObjDrop_c::checkGetArea() {
     return false;
 }
 
-void daObjDrop_c::checkCompleteDemo() {
+DUSK_NOINLINE void daObjDrop_c::checkCompleteDemo() {
     u8 need_num = dComIfGp_getNeedLightDropNum();
     u8 num = dComIfGs_getLightDropNum(dComIfGp_getStartStageDarkArea());
 

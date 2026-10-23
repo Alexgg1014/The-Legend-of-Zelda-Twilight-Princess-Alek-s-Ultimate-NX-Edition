@@ -91,6 +91,9 @@ struct Limits {
     std::size_t publishBytesPerFrame = 1024 * 1024; ///< at least one image per frame
     std::size_t maxPublishesPerFrame = 4;
     std::uint32_t placeholderMaxDimension = 256;    ///< for entries a hint creates
+    /// V1-rc5: requests per image before it stays Failed (1: no retry). A network error, a timeout,
+    /// HTTP 408/429/5xx or a body that does not decode is tried again after 1 s, 3 s, 8 s...
+    std::uint32_t maxAttempts = 1;
 };
 
 struct FetchOutcome {
@@ -98,6 +101,7 @@ struct FetchOutcome {
     Kind kind = Kind::NetworkError;
     Image image;
     std::string message;
+    int httpStatus = 0;    ///< V1-rc5: for HttpError, to tell a retryable status from a permanent one
     std::size_t bodyBytes = 0;
     double networkMs = 0;  ///< measured on the worker
     double decodeMs = 0;   ///< decode + premultiply + downscale, on the worker
@@ -175,7 +179,7 @@ public:
     /// Deferred entries never start.
     std::vector<Start> take_starts();
 
-    enum class Completion : std::uint8_t { Stored, Stale, Failed, Rejected };
+    enum class Completion : std::uint8_t { Stored, Stale, Failed, Rejected, Retry };
     Completion complete(const std::string& source, std::uint64_t ticket, FetchOutcome outcome);
 
     /// Decoded images to hand to RmlUi this frame (it reloads a source after
@@ -209,6 +213,10 @@ public:
     /// For tests and telemetry: the priority an entry would be scheduled with.
     Priority priority_of(std::string_view source) const;
     State state_of(std::string_view source) const;
+    /// V1-rc5: requests made for `source` so far (0 if unknown).
+    std::uint32_t attempts_of(std::string_view source) const;
+    /// V1-rc5: the clock retries are scheduled on, in seconds (the provider sets it every frame).
+    void set_now(double seconds) { mNow = seconds; }
 
 private:
     struct Entry {
@@ -222,6 +230,8 @@ private:
         std::uint32_t placeholderHeight = 1;
         bool publishPending = false;
         bool lookedUp = false;        ///< RmlUi asked for it (holds a placeholder)
+        std::uint32_t attempts = 0;   ///< V1-rc5: requests made
+        double retryAt = 0;           ///< V1-rc5: not started again before this (set_now's clock)
     };
 
     Priority priority_locked(const std::string& source) const;
@@ -238,6 +248,7 @@ private:
     std::vector<Cancel> mCancels;
     std::uint64_t mClock = 0;
     std::uint64_t mTickets = 0;
+    double mNow = 0;
     std::size_t mPending = 0;
     std::size_t mReadyBytes = 0;
     std::size_t mReadyEntries = 0;

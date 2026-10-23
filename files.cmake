@@ -1518,11 +1518,14 @@ set(DUSK_FILES
         src/dusk/mods/loader/context.cpp
         src/dusk/mods/loader/depgraph.cpp
         src/dusk/mods/loader/depgraph.hpp
+        src/dusk/mods/loader/lib_cache.cpp
         src/dusk/mods/loader/loader.cpp
         src/dusk/mods/loader/loader.hpp
         src/dusk/mods/loader/manifest.cpp
         src/dusk/mods/loader/manifest.hpp
         src/dusk/mods/loader/natives.cpp
+        src/dusk/mods/loader/update_journal.cpp
+        src/dusk/mods/loader/update_journal.hpp
         src/dusk/mods/loader/natives.hpp
         src/dusk/mods/loader/package_choice.cpp
         src/dusk/mods/loader/package_choice.hpp
@@ -1589,12 +1592,15 @@ set(DUSK_FILES
         src/dusk/mods/svc/window.hpp
         src/dusk/mods/svc/save.cpp
         src/dusk/mods/svc/save.hpp
+        src/dusk/mods/svc/save_snapshot.cpp
         src/dusk/mods/svc/stage.cpp
         src/dusk/mods/svc/stage.hpp
         src/dusk/mouse.cpp
         src/dusk/presentation.cpp
         src/dusk/presentation.hpp
         src/dusk/scope_guard.hpp
+        src/dusk/save_context.cpp
+        src/dusk/save_context.hpp
         src/dusk/save_manager.cpp
         src/dusk/save_manager.hpp
         src/dusk/settings.cpp
@@ -1689,6 +1695,7 @@ set(DUSK_FILES
         src/dusk/ui/tooltip.hpp
         src/dusk/ui/number_button.cpp
         src/dusk/ui/number_button.hpp
+        src/dusk/ui/boot_splash.cpp
         src/dusk/ui/overlay.cpp
         src/dusk/ui/overlay.hpp
         src/dusk/ui/row.cpp

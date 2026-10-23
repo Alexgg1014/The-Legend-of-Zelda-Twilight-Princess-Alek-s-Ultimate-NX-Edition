@@ -13,6 +13,9 @@
 #include "dusk/ui/format.hpp"
 #include "dusk/ui/menu_bar.hpp"
 #include "mod_updates.hpp"
+#ifdef __SWITCH__
+#include "dusk/self_update.hpp"
+#endif
 #include "modal.hpp"
 #include "mods_window.hpp"
 #include "preset.hpp"
@@ -32,6 +35,8 @@
 #ifdef __SWITCH__
 #include <borealis/task.hpp>
 #include <switch/disc_scan.hpp>
+
+#include "dusk/shader_warmup_runtime.hpp"
 
 #include <cctype>
 #endif
@@ -146,6 +151,10 @@ std::unique_ptr<DiscVerificationTask> sDiscVerificationTask;
 bool sDiscVerificationModalPushed = false;
 
 borealis::Task<borealis::update::Result> sUpdateCheck;
+#ifdef __SWITCH__
+Button* sUpdateMenuButton = nullptr;  // V1-rc9: the main menu's updater button (build_menu_buttons)
+Rml::String sUpdateMenuLabel;
+#endif
 std::optional<borealis::update::Result> sUpdateCheckResult;
 
 bool verification_state_allows_launch(iso::ValidationError validation) noexcept {
@@ -205,7 +214,7 @@ std::optional<DiscVerificationResult> take_finished_disc_verification() {
 
 void begin_update_check() {
 #ifdef __SWITCH__
-    return;
+    dusk::self_update::maybe_auto_check();  // V1-rc8: the port's releases, at most once a day
 #else
     if (!getSettings().backend.checkForUpdates.getValue()) {
         return;
@@ -236,6 +245,15 @@ std::string update_release_label(const borealis::update::Release& release) {
 }
 
 void open_update_release() {
+#ifdef __SWITCH__
+    // V1-rc8: install here (download, check, put in place at exit), or restart once it is ready.
+    if (dusk::self_update::state() == dusk::self_update::State::Ready) {
+        dusk::self_update::restart_now();
+    } else {
+        dusk::self_update::install();
+    }
+    return;
+#endif
     if (!sUpdateCheckResult.has_value() ||
         sUpdateCheckResult->status != borealis::update::Status::UpdateAvailable)
     {
@@ -798,6 +816,99 @@ void try_push_language_unavailable_modal(Document& host) {
 }
 
 #ifdef __SWITCH__
+// aleks2 (SHADERS-c1): "Preparing shaders". Shown once at startup when the shader list has
+// not been compiled for this console yet (shader_warmup::decide). It only watches: the
+// compiling itself is Aurora's background queue, which keeps going after Skip, so the
+// menu, this screen and the game stay responsive throughout.
+class ShaderPrepModal final : public Modal {
+public:
+    ShaderPrepModal()
+        : Modal{Props{
+              .title = "Preparing shaders",
+              .bodyRml = body_rml(),
+              .actions =
+                  {
+                      ModalAction{
+                          .label = "Skip",
+                          .onPressed = [](Modal& modal) { close(modal, true); },
+                      },
+                  },
+              .onDismiss = [](Modal& modal) { close(modal, true); },
+          }} {
+        mCounter = mDialog->QuerySelector("#shader-prep-counter");
+        mEta = mDialog->QuerySelector("#shader-prep-eta");
+        mBar = mDialog->QuerySelector("#shader-prep-bar");
+        // V1-rc1: black behind the dialog, not the title scene.
+        if (mRoot != nullptr) {
+            mRoot->SetProperty("background-color", "#000000");
+        }
+        shader_warmup::screen_shown();
+        refresh();
+    }
+
+    void update() override {
+        const auto now = clock::now();
+        if (now >= mNextRefresh) {
+            mNextRefresh = now + std::chrono::milliseconds(250);
+            if (refresh()) {
+                close(*this, false);
+                return;
+            }
+        }
+        Modal::update();
+    }
+
+private:
+    static Rml::String body_rml() {
+        const char* why = shader_warmup::reason_text(shader_warmup::reason());
+        return "Dusklight is optimizing the graphics for this console. This should only be needed once, or after "
+               "a major graphics update.<br/><br/>" +
+               escape(why) +
+               "<br/><br/><b><span id=\"shader-prep-counter\">0 / 0</span></b>"
+               " - <span id=\"shader-prep-eta\"></span>"
+               "<br/><progress id=\"shader-prep-bar\" class=\"info\" value=\"0\" />"
+               "<br/>Skipping is safe: preparation continues in the background, but the game may stutter now and "
+               "then until it finishes. What is already done is kept if you close the game.";
+    }
+
+    // True once the pass is over.
+    bool refresh() {
+        const auto p = shader_warmup::progress();
+        if (mCounter != nullptr) {
+            set_text_content(mCounter, p.counter);
+        }
+        if (mEta != nullptr) {
+            set_text_content(mEta, p.eta);
+        }
+        if (mBar != nullptr) {
+            const float value = p.total > 0 ? static_cast<float>(p.done) / static_cast<float>(p.total) : 1.0f;
+            mBar->SetAttribute("value", value);
+        }
+        return p.finished;
+    }
+
+    static void close(Modal& modal, bool skipped) {
+        shader_warmup::screen_closed(skipped);
+        modal.pop();
+    }
+
+    Rml::Element* mCounter = nullptr;
+    Rml::Element* mEta = nullptr;
+    Rml::Element* mBar = nullptr;
+    clock::time_point mNextRefresh{};
+};
+
+void try_push_shader_prep_modal(Document& host) {
+    // V1-rc11: only once the menu is showing. Pushed earlier (first launch, while the boot was still on),
+    // cover() saw the menu not visible yet and the pop never showed it again: after Skip the menu stayed hidden
+    // until a restart (tester, rc9).
+    if (shader_warmup::screen_wanted() && host.visible()) {
+        host.push(std::make_unique<ShaderPrepModal>());
+    }
+}
+#endif
+
+#ifdef __SWITCH__
 // The console has no file picker, so the disc image is looked for instead: any file
 // in the data folder with a disc-image extension. A file named game.gcm wins; with
 // several candidates, the first by name.
@@ -1098,7 +1209,7 @@ void ensure_initialized() noexcept {
 #ifdef __SWITCH__
     if (state.configuredDiscPath.empty()) {
       if (std::string autoDisc = find_switch_disc_image(); !autoDisc.empty()) {
-        PrelaunchLog.info("Auto-selecting Switch disc image");
+        PrelaunchLog.info("Disc image found on the SD card; using it");
         begin_disc_verification(autoDisc);
       }
     }
@@ -1222,6 +1333,10 @@ Prelaunch::Prelaunch() : Document(kDocumentSource, false, DocumentScope::Prelaun
 
 void Prelaunch::build_menu_buttons() {
     mModsButton = nullptr;
+#ifdef __SWITCH__
+    sUpdateMenuButton = nullptr;
+    sUpdateMenuLabel.clear();
+#endif
     if (auto* menuList = mDocument->GetElementById("menu-list")) {
         // Restore the previously selected game mode before creating the play control.
         gamemode::getGameModeManager().setGameModeToPrevious();
@@ -1260,7 +1375,7 @@ void Prelaunch::build_menu_buttons() {
             }
 
             prelaunch_state().firstLaunch = false;
-            IsGameLaunched = true;
+            IsGameLaunched = true; dusk::boot_timing::play_pressed();
             hide(true);
             MenuBar::refresh_tabs();
         });
@@ -1282,6 +1397,32 @@ void Prelaunch::build_menu_buttons() {
             push(std::make_unique<ModsWindow>());
         });
         apply_intro_animation(mMenuButtons.back()->root(), "delay-3");
+
+#ifdef __SWITCH__
+        // V1-rc9: the updater on the main menu (Settings, Aleks, Updates has the rest). Its label follows the state
+        // (Prelaunch::update): check, install the version found, or restart once it is ready.
+        mMenuButtons.push_back(std::make_unique<Button>(menuList, "Check for Updates"));
+        sUpdateMenuButton = mMenuButtons.back().get();
+        mMenuButtons.back()->on_pressed([] {
+            using dusk::self_update::State;
+            switch (dusk::self_update::state()) {
+            case State::Available:
+                dusk::self_update::install();
+                break;
+            case State::Ready:
+                dusk::self_update::restart_now();
+                break;
+            case State::Checking:
+            case State::Downloading:
+            case State::Verifying:
+                break;
+            default:
+                dusk::self_update::check_now();
+                break;
+            }
+        });
+        apply_intro_animation(mMenuButtons.back()->root(), "delay-3");
+#endif
 
         mMenuButtons.push_back(std::make_unique<Button>(menuList, "Quit"));
         mMenuButtons.back()->on_pressed([] { IsRunning = false; });
@@ -1351,10 +1492,20 @@ void Prelaunch::update() {
     ensure_initialized();
     try_apply_mirrored_layout(mDocument);
 
+    // V1-rc11: one modal per frame. Two pushes in the same frame covered the menu twice, and the second cover()
+    // recorded it as not visible, so closing both never showed it again (first launch: disc verification, then the
+    // shader screen; after Skip the menu stayed hidden until a restart).
     if (top_document() == this) {
         try_push_verification_modal(*this);
+    }
+    if (top_document() == this) {
         try_push_language_unavailable_modal(*this);
     }
+#ifdef __SWITCH__
+    if (top_document() == this) {
+        try_push_shader_prep_modal(*this);
+    }
+#endif
 
     const auto& state = prelaunch_state();
 
@@ -1450,6 +1601,45 @@ void Prelaunch::update() {
         }
         set_text_content(mVersion, Rml::String{versionStr});
     }
+#ifdef __SWITCH__
+    if (sUpdateMenuButton != nullptr) {
+        using dusk::self_update::State;
+        const State s = dusk::self_update::state();
+        const Rml::String label = s == State::Available ? Rml::String{"Install " + dusk::self_update::latest_label()}
+                                  : s == State::Ready   ? Rml::String{"Restart to Update"}
+                                  : s == State::Checking || s == State::Downloading || s == State::Verifying
+                                      ? Rml::String{dusk::self_update::status_value()}
+                                  : s == State::UpToDate ? Rml::String{"Up to Date"}
+                                                         : Rml::String{"Check for Updates"};
+        if (label != sUpdateMenuLabel) {
+            sUpdateMenuLabel = label;
+            sUpdateMenuButton->set_text(label);
+        }
+    }
+    if (mUpdateStatus != nullptr && mUpdateMessage != nullptr) {
+        // V1-rc8: the in-app updater's state (self_update.cpp). Quiet unless there is something to say.
+        using dusk::self_update::State;
+        const State s = dusk::self_update::state();
+        if (s == State::Idle || s == State::UpToDate) {
+            mUpdateStatus->RemoveAttribute("state");
+            set_text_content(mUpdateMessage, "");
+        } else if (s == State::Available || s == State::Ready) {
+            mUpdateStatus->SetAttribute("state", "available");
+            set_text_content(mUpdateMessage, s == State::Ready ? "Update ready!" : "Update available!");
+            if (mUpdateDownloadLabel != nullptr) {
+                set_text_content(mUpdateDownloadLabel,
+                    s == State::Ready ? Rml::String{"Restart now"}
+                                      : Rml::String{fmt::format("Install {}", dusk::self_update::latest_label())});
+            }
+        } else if (s == State::Failed) {
+            mUpdateStatus->SetAttribute("state", "failed");
+            set_text_content(mUpdateMessage, "Failed to check for updates");
+        } else {
+            mUpdateStatus->SetAttribute("state", "checking");
+            set_text_content(mUpdateMessage, Rml::String{dusk::self_update::status_value()});
+        }
+    }
+#else
     if (mUpdateStatus != nullptr && mUpdateMessage != nullptr) {
         if (auto result = take_finished_update_check()) {
             if (result->status == borealis::update::Status::Failed) {
@@ -1478,6 +1668,7 @@ void Prelaunch::update() {
             set_text_content(mUpdateMessage, "Failed to check for updates");
         }
     }
+#endif
 
     Document::update();
 }

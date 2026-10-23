@@ -8,6 +8,8 @@
 #include <mutex>
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <system_error>
 
 namespace dusk::archive {
@@ -31,6 +33,28 @@ PackageFormat detect_package_format(mz_zip_archive& zip) {
         return PackageFormat::Mod;
     }
     return PackageFormat::Unknown;
+}
+
+// aleks2 (rc18): why a ZIP did not open, in terms the person who copied it can act on. rc17 on the console
+// refused two 1.4 GB texture packs ("failed finding central directory") that open on the PC and, through this
+// same code, on a host test; so the size this platform sees and what is really at the file's end go in the error.
+std::string describe_zip_end(const borealis::io::RandomAccessFile& file) {
+    const uint64_t size = file.size();
+    constexpr uint64_t kTail = 64 * 1024 + 22;  // the end record, after a comment of up to 64 KiB
+    const uint64_t take = size < kTail ? size : kTail;
+    std::string tail(static_cast<size_t>(take), '\0');
+    std::error_code error;
+    const size_t got = file.read_at(size - take, {reinterpret_cast<std::byte*>(tail.data()), tail.size()}, error);
+    if (error || got != tail.size()) {
+        return fmt::format("{} bytes; reading the last {} bytes gave {}{}", size, take, got,
+            error ? fmt::format(", {} (errno {})", error.message(), error.value()) : std::string{});
+    }
+    const auto at = tail.rfind(std::string_view{"PK\x05\x06", 4});
+    if (at == std::string::npos) {
+        return fmt::format("{} bytes; no ZIP end record in the last {} bytes: the file is cut short or damaged, "
+                           "copy it again and compare its size with the original", size, take);
+    }
+    return fmt::format("{} bytes; ZIP end record {} bytes before the end", size, tail.size() - at);
 }
 
 }  // namespace
@@ -77,8 +101,8 @@ ZipArchive::ZipArchive(const std::filesystem::path& path) : m_impl{std::make_uni
     m_impl->zip.m_pIO_opaque = m_impl.get();
     if (!mz_zip_reader_init(&m_impl->zip, m_impl->file.size(), 0)) {
         const auto zipError = mz_zip_get_last_error(&m_impl->zip);
-        throw std::runtime_error(
-            fmt::format("Opening ZIP failed: {}", mz_zip_get_error_string(zipError)));
+        throw std::runtime_error(fmt::format("Opening ZIP failed: {} ({})", mz_zip_get_error_string(zipError),
+            describe_zip_end(m_impl->file)));
     }
     m_impl->open = true;
     m_impl->format = detect_package_format(m_impl->zip);

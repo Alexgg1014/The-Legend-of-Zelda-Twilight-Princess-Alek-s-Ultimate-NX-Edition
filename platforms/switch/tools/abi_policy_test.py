@@ -91,7 +91,16 @@ with tempfile.TemporaryDirectory() as tmp:
     lx = " | ".join(v["linux_compat"]["blockers"])
     check("libstdc++ ABI not safe" in lx and "switch-arm64 library is required" in lx, f"linux_compat refuses: {lx}")
     check(not v["linux_compat"]["loadable_if_game_defines_imports"], "linux iostream module is not loadable")
-    check(set(v["linux_compat"]["resolution"]["denied"]) == {n for n in IOS}, "all family imports are denied")
+    # DM2-b: only the file-stream names; ios_base, basic_ios and stringstream are laid out alike and bind
+    check(set(v["linux_compat"]["resolution"]["denied"]) == {n for n in IOS if "fstream" in n},
+          f"only the file-stream imports are denied: {v['linux_compat']['resolution']['denied']}")
+    # ...and with a glibc-layout instance of them in the image (ALEKS2_MOD_LINUX_STREAMS), none is
+    elf_audit.set_linux_streams({n for n in IOS if "fstream" in n})
+    vs = verdict(ios)
+    check(vs["linux_compat"]["loadable_if_game_defines_imports"] and not vs["linux_compat"]["blockers"],
+          f"with the image's linux streams the module loads: {vs['linux_compat']}")
+    check(set(vs["linux_compat"]["resolution"]["shim"]) >= {n for n in IOS if "fstream" in n}, "they are shims")
+    elf_audit.set_linux_streams(())
     check(not any("libstdc++" in b for b in v["switch_package"]["blockers"]) and v["switch_package"]["loadable"],
           f"switch_package not refused for the same imports: {v['switch_package']}")
     vp = verdict(plain)
@@ -102,8 +111,9 @@ with tempfile.TemporaryDirectory() as tmp:
     vl = verdict(locale_only)
     check(vl["linux_compat"]["loadable_if_game_defines_imports"] and not vl["linux_compat"]["blockers"],
           f"Cosmetics' locale imports are allowed in a linux module: {vl['linux_compat']}")
-    check(not any(elf_audit.unsafe_libstdcxx_abi(n) for n in LOCALE) and elf_audit.unsafe_libstdcxx_abi("_ZNSt8ios_baseC2Ev")
-          and elf_audit.unsafe_libstdcxx_abi("_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E")
+    check(not any(elf_audit.unsafe_libstdcxx_abi(n) for n in LOCALE) and not elf_audit.unsafe_libstdcxx_abi("_ZNSt8ios_baseC2Ev")
+          and not elf_audit.unsafe_libstdcxx_abi("_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E")
+          and elf_audit.unsafe_libstdcxx_abi("_ZNSt14basic_ofstreamIcSt11char_traitsIcEEC1Ev")
           and not elf_audit.unsafe_libstdcxx_abi("localeconv") and not elf_audit.unsafe_libstdcxx_abi("_ZNSolsEi"),
           "name matcher")
     # the table the loader's test reads too: the same verdict for every name

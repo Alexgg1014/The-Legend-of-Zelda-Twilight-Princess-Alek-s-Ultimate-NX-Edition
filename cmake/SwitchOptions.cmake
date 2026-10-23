@@ -38,6 +38,26 @@ unset(_feature)
 set(AURORA_ENABLE_DVD OFF CACHE BOOL "No nod (Rust) here; see platforms/switch" FORCE)
 set(AURORA_ENABLE_RMLUI ON CACHE BOOL "" FORCE)
 
+# aleks2 (deko3d P1): the experimental deko3d renderer, chosen at run time (backend.graphicsBackend
+# = "deko3d"); Dawn/NVK stays the default and the fallback. Its third-party parts (deko3d 0.5.0 and
+# uam 1.1.0 with their patches, the two Tint options) come from a SwitchWaker checkout at 084291f
+# (MIT; see extern/aurora/lib/deko/README.md). Tint's GLSL writer translates the shaders the DKSH
+# cache lacks.
+option(ALEKS2_DEKO3D "Build the run-time selectable deko3d renderer (lab)" OFF)
+set(ALEKS2_DEKO3D_SWITCHWAKER_DIR "" CACHE PATH "SwitchWaker checkout at 084291f")
+# aleks2 (deko3d rc12): with ALEKS2_DEKO3D, Auto means deko3d ("deko3d (recommended)"; Vulkan = Dawn/NVK for the
+# starts that need it). OFF gives the old choice back (Auto = Vulkan, deko3d "Experimental") with no code change.
+# Read only by src/dusk/deko3d_policy.cpp.
+option(ALEKS2_DEKO3D_DEFAULT "deko3d is the default backend (Auto) when ALEKS2_DEKO3D is on" ON)
+if (ALEKS2_DEKO3D)
+  if (NOT EXISTS "${ALEKS2_DEKO3D_SWITCHWAKER_DIR}/switch/deko3d/CMakeLists.txt")
+    message(FATAL_ERROR "ALEKS2_DEKO3D: ALEKS2_DEKO3D_SWITCHWAKER_DIR must name a SwitchWaker checkout")
+  endif ()
+  set(AURORA_GFX_DEKO3D ON CACHE BOOL "" FORCE)
+  set(AURORA_DEKO3D_SW_DIR "${ALEKS2_DEKO3D_SWITCHWAKER_DIR}" CACHE PATH "" FORCE)
+  set(TINT_BUILD_GLSL_WRITER ON CACHE BOOL "" FORCE)
+endif ()
+
 # Dawn and SDL3 (patched and pinned there).
 include(${CMAKE_CURRENT_LIST_DIR}/SwitchDeps.cmake)
 

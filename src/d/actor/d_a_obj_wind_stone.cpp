@@ -78,7 +78,7 @@ int daWindStone_c::create() {
     return phase;
 }
 
-int daWindStone_c::execute() {
+DUSK_NOINLINE int daWindStone_c::execute() {
     switch (field_0x5c4) {
     case 0:
         exeModeHowl();

@@ -288,7 +288,7 @@ void JASTrack::setLatestKey(u8 param_0) {
     field_0x22b += getTransposeTotal();
 }
 
-JASChannel* JASTrack::channelStart(JASTrack::TChannelMgr* i_channelMgr, u32 key, u32 velocity,
+DUSK_NOINLINE JASChannel* JASTrack::channelStart(JASTrack::TChannelMgr* i_channelMgr, u32 key, u32 velocity,  // aleks2 (rc17): a catalog hook target (coop_mod), inlined by the PGO build
                                    u32 i_updateTimer) {
     JASBank* bank = NULL;
     if (mBankTable != NULL) {

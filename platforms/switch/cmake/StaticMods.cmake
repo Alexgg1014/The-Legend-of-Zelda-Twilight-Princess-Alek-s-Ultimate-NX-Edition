@@ -176,7 +176,7 @@ function(aleks2_finish_static_mods)
 
     # H36: the Luau probe, packed for the card, whenever the Luau runtime is in the build.
     # It goes to switch-test-mods/, not switch-mods/: that folder is what a player copies,
-    # and the probe is a diagnostic (docs/switch-h36-mod-platform.md says how to use it).
+    # and the probe is a diagnostic (the H36 milestone notes say how to use it).
     if ("dev.twilitrealm.luau" IN_LIST _ids)
         set(_probe_dir "${CMAKE_SOURCE_DIR}/platforms/switch/test-mods/luau_probe")
         set(_probe "${CMAKE_BINARY_DIR}/switch-test-mods/luau_probe.dusk")

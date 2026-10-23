@@ -1,17 +1,25 @@
 # H37-c6: one verdict for a Linux-built module's import, read by elf_runtime_policy_test.cpp (the loader) and
 # abi_policy_test.py (elf_audit.py), so the two readers cannot drift apart.
+# DM2-b: only basic_filebuf and the file streams differ in layout (glibc's 48-byte __c_lock); ios_base,
+# basic_ios and the string streams are laid out alike and allowed. These verdicts are for an image WITHOUT
+# glibc-layout file streams (no ALEKS2_MOD_LINUX_STREAMS); with them, the shimmed names bind instead.
 # <refused|allowed> <name>
-refused _ZNSt8ios_baseC2Ev
-refused _ZNSt8ios_baseD2Ev
-refused _ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E
 refused _ZNSt14basic_ofstreamIcSt11char_traitsIcEEC1Ev
 refused _ZTVSt14basic_ofstreamIcSt11char_traitsIcEE
 refused _ZTTSt14basic_ofstreamIcSt11char_traitsIcEE
 refused _ZNSt14basic_ifstreamIcSt11char_traitsIcEED1Ev
 refused _ZNSt13basic_fstreamIcSt11char_traitsIcEEC1Ev
-refused _ZNSt7__cxx1119basic_stringstreamIcSt11char_traitsIcESaIcEEC1Ev
-refused _ZNSt7__cxx1118basic_ostringstreamIcSt11char_traitsIcESaIcEEC1Ev
-refused _ZNSt7__cxx1118basic_istringstreamIcSt11char_traitsIcESaIcEED1Ev
+refused _ZNSt13basic_filebufIcSt11char_traitsIcEEC1Ev
+refused _ZTVSt13basic_filebufIcSt11char_traitsIcEE
+refused _ZNSt14basic_ifstreamIwSt11char_traitsIwEEC1Ev
+allowed _ZNSt8ios_baseC2Ev
+allowed _ZNSt8ios_baseD2Ev
+allowed _ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E
+allowed _ZTVSt9basic_iosIcSt11char_traitsIcEE
+allowed _ZNSt7__cxx1119basic_stringstreamIcSt11char_traitsIcESaIcEEC1Ev
+allowed _ZNSt7__cxx1118basic_ostringstreamIcSt11char_traitsIcESaIcEEC1Ev
+allowed _ZNSt7__cxx1118basic_istringstreamIcSt11char_traitsIcESaIcEED1Ev
+allowed _ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEE7_M_syncEPcmm
 allowed _ZNKSt6locale2id5_M_idEv
 allowed _ZNSt6locale5facetD2Ev
 allowed _ZNSt6localeC1ERKS_

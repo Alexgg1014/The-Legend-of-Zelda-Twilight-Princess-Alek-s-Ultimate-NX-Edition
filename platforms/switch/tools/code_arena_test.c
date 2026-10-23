@@ -10,22 +10,27 @@
  *
  * Part A (any host; built with ASan and UBSan by test-code-arena.sh): the manager alone.
  *   - the fake refuses the 11th object, exactly as the console did;
- *   - Cosmetics' 28 hooks and Roll and Sprint's 4 take ONE object; with Randomizer's 92, two;
+ *   - DM2-a: Twilit 343 + Dawnlight 318 + Randomizer 92 + Zora Swim 43 + Dark Link 28 hooks (824;
+ *     H37's one page per hook needed 13 objects) take ONE object; ALBT's 331 on top, two;
+ *   - DM2-a: 16 slots a page; writing one never changes a byte of a live neighbour; ordinary hooks
+ *     leave the page-boundary slots (the 8-byte patch's) for last; misaligned slots are refused;
  *   - a failed create, MapSlave, MapOwner or UnmapOwner leaves nothing behind;
- *   - releasing one mod's pages leaves another's executable and intact, the executable view of
+ *   - releasing one mod's slots leaves another's executable and intact, the executable view of
  *     an arena is never unmapped while it lives, and the writable view is mapped only while a
- *     page is being written;
- *   - freed pages are reused (oldest first, after the fresh ones) and repeated deactivation and
+ *     slot is being written;
+ *   - freed slots are reused (oldest first, after every fresh one) and repeated deactivation and
  *     reactivation never grows the number of objects;
- *   - every page is within ADRP reach of its target, and a target with no code space in reach is
+ *   - every slot is within ADRP reach of its target, and a target with no code space in reach is
  *     refused cleanly;
+ *   - more hooks than eight arenas hold, or a kernel that runs out first, fail with the reason and
+ *     leave the running mods intact; code_arena_usage says so beforehand (the loader's check);
  *   - trim releases empty arenas and every handle, reservation and backing comes back.
  *
  * Part B (aarch64 only, run under qemu by test-code-arena.sh): funchook itself -- v1.1.3 as the
- * build fetches it, patched by cmake/PatchFunchook.cmake -- installs real hooks on 124 real
- * functions through these pages, one funchook per target as svc/hook.cpp does: the Cosmetics,
- * Roll and Sprint and Randomizer counts, then Cosmetics off and on again five times. Every hooked
- * call must reach its hook, and every hook must reach the original through its trampoline.
+ * build fetches it, patched by cmake/PatchFunchook.cmake -- installs real hooks on real functions
+ * through these slots, one funchook per target as svc/hook.cpp does (code_arena_funchook_test.c
+ * says which). Every hooked call must reach its hook, and every hook must reach the original
+ * through its trampoline.
  */
 #define _GNU_SOURCE
 #include "code_arena.h"
@@ -290,6 +295,19 @@ static void fk_icache(void *ctx, uintptr_t addr, size_t size)
 {
     (void)ctx;
     __builtin___clear_cache((char *)addr, (char *)addr + size);
+    /* DM2-a: qemu-user does not see a write made through the writable view (another address of the
+     * same memfd) and would keep running what it translated from a reused slot before -- what the
+     * instruction cache invalidation prevents on hardware. Mapping the page again, same file, same
+     * offset, same protection, makes qemu drop those translations; a thread running elsewhere in
+     * the page sees the same bytes throughout (MAP_FIXED replaces the mapping at once). */
+    for (int i = 0; i < MAX_OBJECTS; i++) {
+        const fake_object *o = &K.obj[i];
+        if (o->used && o->rx != 0 && addr >= o->rx && addr < o->rx + o->size) {
+            const uintptr_t lo = addr & ~(uintptr_t)0xFFF;
+            const uintptr_t hi = (addr + size + 0xFFF) & ~(uintptr_t)0xFFF;
+            mmap((void *)lo, hi - lo, PROT_READ | PROT_EXEC, MAP_SHARED | MAP_FIXED, o->fd, (off_t)(lo - o->rx));
+        }
+    }
 }
 
 static void fk_log(void *ctx, const char *line)
@@ -314,39 +332,61 @@ static void reset_kernel(void)
 
 /* ------------------------------------------------------------------ part A: the manager -- */
 
+
 /* Hook targets: addresses inside this program's code, as the game's functions are inside the NRO. */
 static uintptr_t target(int i)
 {
     return ((uintptr_t)&reset_kernel & ~(uintptr_t)0xFFF) + (uintptr_t)i * 0x40;
 }
 
+/* One mod's slots, as hook.cpp holds them: one per hooked function. */
+#define MOD_SLOTS_MAX 1200
 typedef struct {
-    uintptr_t rx[128];
-    void *rw[128];
+    uintptr_t rx[MOD_SLOTS_MAX];
+    void *rw[MOD_SLOTS_MAX];
+    uint8_t tag[MOD_SLOTS_MAX];
     int n;
-} mod_pages;
+} mod_slots;
 
-static int install(code_arenas *m, mod_pages *mod, int first, int count, uint8_t tag)
+static mod_slots *new_mod(void)
+{
+    mod_slots *mod = calloc(1, sizeof *mod);
+    return mod;
+}
+
+/* Every byte of a slot carries the tag, so an overlap or a stray write shows up anywhere in it. */
+static int install_flags(code_arenas *m, mod_slots *mod, int first, int count, uint8_t tag, unsigned flags)
 {
     char err[192];
     for (int i = 0; i < count; i++) {
         uintptr_t rx = 0;
         void *rw = NULL;
-        const int rv = code_arena_alloc(m, target(first + i), &rx, &rw, err, sizeof err);
+        const int rv = code_arena_alloc(m, target(first + i), flags, &rx, &rw, err, sizeof err);
         if (rv != 0) {
             return rv;
         }
-        memset(rw, tag, 64); /* the "trampoline" */
+        CHECK(((const uint8_t *)rw)[0] == 0 && ((const uint8_t *)rw)[CODE_ARENA_SLOT - 1] == 0);  /* zeroed */
+        memset(rw, tag, CODE_ARENA_SLOT); /* the "trampoline" */
         CHECK(code_arena_commit(m, rx, err, sizeof err) == 0);
         CHECK(code_arena_within_adrp(target(first + i), rx));
+        CHECK(rx % CODE_ARENA_SLOT == 0);
+        if (flags & CODE_ARENA_PAGE_ALIGNED) {
+            CHECK(rx % CODE_ARENA_PAGE == 0);
+        }
         mod->rx[mod->n] = rx;
         mod->rw[mod->n] = rw;
+        mod->tag[mod->n] = tag;
         mod->n++;
     }
     return 0;
 }
 
-static void uninstall(code_arenas *m, mod_pages *mod)
+static int install(code_arenas *m, mod_slots *mod, int first, int count, uint8_t tag)
+{
+    return install_flags(m, mod, first, count, tag, 0);
+}
+
+static void uninstall(code_arenas *m, mod_slots *mod)
 {
     char err[192];
     for (int i = 0; i < mod->n; i++) {
@@ -355,12 +395,12 @@ static void uninstall(code_arenas *m, mod_pages *mod)
     mod->n = 0;
 }
 
-static int intact(const mod_pages *mod, uint8_t tag)
+static int intact(const mod_slots *mod)
 {
     for (int i = 0; i < mod->n; i++) {
         const uint8_t *p = (const uint8_t *)mod->rx[i]; /* read through the EXECUTABLE view */
-        for (int b = 0; b < 64; b++) {
-            if (p[b] != tag) {
+        for (uint32_t b = 0; b < CODE_ARENA_SLOT; b++) {
+            if (p[b] != mod->tag[i]) {
                 return 0;
             }
         }
@@ -375,6 +415,20 @@ static int rw_views_mapped(void)
         n += K.obj[i].used && K.obj[i].rw != 0;
     }
     return n;
+}
+
+static void free_everything(code_arenas *m)
+{
+    char err[192];
+    for (uint32_t a = 0; a < m->count; a++) {
+        for (uint32_t s = 0; s < CODE_ARENA_SLOTS; s++) {
+            if (m->arena[a].state[s] != CODE_SLOT_FREE) {
+                code_arena_free(m, m->arena[a].rx + s * CODE_ARENA_SLOT, err, sizeof err);
+            }
+        }
+    }
+    CHECK(code_arena_trim(m) == 0);
+    CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0);
 }
 
 static void control_kernel_limit(void)
@@ -400,135 +454,223 @@ static void control_kernel_limit(void)
     printf("control      one object per page, as in H36: the fake kernel refuses object 11 with 0x%x\n", rc);
 }
 
-static void mods_together(void)
+/* DM2-a: the combination that did not fit. Declared hooks (package_audit.py, catalogue of
+ * 2026-10-14): Twilit Essentials 343, Dawnlight 318, Randomizer 92, Zora Swim 43, Dark Link 28 --
+ * 824, against 512 in H37's one-page-per-hook arenas. Then A Link Between Twilight (331) on top. */
+static void catalogue_together(void)
 {
     reset_kernel();
-    code_arenas m;
+    static code_arenas m;
     code_arenas_init(&m, &OPS);
-    static mod_pages cosmetics, rollsprint, rando;
-    memset(&cosmetics, 0, sizeof cosmetics);
-    memset(&rollsprint, 0, sizeof rollsprint);
-    memset(&rando, 0, sizeof rando);
+    mod_slots *twilit = new_mod(), *dawn = new_mod(), *rando = new_mod(), *zora = new_mod(), *dark = new_mod(),
+              *albt = new_mod();
 
-    CHECK(install(&m, &cosmetics, 0, 28, 0xC0) == 0);
-    CHECK(K.live_objects == 1);
-    CHECK(install(&m, &rollsprint, 100, 4, 0x55) == 0);
-    CHECK(K.live_objects == 1 && m.stats.pages_used == 32);
-    const uint32_t objectsCosmeticsRoll = K.live_objects;
-    CHECK(install(&m, &rando, 200, 92, 0xAA) == 0);
-    CHECK(K.live_objects == 2 && K.live_objects < K.limit);
-    CHECK(intact(&cosmetics, 0xC0) && intact(&rollsprint, 0x55) && intact(&rando, 0xAA));
-    CHECK(rw_views_mapped() == 0);  /* nothing being written: no writable view */
-    CHECK(m.writers == 0);
+    CHECK(install(&m, twilit, 0, 343, 0x71) == 0);
+    CHECK(install(&m, dawn, 400, 318, 0xD1) == 0);
+    CHECK(install(&m, rando, 800, 92, 0xAA) == 0);
+    CHECK(install(&m, zora, 1000, 43, 0x2A) == 0);
+    CHECK(install(&m, dark, 1100, 28, 0xDA) == 0);
+    const uint32_t five_objects = K.live_objects;
+    const uint32_t five_pages = m.stats.pages_touched;
+    CHECK(five_objects == 1);                  /* H37 needed 13 (824 / 64): more than the kernel has */
+    CHECK(m.stats.slots_used == 824);
+    CHECK(five_pages == (824 + 14) / 15);     /* 15 ordinary slots a page: the boundary slot is kept free */
+    CHECK(m.stats.aligned_used == 0);
+    CHECK(intact(twilit) && intact(dawn) && intact(rando) && intact(zora) && intact(dark));
+    CHECK(rw_views_mapped() == 0 && m.writers == 0);
+    uint32_t used = 0, free_now = 0, capacity = 0;
+    code_arena_usage(&m, &used, &free_now, &capacity);
+    CHECK(used == 824 && free_now == CODE_ARENA_SLOTS - 824 && capacity == CODE_ARENA_MAX * CODE_ARENA_SLOTS);
 
-    /* Cosmetics off: the others keep running, from views that never moved. */
-    uninstall(&m, &cosmetics);
-    CHECK(intact(&rollsprint, 0x55) && intact(&rando, 0xAA));
-    CHECK(K.unmap_rx_calls == 0);
-    /* ...and on again, five times: no growth. */
+    CHECK(install(&m, albt, 1200, 331, 0xAB) == 0);
+    CHECK(K.live_objects == 2 && m.stats.slots_used == 1155);
+    CHECK(intact(twilit) && intact(dawn) && intact(rando) && intact(zora) && intact(dark) && intact(albt));
+
+    /* Dawnlight off and on again five times: the others intact, no object added, slots reused. */
     for (int cycle = 0; cycle < 5; cycle++) {
-        CHECK(install(&m, &cosmetics, 0, 28, (uint8_t)(0xC1 + cycle)) == 0);
-        CHECK(intact(&cosmetics, (uint8_t)(0xC1 + cycle)) && intact(&rollsprint, 0x55) && intact(&rando, 0xAA));
-        uninstall(&m, &cosmetics);
+        uninstall(&m, dawn);
+        CHECK(intact(twilit) && intact(rando) && intact(albt));
+        CHECK(install(&m, dawn, 400, 318, (uint8_t)(0xD2 + cycle)) == 0);
+        CHECK(intact(dawn) && intact(twilit) && intact(rando) && intact(zora) && intact(dark) && intact(albt));
     }
-    CHECK(install(&m, &cosmetics, 0, 28, 0xC9) == 0);
-    CHECK(K.live_objects == 2 && K.peak_objects == 2);
-    CHECK(m.stats.reuses > 0);
-    CHECK(K.unmap_rx_calls == 0);
-    char line[320];
+    CHECK(K.live_objects == 2 && K.peak_objects == 2 && K.unmap_rx_calls == 0);
+    char line[512];
     code_arena_describe(&m, line, sizeof line);
-    printf("mods         Cosmetics 28 + Roll and Sprint 4: %u object(s); + Randomizer 92: %u; "
-           "Cosmetics off/on x6, others intact; kernel limit %u\n",
-        objectsCosmeticsRoll, K.live_objects, K.limit);
+    printf("catalogue    Twilit 343 + Dawnlight 318 + Randomizer 92 + Zora Swim 43 + Dark Link 28 = 824 hooks: "
+           "%u CodeMemory object, %u pages (H37: 13 objects, beyond the kernel's ~10); + ALBT 331: %u objects; "
+           "Dawnlight off/on x5, others intact\n",
+           five_objects, five_pages, K.live_objects);
     printf("             %s\n", line);
-
-    uninstall(&m, &cosmetics);
-    uninstall(&m, &rollsprint);
-    uninstall(&m, &rando);
+    uninstall(&m, twilit);
+    uninstall(&m, dawn);
+    uninstall(&m, rando);
+    uninstall(&m, zora);
+    uninstall(&m, dark);
+    uninstall(&m, albt);
     CHECK(code_arena_trim(&m) == 0);
     CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0);
-    CHECK(K.unmap_rx_calls == 2);  /* only by trim, only once every page was free */
+    CHECK(K.unmap_rx_calls == 2);  /* only by trim, only once every slot was free */
+    free(twilit), free(dawn), free(rando), free(zora), free(dark), free(albt);
+}
+
+/* DM2-a: slots of one page are independent. Writing one (its arena's writable view mapped) never
+ * changes a byte of its neighbours, which other threads may be executing; the executable view is
+ * never touched; page-boundary slots go to the two-instruction patch and ordinary requests take
+ * them last. */
+static void packing(void)
+{
+    char err[192];
+    reset_kernel();
+    static code_arenas m;
+    code_arenas_init(&m, &OPS);
+    mod_slots *a = new_mod(), *b = new_mod(), *narrow = new_mod();
+
+    CHECK(install(&m, a, 0, 15, 0x11) == 0);  /* one page's ordinary slots */
+    CHECK(m.stats.pages_touched == 1);
+    for (int i = 0; i < 15; i++) {
+        CHECK(a->rx[i] / CODE_ARENA_PAGE == a->rx[0] / CODE_ARENA_PAGE);  /* the same page */
+        CHECK(a->rx[i] % CODE_ARENA_PAGE != 0);                         /* not its boundary slot */
+        for (int j = 0; j < i; j++) {
+            CHECK(a->rx[i] != a->rx[j]);
+        }
+    }
+    /* A narrow hook: the boundary slot of the first page, next to the 15 live ones. */
+    CHECK(install_flags(&m, narrow, 15, 1, 0x88, CODE_ARENA_PAGE_ALIGNED) == 0);
+    CHECK(narrow->rx[0] == a->rx[0] - CODE_ARENA_SLOT);
+    CHECK(m.stats.aligned_used == 1 && m.stats.pages_touched == 1);
+
+    /* A slot held in WRITING (writable view mapped) while its neighbours are live: they are intact,
+     * through the executable view, before and after the write. */
+    CHECK(code_arena_free(&m, a->rx[7], err, sizeof err) == 0);  /* slot 8 of page 0, freed first */
+    a->rx[7] = a->rx[--a->n];
+    uintptr_t rx = 0;
+    void *rw = NULL;
+    CHECK(code_arena_alloc(&m, target(7), 0, &rx, &rw, err, sizeof err) == 0);
+    CHECK(rx / CODE_ARENA_PAGE != a->rx[0] / CODE_ARENA_PAGE);  /* a fresh slot, not the freed one */
+    CHECK(rw_views_mapped() == 1);
+    memset(rw, 0x5A, CODE_ARENA_SLOT);
+    CHECK(intact(a) && intact(narrow));
+    CHECK(code_arena_commit(&m, rx, err, sizeof err) == 0);
+    CHECK(rw_views_mapped() == 0);
+    CHECK(intact(a) && intact(narrow) && ((const uint8_t *)rx)[0] == 0x5A);
+    const uintptr_t freed_second = rx;
+    CHECK(code_arena_free(&m, rx, err, sizeof err) == 0);  /* freed second */
+
+    /* Rewriting a live slot (funchook's unprotect then protect) touches only that slot. */
+    void *again = NULL;
+    CHECK(code_arena_begin_write(&m, a->rx[3], &again, err, sizeof err) == 0);
+    memset(again, 0x33, CODE_ARENA_SLOT);
+    a->tag[3] = 0x33;
+    CHECK(code_arena_commit(&m, a->rx[3], err, sizeof err) == 0);
+    CHECK(rw_views_mapped() == 0 && intact(a) && intact(narrow));
+
+    /* Misaligned or interior addresses are not slots; unknown flags are refused. */
+    CHECK(code_arena_free(&m, a->rx[0] + 4, err, sizeof err) == CODE_ARENA_E_INVALID);
+    CHECK(code_arena_commit(&m, a->rx[0] + CODE_ARENA_SLOT / 2, err, sizeof err) == CODE_ARENA_E_INVALID);
+    CHECK(code_arena_alloc(&m, target(0), 0x80, &rx, &rw, err, sizeof err) == CODE_ARENA_E_INVALID);
+
+    /* Every fresh ordinary slot goes before any boundary slot: 960 a arena, 16 taken (15 + one freed). */
+    const int fresh_ordinary = (int)(CODE_ARENA_SLOTS - CODE_ARENA_PAGES) - 16;
+    CHECK(install(&m, b, 100, fresh_ordinary, 0x22) == 0);
+    CHECK(m.stats.aligned_used == 1);  /* still only the narrow hook's */
+    CHECK(m.stats.pages_touched == CODE_ARENA_PAGES && m.stats.reuses == 0);
+    /* Narrow hooks still find every other boundary slot. */
+    mod_slots *narrow2 = new_mod();
+    CHECK(install_flags(&m, narrow2, 3000, (int)CODE_ARENA_PAGES - 1, 0x99, CODE_ARENA_PAGE_ALIGNED) == 0);
+    CHECK(m.stats.aligned_used == CODE_ARENA_PAGES && K.live_objects == 1);
+    /* Then the two freed slots, the one freed first first. */
+    mod_slots *c = new_mod();
+    CHECK(install(&m, c, 5000, 2, 0x77) == 0);
+    CHECK(c->rx[0] / CODE_ARENA_PAGE == a->rx[0] / CODE_ARENA_PAGE && c->rx[1] == freed_second);
+    CHECK(m.stats.reuses == 2 && m.stats.slots_used == CODE_ARENA_SLOTS && K.live_objects == 1);
+    /* The arena is full: the next one makes a second object. */
+    mod_slots *narrow3 = new_mod();
+    CHECK(install_flags(&m, narrow3, 4000, 1, 0x9A, CODE_ARENA_PAGE_ALIGNED) == 0);
+    CHECK(K.live_objects == 2);
+    CHECK(intact(a) && intact(b) && intact(c) && intact(narrow) && intact(narrow2) && intact(narrow3));
+    printf("packing      %u slots of %u B a page, cache-line aligned; writing one never changes its live "
+           "neighbours; ordinary hooks leave the %u boundary slots of an arena to the 8-byte patch until "
+           "the other %u are gone; reuse only after every fresh slot, oldest first\n",
+           CODE_ARENA_SLOTS_PER_PAGE, CODE_ARENA_SLOT, CODE_ARENA_PAGES, CODE_ARENA_SLOTS - CODE_ARENA_PAGES);
+    free_everything(&m);
+    free(a), free(b), free(c), free(narrow), free(narrow2), free(narrow3);
 }
 
 static void failures(void)
 {
     char err[192];
     reset_kernel();
-    code_arenas m;
+    static code_arenas m;
     code_arenas_init(&m, &OPS);
     uintptr_t rx = 0;
     void *rw = NULL;
 
     K.fail_create = 1;
-    CHECK(code_arena_alloc(&m, target(0), &rx, &rw, err, sizeof err) == CODE_ARENA_E_KERNEL);
+    CHECK(code_arena_alloc(&m, target(0), 0, &rx, &rw, err, sizeof err) == CODE_ARENA_E_KERNEL);
     CHECK(strstr(err, "svcCreateCodeMemory") != NULL && strstr(err, "0xdead01") != NULL);
     CHECK(m.stats.last_failure == RESULT_INJECTED);
     CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0 && m.count == 0);
 
     K.fail_map_rx = 1;
-    CHECK(code_arena_alloc(&m, target(0), &rx, &rw, err, sizeof err) == CODE_ARENA_E_KERNEL);
+    CHECK(code_arena_alloc(&m, target(0), 0, &rx, &rw, err, sizeof err) == CODE_ARENA_E_KERNEL);
     CHECK(strstr(err, "MapSlave") != NULL);
     CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0 && m.count == 0);
 
     K.no_space_near = 1;
-    CHECK(code_arena_alloc(&m, target(0), &rx, &rw, err, sizeof err) == CODE_ARENA_E_NO_RANGE);
+    CHECK(code_arena_alloc(&m, target(0), 0, &rx, &rw, err, sizeof err) == CODE_ARENA_E_NO_RANGE);
     CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0);
     K.no_space_near = 0;
 
     /* A kernel that answers with space beyond ADRP's reach: refused, the reservation given back. */
     K.near_out_of_reach = 1;
-    CHECK(code_arena_alloc(&m, target(0), &rx, &rw, err, sizeof err) == CODE_ARENA_E_NO_RANGE);
+    CHECK(code_arena_alloc(&m, target(0), 0, &rx, &rw, err, sizeof err) == CODE_ARENA_E_NO_RANGE);
     CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0);
     K.near_out_of_reach = 0;
 
     /* A target far beyond 4 GiB of every arena, with no space near it: refused cleanly, and the
      * existing arena is untouched. */
-    mod_pages some;
-    memset(&some, 0, sizeof some);
-    CHECK(install(&m, &some, 0, 3, 0x11) == 0);
+    mod_slots *some = new_mod();
+    CHECK(install(&m, some, 0, 3, 0x11) == 0);
     const uint32_t before = K.live_objects;
     const uintptr_t far = target(0) ^ ((uintptr_t)1 << 45);
     K.no_space_near = 1;
-    CHECK(code_arena_alloc(&m, far, &rx, &rw, err, sizeof err) == CODE_ARENA_E_NO_RANGE);
+    CHECK(code_arena_alloc(&m, far, 0, &rx, &rw, err, sizeof err) == CODE_ARENA_E_NO_RANGE);
+    CHECK(code_arena_alloc(&m, far, CODE_ARENA_PAGE_ALIGNED, &rx, &rw, err, sizeof err) == CODE_ARENA_E_NO_RANGE);
     K.no_space_near = 0;
     CHECK(K.live_objects == before && K.live_reservations == 2 * (int)before && K.live_backings == (int)before);
-    CHECK(intact(&some, 0x11));
+    CHECK(intact(some));
 
-    /* MapOwner refused when a page is to be written: the page stays free, nothing leaks. */
-    const uint32_t used = m.stats.pages_used;
+    /* MapOwner refused when a slot is to be written: the slot stays free, nothing leaks. */
+    const uint32_t used = m.stats.slots_used;
     K.fail_map_rw = 1;
-    CHECK(code_arena_alloc(&m, target(5), &rx, &rw, err, sizeof err) == CODE_ARENA_E_KERNEL);
+    CHECK(code_arena_alloc(&m, target(5), 0, &rx, &rw, err, sizeof err) == CODE_ARENA_E_KERNEL);
     CHECK(strstr(err, "MapOwner") != NULL);
-    CHECK(m.stats.pages_used == used && m.writers == 0);
-    CHECK(install(&m, &some, 5, 1, 0x11) == 0);  /* and the next attempt works */
+    CHECK(m.stats.slots_used == used && m.writers == 0);
+    CHECK(install(&m, some, 5, 1, 0x11) == 0);  /* and the next attempt works */
 
-    /* UnmapOwner refused after a write: reported; the page is live and executable regardless. */
-    CHECK(code_arena_alloc(&m, target(6), &rx, &rw, err, sizeof err) == 0);
+    /* UnmapOwner refused after a write: reported; the slot is live and executable regardless. */
+    CHECK(code_arena_alloc(&m, target(6), 0, &rx, &rw, err, sizeof err) == 0);
     memset(rw, 0x22, 64);
     K.fail_unmap_rw = 1;
     CHECK(code_arena_commit(&m, rx, err, sizeof err) == CODE_ARENA_E_KERNEL);
     CHECK(strstr(err, "UnmapOwner") != NULL);
     CHECK(((const uint8_t *)rx)[0] == 0x22);
     CHECK(rw_views_mapped() == 1);  /* still mapped: the next commit retries the unmap */
-    CHECK(code_arena_alloc(&m, target(7), &rx, &rw, err, sizeof err) == 0);
+    CHECK(code_arena_alloc(&m, target(7), 0, &rx, &rw, err, sizeof err) == 0);
     CHECK(code_arena_commit(&m, rx, err, sizeof err) == 0);
     CHECK(rw_views_mapped() == 0);
 
     /* Misuse is refused, not followed. */
     CHECK(code_arena_free(&m, (uintptr_t)0x1000, err, sizeof err) == CODE_ARENA_E_INVALID);
     CHECK(code_arena_commit(&m, (uintptr_t)0x1000, err, sizeof err) == CODE_ARENA_E_INVALID);
+    CHECK(code_arena_free(&m, some->rx[0], err, sizeof err) == 0);
+    CHECK(code_arena_free(&m, some->rx[0], err, sizeof err) == CODE_ARENA_E_INVALID);  /* twice */
+    some->rx[0] = some->rx[--some->n];
 
-    uninstall(&m, &some);
-    for (uint32_t a = 0; a < m.count; a++) {
-        for (uint32_t p = 0; p < CODE_ARENA_PAGES; p++) {
-            if (m.arena[a].state[p] != CODE_SLOT_FREE) {
-                code_arena_free(&m, m.arena[a].rx + p * CODE_ARENA_PAGE, err, sizeof err);
-            }
-        }
-    }
-    CHECK(code_arena_trim(&m) == 0);
-    CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0);
-    printf("failures     create, MapSlave, MapOwner, UnmapOwner, no space, out of reach: refused "
+    uninstall(&m, some);
+    free_everything(&m);
+    free(some);
+    printf("failures     create, MapSlave, MapOwner, UnmapOwner, no space, out of reach, double free: refused "
            "with the Result, nothing leaked\n");
 }
 
@@ -536,68 +678,72 @@ static void reuse_order(void)
 {
     char err[192];
     reset_kernel();
-    code_arenas m;
+    static code_arenas m;
     code_arenas_init(&m, &OPS);
-    mod_pages all;
-    memset(&all, 0, sizeof all);
-    CHECK(install(&m, &all, 0, CODE_ARENA_PAGES, 0x33) == 0);  /* one arena, full */
-    CHECK(K.live_objects == 1);
-    /* Free pages 10, 3, 40 in that order: they come back 10, 3, 40. */
-    const int order[3] = {10, 3, 40};
-    for (int i = 0; i < 3; i++) {
-        CHECK(code_arena_free(&m, all.rx[order[i]], err, sizeof err) == 0);
+    mod_slots *all = new_mod();
+    CHECK(install(&m, all, 0, (int)CODE_ARENA_SLOTS, 0x33) == 0);  /* one arena, full */
+    CHECK(K.live_objects == 1 && m.stats.reuses == 0);
+    /* Free slots 10, 3, 40, and a boundary one, in that order: ordinary requests get 10, 3, 40 back,
+     * then the boundary one; nothing in between. */
+    const int order[4] = {10, 3, 40, (int)CODE_ARENA_SLOTS - 1};
+    CHECK(all->rx[order[3]] % CODE_ARENA_PAGE == 0);  /* boundary slots were handed out last */
+    for (int i = 0; i < 4; i++) {
+        CHECK(code_arena_free(&m, all->rx[order[i]], err, sizeof err) == 0);
     }
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         uintptr_t rx = 0;
         void *rw = NULL;
-        CHECK(code_arena_alloc(&m, target(0), &rx, &rw, err, sizeof err) == 0);
-        CHECK(rx == all.rx[order[i]]);
+        CHECK(code_arena_alloc(&m, target(0), 0, &rx, &rw, err, sizeof err) == 0);
+        CHECK(rx == all->rx[order[i]]);
         CHECK(code_arena_commit(&m, rx, err, sizeof err) == 0);
     }
-    CHECK(K.live_objects == 1 && m.stats.reuses == 3);
-    /* One more than fits: a second arena, a second object. */
+    CHECK(K.live_objects == 1 && m.stats.reuses == 4);
+    /* A freed boundary slot goes to a narrow request ahead of fresh ones elsewhere... */
+    CHECK(code_arena_free(&m, all->rx[order[3]], err, sizeof err) == 0);
     uintptr_t rx = 0;
     void *rw = NULL;
-    CHECK(code_arena_alloc(&m, target(1), &rx, &rw, err, sizeof err) == 0);
+    CHECK(code_arena_alloc(&m, target(1), CODE_ARENA_PAGE_ALIGNED, &rx, &rw, err, sizeof err) == 0);
+    CHECK(rx == all->rx[order[3]]);
+    CHECK(code_arena_commit(&m, rx, err, sizeof err) == 0);
+    /* ...and one more than fits makes a second arena, a second object. */
+    CHECK(code_arena_alloc(&m, target(1), 0, &rx, &rw, err, sizeof err) == 0);
     CHECK(code_arena_commit(&m, rx, err, sizeof err) == 0);
     CHECK(K.live_objects == 2);
-    printf("reuse        freed pages come back oldest first; a full arena makes a second object\n");
-    for (uint32_t a = 0; a < m.count; a++) {
-        for (uint32_t p = 0; p < CODE_ARENA_PAGES; p++) {
-            if (m.arena[a].state[p] != CODE_SLOT_FREE) {
-                code_arena_free(&m, m.arena[a].rx + p * CODE_ARENA_PAGE, err, sizeof err);
-            }
-        }
-    }
-    code_arena_trim(&m);
-    CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0);
+    printf("reuse        freed slots come back oldest first, after every fresh one; a full arena makes a "
+           "second object\n");
+    free_everything(&m);
+    free(all);
 }
 
-/* H38: a mod whose hooks do not fit. Cosmetics + Roll and Sprint (32 pages) are running and a mod asks for more than
- * the 8 arenas (512 pages) can give. The allocation that does not fit fails with a message that names the capacity,
- * the loader then drops that mod's partial hooks (hook_remove_mod frees page by page, done here the same way), the
- * running mods stay intact, every page is available again, and neither the failure nor repeating it adds an object. */
+/* A mod whose hooks do not fit. Two mods are running and a mod asks for more than the 8 arenas can
+ * give. The allocation that does not fit fails with a message that names the capacity, the loader
+ * then drops that mod's partial hooks (hook_remove_mod frees slot by slot, done here the same way),
+ * the running mods stay intact, every slot is available again, and neither the failure nor
+ * repeating it adds an object. code_arena_usage says beforehand that it would not fit -- what the
+ * loader checks before the mod runs any code (svc::hook_room_check), so this path is the last line. */
 static void capacity_exhaustion(void)
 {
     char err[192];
     reset_kernel();
-    code_arenas m;
+    static code_arenas m;
     code_arenas_init(&m, &OPS);
-    static mod_pages running;
-    memset(&running, 0, sizeof running);
-    CHECK(install(&m, &running, 0, 32, 0xB0) == 0);
+    mod_slots *running = new_mod();
+    CHECK(install(&m, running, 0, 32, 0xB0) == 0);
     CHECK(K.live_objects == 1);
 
-    enum { ASK = 600, ROOM = CODE_ARENA_MAX * CODE_ARENA_PAGES - 32 };
+    enum { ASK = CODE_ARENA_MAX * CODE_ARENA_SLOTS + 8, ROOM = CODE_ARENA_MAX * CODE_ARENA_SLOTS - 32 };
+    uint32_t used = 0, capacity = 0;
+    code_arena_usage(&m, &used, NULL, &capacity);
+    CHECK(used == 32 && capacity - used == ROOM && ASK > capacity - used);  /* the check would refuse it */
     static uintptr_t big[ASK];
-    for (int cycle = 0; cycle < 6; cycle++) {
+    for (int cycle = 0; cycle < 3; cycle++) {
         int got = 0;
         int rv = 0;
         err[0] = '\0';
         for (int i = 0; i < ASK; i++) {
             uintptr_t rx = 0;
             void *rw = NULL;
-            rv = code_arena_alloc(&m, target(1000 + i), &rx, &rw, err, sizeof err);
+            rv = code_arena_alloc(&m, target(1000 + i % 500), 0, &rx, &rw, err, sizeof err);
             if (rv != 0) {
                 break;
             }
@@ -605,47 +751,97 @@ static void capacity_exhaustion(void)
             CHECK(code_arena_commit(&m, rx, err, sizeof err) == 0);
             big[got++] = rx;
         }
-        /* every page that exists was handed out, then the next one failed, naming the capacity */
+        /* every slot that exists was handed out, then the next one failed, naming the capacity */
         CHECK(got == ROOM && rv == CODE_ARENA_E_FULL);
         CHECK(strstr(err, "every code arena is full") != NULL && strstr(err, "8 arenas") != NULL);
         CHECK(K.live_objects == CODE_ARENA_MAX && K.peak_objects == CODE_ARENA_MAX && K.peak_objects <= K.limit);
-        CHECK(m.stats.pages_used == CODE_ARENA_MAX * CODE_ARENA_PAGES);
-        CHECK(intact(&running, 0xB0));  /* the running mods are untouched */
+        CHECK(m.stats.slots_used == CODE_ARENA_MAX * CODE_ARENA_SLOTS);
+        CHECK(intact(running));  /* the running mods are untouched */
         /* the mod is dropped: its partial hooks go back one by one */
         for (int i = 0; i < got; i++) {
             CHECK(code_arena_free(&m, big[i], err, sizeof err) == 0);
         }
-        CHECK(m.stats.pages_used == 32);
-        CHECK(intact(&running, 0xB0));
+        CHECK(m.stats.slots_used == 32);
+        CHECK(intact(running));
         CHECK(K.live_objects == CODE_ARENA_MAX && K.peak_objects == CODE_ARENA_MAX);  /* no growth, in any cycle */
     }
-    /* the pages are reusable: a mod that fits goes in, from the arenas that exist */
-    static mod_pages fits;
-    memset(&fits, 0, sizeof fits);
-    CHECK(install(&m, &fits, 2000, 100, 0xCC) == 0);
-    CHECK(intact(&fits, 0xCC) && intact(&running, 0xB0));
+    /* the slots are reusable: a mod that fits goes in, from the arenas that exist */
+    mod_slots *fits = new_mod();
+    CHECK(install(&m, fits, 2000, 1000, 0xCC) == 0);
+    CHECK(intact(fits) && intact(running));
     CHECK(K.live_objects == CODE_ARENA_MAX && m.stats.reuses > 0);
-    uninstall(&m, &fits);
-    uninstall(&m, &running);
+    uninstall(&m, fits);
+    uninstall(&m, running);
     CHECK(code_arena_trim(&m) == 0);
     CHECK(K.live_objects == 0 && K.live_reservations == 0 && K.live_backings == 0);
-    printf("capacity     a mod asking for more than 8 arenas fails with 'every code arena is full'; its partial pages "
-           "go back, the running mods stay intact, objects stay at %u over 6 cycles\n",
-        (unsigned)CODE_ARENA_MAX);
+    printf("capacity     a mod asking for more than 8 arenas (%u hooks) fails with 'every code arena is full'; its "
+           "partial slots go back, the running mods stay intact, objects stay at %u over 3 cycles\n",
+           (unsigned)(CODE_ARENA_MAX * CODE_ARENA_SLOTS), (unsigned)CODE_ARENA_MAX);
+    free(running), free(fits);
+}
+
+/* The kernel runs out before the table does: the fake's pool is smaller than CODE_ARENA_MAX here
+ * (other users of CodeMemory in the system). The failure names the kernel's Result, and the
+ * arenas made before are intact. */
+static void kernel_runs_out_first(void)
+{
+    char err[192];
+    reset_kernel();
+    K.limit = 1;
+    static code_arenas m;
+    code_arenas_init(&m, &OPS);
+    mod_slots *one = new_mod();
+    CHECK(install(&m, one, 0, (int)CODE_ARENA_SLOTS, 0x44) == 0);
+    uintptr_t rx = 0;
+    void *rw = NULL;
+    CHECK(code_arena_alloc(&m, target(0), 0, &rx, &rw, err, sizeof err) == CODE_ARENA_E_KERNEL);
+    CHECK(strstr(err, "svcCreateCodeMemory") != NULL && strstr(err, "0xce01") != NULL);
+    CHECK(intact(one) && K.live_objects == 1 && K.live_reservations == 2 && K.live_backings == 1);
+    printf("kernel       a kernel with room for one object: the 1025th hook fails with 0xce01, the 1024 before "
+           "stay intact\n");
+    free_everything(&m);
+    free(one);
 }
 
 #ifdef CODE_ARENA_TEST_FUNCHOOK
 void run_funchook_part(void);
 #endif
 
+/* V1-rc9: the release at exit, with hooks still installed (a mod turned off keeps its slots until the game
+ * ends): every arena's views unmapped and its CodeMemory object closed, so its backing is ordinary heap again
+ * when the program returns to hbloader. */
+static void release_at_exit(void)
+{
+    reset_kernel();
+    static code_arenas m;
+    code_arenas_init(&m, &OPS);
+    mod_slots *twilit = new_mod(), *albt = new_mod();
+    CHECK(install(&m, twilit, 0, 343, 0x71) == 0);
+    CHECK(install(&m, albt, 400, 900, 0xAB) == 0);
+    const uint32_t objects = K.live_objects;
+    CHECK(objects == 2);
+    uint32_t released = 0, last = 0;
+    CHECK(code_arenas_release(&m, &released, &last) == 0);
+    CHECK(released == objects && K.live_objects == 0 && (uint32_t)K.unmap_rx_calls == objects && last == 0);
+    CHECK(m.count == 0 && rw_views_mapped() == 0);
+    /* nothing left to do a second time */
+    released = 0;
+    CHECK(code_arenas_release(&m, &released, &last) == 0 && released == 0);
+    printf("exit release %u CodeMemory object(s) unmapped and closed with 1243 hooks still installed\n", objects);
+    free(twilit), free(albt);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
     control_kernel_limit();
-    mods_together();
+    catalogue_together();
+    packing();
     failures();
     reuse_order();
     capacity_exhaustion();
+    kernel_runs_out_first();
+    release_at_exit();
 #ifdef CODE_ARENA_TEST_FUNCHOOK
     run_funchook_part();
 #endif

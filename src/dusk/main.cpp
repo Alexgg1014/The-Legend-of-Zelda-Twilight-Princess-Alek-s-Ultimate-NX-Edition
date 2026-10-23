@@ -210,11 +210,36 @@ int RunWindowsGuiEntryPoint() {
     return DuskMain(argc, argv.data());
 }
 #else
+#ifdef __SWITCH__
+extern "C" void aleks2_exit_guard(void);
+extern "C" void aleks2_apply_pending_update(void);
+extern "C" void aleks2_exit_trace(const char* line);
+extern "C" size_t aleks2_close_mod_sockets(void);
+extern "C" void aleks2_end_process_on_quit(void);
+#endif
 int DuskMain(int argc, char* argv[]) {
     const int result = game_main(argc, argv);
+#ifdef __SWITCH__
+    aleks2_exit_trace("game_main returned");  // V1-rc10: the exit trace (switch_startup.cpp)
+    {
+        // V1-rc11: no socket a mod opened is left for socketExit (a static destructor) to find.
+        char line[96];
+        std::snprintf(line, sizeof line, "closed %zu socket(s) Linux mods still held",
+            aleks2_close_mod_sockets());
+        aleks2_exit_trace(line);
+    }
+#endif
+#ifdef __SWITCH__
+    aleks2_apply_pending_update();  // V1-rc8: a downloaded and checked update replaces this NRO now
+#endif
     if (dusk::RestartRequested && RestartProcess(argc, argv)) {
         return 0;
     }
+#ifdef __SWITCH__
+    aleks2_exit_guard();  // V1-rc8: threads left behind would crash hbloader
+    aleks2_exit_trace("main returning");
+    aleks2_end_process_on_quit();  // V1-rc12: a plain quit ends here (switch_startup.cpp)
+#endif
     return result;
 }
 #endif

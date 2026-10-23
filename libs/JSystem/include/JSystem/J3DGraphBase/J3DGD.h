@@ -8,6 +8,26 @@ inline void J3DGDWrite_u8(u8 data) {
     __GDWrite(data);
 }
 
+#if TARGET_PC
+// aleks2 (V1-rc12): the same bytes, with the display-list pointer loaded and stored once per value. __GDWrite's
+// u8 store may alias __GDCurrentDL->ptr, so byte by byte the compiler reloads and stores it after every byte; the
+// console profile had J3DGDSetLight* (material light state, every frame) at ~3.7 % of the game thread.
+inline void J3DGDWrite_u16(u16 data) {
+    u8* p = __GDCurrentDL->ptr;
+    p[0] = (u8)(data >> 8);
+    p[1] = (u8)(data & 0xFF);
+    __GDCurrentDL->ptr = p + 2;
+}
+
+inline void J3DGDWrite_u32(u32 data) {
+    u8* p = __GDCurrentDL->ptr;
+    p[0] = (u8)((data >> 24) & 0xFF);
+    p[1] = (u8)((data >> 16) & 0xFF);
+    p[2] = (u8)((data >> 8) & 0xFF);
+    p[3] = (u8)(data & 0xFF);
+    __GDCurrentDL->ptr = p + 4;
+}
+#else
 inline void J3DGDWrite_u16(u16 data) {
     __GDWrite((u8)((data >> 8)));
     __GDWrite((u8)((data >> 0) & 0xFF));
@@ -19,6 +39,7 @@ inline void J3DGDWrite_u32(u32 data) {
     __GDWrite((u8)((data >> 8) & 0xFF));
     __GDWrite((u8)((data >> 0) & 0xFF));
 }
+#endif
 
 inline void J3DGDWrite_f32(f32 data) {
     union {

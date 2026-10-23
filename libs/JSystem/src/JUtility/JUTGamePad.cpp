@@ -271,7 +271,7 @@ void JUTGamePad::update() {
 
 DUSK_GAME_DATA JSUList<JUTGamePadLongPress> JUTGamePadLongPress::sPatternList(false);
 
-void JUTGamePad::checkResetSwitch() {
+DUSK_NOINLINE void JUTGamePad::checkResetSwitch() {
     if (!JUTGamePad::C3ButtonReset::sResetOccurred) {
         int unused;
         if (OSGetResetSwitchState()) {

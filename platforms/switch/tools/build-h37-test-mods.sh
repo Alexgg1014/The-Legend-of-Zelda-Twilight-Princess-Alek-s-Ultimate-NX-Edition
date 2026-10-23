@@ -52,6 +52,15 @@ unsafe_linux_randomizer=0
 [ "${H37_ALLOW_UNSAFE_LINUX_RANDOMIZER_FOR_HOST_TESTS:-}" = 1 ] && unsafe_linux_randomizer=1
 need_linux=0
 for m in loader_lab template_mod rollandsprint cosmetics luau_runtime; do wanted "$m" && need_linux=1; done
+# DM2-a: the hook_stress lab mod, only when named in H37_TEST_MODS (never part of the default set).
+stress_wanted=0
+[[ " ${H37_TEST_MODS:-} " == *" hook_stress "* ]] && stress_wanted=1 && need_linux=1
+# DM2-b: the iostream_lab lab mod, the same way.
+iolab_wanted=0
+[[ " ${H37_TEST_MODS:-} " == *" iostream_lab "* ]] && iolab_wanted=1 && need_linux=1
+# Cross-save: the Cloud Save mod (mods/cross_save), the same way.
+crosssave_wanted=0
+[[ " ${H37_TEST_MODS:-} " == *" cross_save "* ]] && crosssave_wanted=1 && need_linux=1
 rando_mode=none  # none | switch | linux-host-test
 if wanted randomizer; then
   if [ -n "$devkit_bin" ]; then
@@ -168,6 +177,9 @@ build() {  # build NAME SOURCE_DIR [cmake args...]
 }
 
 build loader_lab "$root/platforms/switch/test-mods/loader_lab" "-DDUSK_DIR=$root"
+[ "$stress_wanted" = 1 ] && build hook_stress "$root/platforms/switch/test-mods/hook_stress" "-DDUSK_DIR=$root"
+[ "$iolab_wanted" = 1 ] && build iostream_lab "$root/platforms/switch/test-mods/iostream_lab" "-DDUSK_DIR=$root"
+[ "$crosssave_wanted" = 1 ] && build cross_save "$root/mods/cross_save" "-DDUSK_DIR=$root"
 build template_mod "$root/mods/template_mod"
 build rollandsprint "$root/mods/rollandsprint"
 build cosmetics "${COSMETICS_SRC:-$root/mods/cosmetics}" "-DDUSKLIGHT_DIR=$root"

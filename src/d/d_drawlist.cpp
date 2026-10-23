@@ -1630,6 +1630,11 @@ void dDlst_shadowControl_c::imageDraw(Mtx param_0) {
     GXSetDither(GX_TRUE);
 }
 
+#if TARGET_PC
+// aleks2 (V1-rc12): perf-lab dbg_no_real_shadow -- the black-ground bisect skips the shadow-volume pass.
+bool g_duskDbgNoRealShadow = false;
+#endif
+
 void dDlst_shadowControl_c::draw(Mtx param_0) {
     ZoneScoped;
     static GXTevColorChan l_tevColorChan[4] = {
@@ -1667,6 +1672,11 @@ void dDlst_shadowControl_c::draw(Mtx param_0) {
     GXSetTevColor(GX_TEVREG2, g_whiteColor);
 
     dDlst_shadowReal_c* real = field_0x4;
+#if TARGET_PC
+    if (g_duskDbgNoRealShadow) {
+        real = NULL;
+    }
+#endif
     for (int i2 = 0, i3 = 0; real != NULL; real = real->getZsortNext()) {
         if (real->isUse()) {
             if (i2 == 0) {
@@ -1979,7 +1989,7 @@ void dDlst_list_c::entryZSortXluDrawList(J3DDrawBuffer* param_0, J3DPacket* para
 }
 
 
-void dDlst_list_c::drawOpaDrawList(J3DDrawBuffer* pDrawBuf) {
+DUSK_NOINLINE void dDlst_list_c::drawOpaDrawList(J3DDrawBuffer* pDrawBuf) {
     J3DShape::resetVcdVatCache();
     j3dSys.setDrawModeOpaTexEdge();
     pDrawBuf->draw();

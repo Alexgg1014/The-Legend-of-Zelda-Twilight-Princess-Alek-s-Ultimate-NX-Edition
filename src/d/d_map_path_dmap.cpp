@@ -800,8 +800,21 @@ int renderingDAmap_c::getNextDrawLayerNo(int param_0) {
     return layerNo;
 }
 
+#if TARGET_PC
+bool renderingPlusDoorAndCursor_c::s_panBasePass = false;
+
 void renderingPlusDoorAndCursor_c::afterDrawPath() {
     renderingPlusDoor_c::afterDrawPath();
+    if (!s_panBasePass) {
+        drawPanDynamic();
+    }
+}
+
+void renderingPlusDoorAndCursor_c::drawPanDynamic() {
+#else
+void renderingPlusDoorAndCursor_c::afterDrawPath() {
+    renderingPlusDoor_c::afterDrawPath();
+#endif
     bool check_floor = isCheckFloor();
 
     if (isRendCursor() && isRendRestart()) {

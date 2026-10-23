@@ -1083,7 +1083,7 @@ int daNpc_Kn_c::step(s16 i_angle, int i_faceMotion, int i_motion, int i_turnCoun
     return mStepMode > 1;
 }
 
-int daNpc_Kn_c::initTalk(int i_flowID, fopAc_ac_c** i_partnerList_p) {
+DUSK_NOINLINE int daNpc_Kn_c::initTalk(int i_flowID, fopAc_ac_c** i_partnerList_p) {
     mFlow.init(this, i_flowID, 0, i_partnerList_p);
     speedF = 0.0f;
     speed.setall(0.0f);

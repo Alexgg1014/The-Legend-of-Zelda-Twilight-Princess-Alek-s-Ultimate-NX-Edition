@@ -6,9 +6,13 @@
 #include "dusk/diagnostic_run.hpp"
 #include "dusk/dualscreen.h"
 #include "dusk/dusk.h"
+#include "dusk/drs_stress.hpp"
 #include "dusk/dynres.hpp"
+#include "dusk/frame_telemetry.hpp"
+#include "dusk/perf_report.hpp"
 #include "dusk/fifo_report.hpp"
 #include "dusk/game_clock.h"
+#include "dusk/gpu_boost.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/mod_loader.hpp"
@@ -20,7 +24,12 @@
 #include "dusk/session_log.hpp"
 #include "dusk/settings.h"
 #include "dusk/shader_prep.hpp"
+#include "dusk/shader_warmup_runtime.hpp"
+#include "dusk/map_loader_definitions.h"
+
+#include <aurora/shader_cache.h>
 #include "dusk/switch_display.hpp"
+#include "dusk/sampler.hpp"
 #include "dusk/ui/document.hpp"
 #include "dusk/ui/modal.hpp"
 #include "dusk/ui/ui.hpp"
@@ -40,6 +49,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <string>
@@ -220,6 +231,9 @@ struct Run {
     bool tour = false;
     std::size_t tourIndex = 0;
     perf_tour::TourReport tourReport;
+    // V1-rc9: tour_matrix -- the perf-lab options before the tour changed them, put back at its end.
+    perf::LabOptions tourLabSaved;
+    bool tourLabSet = false;
     clock::time_point tourZoneStart;
     unsigned tourCreatedAtZoneStart = 0;
     fifo_report::Snapshot tourFifoAtStart{};
@@ -235,6 +249,29 @@ struct Run {
 
 Run g_run;
 std::string g_status;
+
+// V1-c1: frame telemetry (frame_telemetry.hpp) for the window being measured.
+void telemetry_begin() {
+    frame_telemetry::want_gpu_timing(frame_telemetry::kBenchmark, true);
+    frame_telemetry::capture_begin();
+}
+
+perf::GpuInfo telemetry_gpu_info() {
+    const auto g = frame_telemetry::gpu_status();
+    return {.supported = g.supported, .enabled = g.enabled, .calibrated = g.calibrated, .periodNs = g.periodNs,
+        .skipped = g.skipped};
+}
+
+// The per-frame CSV next to a report; failures only go to the log (the JSON is what counts).
+void write_frames_csv(const std::string& jsonName, const std::string& content) {
+    const auto csvName = perf::csv_name_for(jsonName);
+    const WriteResult written = write_report_atomic(ConfigPath / "benchmarks", csvName, content);
+    if (written.ok) {
+        Log.info("frames written: {}", written.path.generic_string());
+    } else {
+        Log.warn("frames CSV not written: {}", written.error);
+    }
+}
 std::string g_lastSummary;
 // Read from the memory-card thread, which is why it is atomic.
 std::atomic<bool> g_savesBlocked{false};
@@ -330,6 +367,7 @@ void begin_measuring() {
         r.profileFromMatrix = false;
     }
     profiler::captureBegin();
+    telemetry_begin();
     set_phase(Phase::Measuring);
     Log.info("measuring {} s ({} {}x{}, queued={} created={})", kMeasureSeconds, mode_name(), r.renderW,
         r.renderH, r.queuedAtWindowStart, r.createdAtWindowStart);
@@ -407,6 +445,16 @@ void describe_settings(JsonWriter& j) {
     j.boolean("vsync", s.video.enableVsync.getValue());
     j.boolean("lock_aspect_ratio_saved", s.video.lockAspectRatio.getValue());
     j.boolean("aspect_lock_effective", dualscreen::effectiveAspectLock());
+    // V1-rc16: presets never touch the clocks: the opt-in GPU boost, whether it is in force, and the clocks read back.
+    j.boolean("gpu_boost", s.game.gpuBoost.getValue());
+    j.boolean("gpu_boost_active", gpu_boost::active());
+    {
+        unsigned cpu = 0, gpu = 0, emc = 0;
+        gpu_boost::clocks_mhz(cpu, gpu, emc);
+        j.integer("clock_cpu_mhz", static_cast<int>(cpu));
+        j.integer("clock_gpu_mhz", static_cast<int>(gpu));
+        j.integer("clock_emc_mhz", static_cast<int>(emc));
+    }
     j.end_object();
 }
 
@@ -596,6 +644,14 @@ std::string build_report(const FrameSummary& frames, const std::string& stamp, s
     // Cadence irregularity (benchmark_report.hpp): 0 for a steady 30 or 60.
     j.integer("judder_pairs", static_cast<std::int64_t>(frames.judderPairs));
     j.num("judder_pct", frames.judderPct, 2);
+    // V1-rc8: missed frames are over {kMissedFrameMs} (was 33.3: a perfect 30 fps frame counted); the cadence.
+    j.num("missed_frame_threshold_ms", benchmark::kMissedFrameMs, 2);
+    j.begin_object("vblank_cadence");
+    j.integer("1v", static_cast<std::int64_t>(frames.vblanks[1]));
+    j.integer("2v", static_cast<std::int64_t>(frames.vblanks[2]));
+    j.integer("3v", static_cast<std::int64_t>(frames.vblanks[3]));
+    j.integer("4v_plus", static_cast<std::int64_t>(frames.vblanks[4]));
+    j.end_object();
     j.end_object();
 
     auto zones = capture_zones();
@@ -668,10 +724,32 @@ std::string build_report(const FrameSummary& frames, const std::string& stamp, s
         fifo_report::write_derived(j, zone_times(zones, profiled), w);
     }
 
-    j.begin_object("gpu");
-    j.boolean("available", false);
-    j.str("reason", "no timestamp-query path is wired into the frame loop; Aurora only feeds GPU zones to Tracy");
-    j.end_object();
+    // V1-c1: GPU time (timestamp queries), who explains the missed frames, the CPU sides.
+    perf::write_telemetry(j, frame_telemetry::capture(), frame_telemetry::budget_ms(), telemetry_gpu_info());
+    {
+        const auto drs = dynres::status();
+        j.begin_object("drs_v1c1");
+        j.str("mode", drs.enabled ? "auto_gpu_only" : "off");
+        j.str("state_at_end", drs.state);
+        j.integer("percent_at_end", drs.percent);
+        j.integer("rows_at_end", drs.rows);
+        j.integer("ceiling_rows", drs.ceilingRows);
+        j.str("lab_options", perf::describe(frame_telemetry::lab()));
+        AuroraRenderTargetStats rt{};
+        aurora_render_target_stats(&rt);
+        j.integer("render_target_sets_created_since_launch", static_cast<std::int64_t>(rt.allocations));
+        j.integer("render_target_pool_hits_since_launch", static_cast<std::int64_t>(rt.pool_hits));
+        j.integer("render_target_pool_sets", rt.pool_sets);
+        j.end_object();
+    }
+    {
+        const auto mem = frame_telemetry::memory();
+        j.begin_object("memory_kb");
+        j.integer("used", static_cast<std::int64_t>(mem.used / 1024));
+        j.integer("total", static_cast<std::int64_t>(mem.total / 1024));
+        j.integer("heap_in_use", static_cast<std::int64_t>(mem.heapInUse / 1024));
+        j.end_object();
+    }
 
     const double sampled = static_cast<double>(std::max<std::uint64_t>(r.sampledFrames, 1));
     j.begin_object("gfx");
@@ -746,6 +824,24 @@ std::string summary_lines(const FrameSummary& f, const char* cache, const std::s
     out += fmt::format("{:.1f} FPS average, {:.1f} FPS 1% low ({} frames)\n", f.avgFps, f.low1PctFps, f.frames);
     out += fmt::format("Frame time: median {:.1f} ms, p95 {:.1f} ms, p99 {:.1f} ms\n", f.medianMs, f.p95Ms, f.p99Ms);
     out += fmt::format("Over 33.3 ms: {:.1f}%   Over 50 ms: {:.1f}%\n", f.pctOver33, f.pctOver50);
+    {
+        // V1-c1: GPU time and who explains the missed frames (perf_report.hpp).
+        const auto& samples = frame_telemetry::capture();
+        const auto w = perf::summarize(samples, frame_telemetry::budget_ms());
+        std::vector<float> gpu;
+        for (const auto& s : samples) {
+            if (s.gpuMs >= 0.f) {
+                gpu.push_back(s.gpuMs);
+            }
+        }
+        out += gpu.empty() ? fmt::format("Missed {:.1f}% (limit: {}), GPU time not available\n", w.missedPct(),
+                                 perf::verdict(w))
+                           : fmt::format("Missed {:.1f}% (limit: {}), GPU p50 {:.1f} ms p99 {:.1f} ms\n",
+                                 w.missedPct(), perf::verdict(w), perf::percentile(gpu, 50), perf::percentile(gpu, 99));
+        const auto drs = dynres::status();
+        out += fmt::format("Dynamic resolution: {}{}\n", drs.enabled ? "Auto - " : "Off",
+            drs.enabled ? drs.state : std::string{});
+    }
     out += fmt::format("Pipelines: {}{}\n", cache,
         r.queueTimedOut ? " (the queue had not drained when the measurement started)" : "");
     if (r.uiVisibleFrames > 0) {
@@ -831,6 +927,8 @@ void finish_tour_report();
 void end_run() {
     // Belt and braces: every way out goes through begin_restore, which already did this.
     profile::clearOverrides();
+    frame_telemetry::capture_end();
+    frame_telemetry::want_gpu_timing(frame_telemetry::kBenchmark, false);
     diagnostic_run::end({
         .reenableGameSaves =
             [] {
@@ -904,6 +1002,7 @@ void begin_restore(Outcome outcome, std::string detail) {
 void finish_measurement() {
     auto& r = g_run;
     profiler::captureEnd();
+    frame_telemetry::capture_end();
     const FrameSummary frames = summarize_frames(profiler::captureFrameIntervalsMs());
 
     // Wall clock for the file name and the report; steady_clock has no epoch.
@@ -915,6 +1014,11 @@ void finish_measurement() {
     const std::string json = build_report(frames, stamp, unixNow, fileName);
 
     const WriteResult written = write_report_atomic(ConfigPath / "benchmarks", fileName, json);
+    {
+        std::string csv = perf::csv_header();
+        perf::append_csv(csv, frame_telemetry::capture(), frame_telemetry::budget_ms());
+        write_frames_csv(fileName, csv);
+    }
 
     const auto* stats = aurora_get_stats();
     const unsigned createdNow = stats != nullptr ? stats->createdPipelines : 0;
@@ -997,6 +1101,61 @@ void cancel_now(const std::string& reason, Outcome outcome) {
 // back there, and it measures no frame rate.
 
 const shader_prep::Timing kPrepTiming{};
+// V1-c4: the harvest tour uses a shorter timing (hundreds of rooms).
+const shader_prep::Timing& prep_timing() {
+    static const shader_prep::Timing harvest = shader_prep::harvest_timing();
+    return shader_prep::harvest_tour() ? harvest : kPrepTiming;
+}
+
+// V1-c4: the harvest tour (shader_tour=all). Every room of the warp table, first entrance
+// point, except the title/file-select stages and boss arenas (a warp there starts the
+// fight with the controls locked). It can take hours: progress is kept in
+// <data>/shader-tour/harvest-progress.txt, so starting it again continues where it stopped,
+// and the recipe list is exported every few rooms to shader-tour/harvest_pipeline_cache.db.
+std::vector<shader_prep::Zone> harvest_zone_list() {
+    std::vector<shader_prep::Zone> out;
+    for (const auto& region : gameRegions) {
+        for (const auto& map : region.maps) {
+            if (map.mapFile == nullptr || std::strcmp(map.mapFile, "F_SP102") == 0 ||
+                std::strcmp(map.mapFile, "F_SP112") == 0 || std::strstr(map.mapName, "Arena") != nullptr)
+            {
+                continue;
+            }
+            for (const auto& room : map.mapRooms) {
+                const int point = room.roomPoints.empty() ? 0 : room.roomPoints.front();
+                out.push_back(shader_prep::Zone{map.mapFile, room.roomNo, point, -1, map.mapName, region.regionName});
+            }
+        }
+    }
+    return out;
+}
+
+std::filesystem::path harvest_dir() {
+    return ConfigPath / "shader-tour";
+}
+
+std::size_t harvest_saved_index() {
+    std::ifstream in(harvest_dir() / "harvest-progress.txt");
+    std::size_t index = 0;
+    if (in >> index) {
+        return index;
+    }
+    return 0;
+}
+
+void harvest_save_index(std::size_t index) {
+    std::error_code ec;
+    std::filesystem::create_directory(harvest_dir(), ec);
+    std::ofstream(harvest_dir() / "harvest-progress.txt", std::ios::trunc) << index << "\n";
+}
+
+void harvest_export(const char* why) {
+    std::error_code ec;
+    std::filesystem::create_directory(harvest_dir(), ec);
+    const auto file = harvest_dir() / "harvest_pipeline_cache.db";
+    const auto rows = aurora_export_pipeline_cache(file.string().c_str());
+    Log.info("harvest tour: {} recipes exported to {} ({})", rows, file.generic_string(), why);
+}
 
 unsigned created_pipelines() {
     const auto* stats = aurora_get_stats();
@@ -1026,9 +1185,20 @@ void begin_prep_zone();
 void next_prep_zone() {
     auto& r = g_run;
     ++r.prepIndex;
+    if (shader_prep::harvest_tour()) {
+        harvest_save_index(r.prepIndex);
+        if (r.prepIndex % 10 == 0) {
+            harvest_export("every 10 rooms");
+        }
+    }
     if (r.prepIndex >= shader_prep::zones().size()) {
         r.prepReport.outcome = shader_prep::Outcome::Completed;
         Log.info("prepare shaders: tour finished");
+        if (shader_prep::harvest_tour()) {
+            harvest_export("finished");
+            std::error_code ec;
+            std::filesystem::remove(harvest_dir() / "harvest-progress.txt", ec);
+        }
         begin_restore(Outcome::Completed, {});
         return;
     }
@@ -1081,6 +1251,12 @@ void begin_prep_zone() {
 
 void tick_prep(unsigned queued) {
     auto& r = g_run;
+    if (shader_prep::harvest_tour() && dComIfGs_getLife() < dComIfGs_getMaxLife()) {
+        // Hundreds of rooms with enemies and the controls locked: a game over would stop
+        // the tour (SwitchWakerHD saw the same in its warp sweep). The save state is put
+        // back at the end anyway.
+        dComIfGs_setLife(dComIfGs_getMaxLife());
+    }
     const auto plan = shader_prep::zones();
     const auto& zone = plan[r.prepIndex];
     auto& report = r.prepReport;
@@ -1102,7 +1278,7 @@ void tick_prep(unsigned queued) {
             set_phase(Phase::PrepRender);
             return;
         }
-        if (waited > kPrepTiming.loadTimeoutSeconds) {
+        if (waited > prep_timing().loadTimeoutSeconds) {
             end_prep_zone(shader_prep::ZoneStatus::Failed, shader_prep::ZoneEnd::None, "the zone did not finish loading");
             next_prep_zone();
             return;
@@ -1140,7 +1316,7 @@ void tick_prep(unsigned queued) {
         progress.queueEmptyFor = r.queueWasEmpty ? seconds_since(r.queueEmptySince) : 0.0;
         progress.queued = queued;
         progress.createdInZone = created >= r.prepCreatedAtZoneStart ? created - r.prepCreatedAtZoneStart : 0;
-        const auto end = shader_prep::decide(progress, kPrepTiming);
+        const auto end = shader_prep::decide(progress, prep_timing());
         if (end != shader_prep::ZoneEnd::None) {
             // A cutscene that started on arrival is let finish before warping out.
             if (dComIfGp_event_runCheck()) {
@@ -1148,19 +1324,19 @@ void tick_prep(unsigned queued) {
                     r.prepWaitingForEvent = true;
                     r.prepEventWaitStart = clock::now();
                 }
-                if (seconds_since(r.prepEventWaitStart) < kPrepTiming.eventWaitSeconds) {
+                if (seconds_since(r.prepEventWaitStart) < prep_timing().eventWaitSeconds) {
                     g_status = fmt::format("Preparing shaders - zone {}/{}: {} - waiting for a scene to end",
                         r.prepIndex + 1, plan.size(), zone.name);
                     return;
                 }
                 Log.warn("prepare shaders: an event was still running in {} after {:.0f} s; moving on", zone.stage,
-                    kPrepTiming.eventWaitSeconds);
+                    prep_timing().eventWaitSeconds);
             }
             end_prep_zone(shader_prep::ZoneStatus::Completed, end, {});
             next_prep_zone();
             return;
         }
-        zoneFraction = 0.1 + 0.9 * std::min(1.0, progress.sinceSettled / kPrepTiming.maxZoneSeconds);
+        zoneFraction = 0.1 + 0.9 * std::min(1.0, progress.sinceSettled / prep_timing().maxZoneSeconds);
         detail = fmt::format("{} new, {} queued", progress.createdInZone, queued);
     }
 
@@ -1221,6 +1397,22 @@ void finish_prep_report() {
         shader_prep::outcome_name(report.outcome), plan.size(), report.createdTotal, report.queuedAtStart,
         report.queuedMax, report.queuedAtEnd, report.totalSeconds, report.returned, report.stateRestored,
         report.savesReenabled, report.configSavesDuringRun);
+    if (shader_prep::master_tour()) {
+        // The list this tour leaves in pipeline_cache.db, copied out consistently; turned
+        // into romfs/initial_pipeline_cache.db by platforms/switch/tools/make-shader-seed.py.
+        const auto dir = ConfigPath / "shader-tour";
+        std::error_code ec;
+        std::filesystem::create_directory(dir, ec);
+        const auto file = dir / fmt::format("master_pipeline_cache-{}-{}.db", utc_stamp_for_file(unixNow), build_id());
+        const auto rows = aurora_export_pipeline_cache(file.string().c_str());
+        if (rows >= 0) {
+            Log.info("shader tour: {} recipes exported to {}", rows, file.generic_string());
+            text += fmt::format("Shader Tour list: {} recipes in {}\n", rows, file.generic_string());
+        } else {
+            Log.error("shader tour: export to {} failed", file.generic_string());
+            text += "SHADER TOUR LIST NOT EXPORTED (see the log)\n";
+        }
+    }
     g_lastSummary = text;
     show_summary(report.outcome == shader_prep::Outcome::Completed ? "Shaders prepared" :
                  report.outcome == shader_prep::Outcome::Cancelled ? "Shader preparation cancelled" :
@@ -1291,6 +1483,8 @@ void begin_tour_window() {
     z.measured = true;
     z.interp.stalledAtMeasureStart = game_clock::interpolation_stalled();
     profiler::captureBegin();
+    telemetry_begin();
+    sampler::zone_begin(perf_tour::zones()[r.tourIndex].name);  // V1-rc12: profile_main (off: returns)
     set_phase(Phase::TourMeasuring);
 }
 
@@ -1300,7 +1494,12 @@ void begin_tour_window() {
 void end_tour_window(bool complete) {
     auto& r = g_run;
     auto& z = tour_zone();
+    sampler::zone_end();  // V1-rc12
     profiler::captureEnd();
+    frame_telemetry::capture_end();
+    z.telemetry = frame_telemetry::capture();
+    z.telemetryGpu = telemetry_gpu_info();
+    z.telemetryBudgetMs = frame_telemetry::budget_ms();
     z.measurementComplete = complete;
     z.measureSecondsWall = seconds_since(r.measureStart);
     z.frames = summarize_frames(profiler::captureFrameIntervalsMs());
@@ -1397,6 +1596,17 @@ void begin_tour_zone() {
     r.tourZoneStart = clock::now();
     r.tourCreatedAtZoneStart = created_pipelines();
     r.queueWasEmpty = false;
+    // V1-rc9: the matrix step's values, before the zone (the warm-up lets them settle before the window).
+    if (const auto* s = perf_tour::plan_step(r.tourIndex)) {
+        for (const auto& [key, value] : s->values) {
+            std::string why;
+            if (!frame_telemetry::set_lab_value(key, value, why)) {
+                Log.warn("performance tour: {}={} not applied: {}", key, value, why);
+            }
+        }
+        Log.info("performance tour {}/{}: {} with {}", r.tourIndex + 1, perf_tour::zones().size(), zone.name,
+            s->label);
+    }
     if (prep_stage_settled(zone.stage) && dComIfGp_getStartStageRoomNo() == zone.room) {
         // Already there (the first zone, when the tour starts in it): nothing to load.
         tour_arrive(queued_pipelines());
@@ -1410,6 +1620,11 @@ void begin_tour_zone() {
 
 void tick_tour(unsigned queued) {
     auto& r = g_run;
+    // V1-rc8: enemies attack Link in Hyrule Field while the tour measures: life kept full, as the harvest tour does
+    // (a normal save would die there). The save state is put back at the end anyway.
+    if (dComIfGs_getLife() < dComIfGs_getMaxLife()) {
+        dComIfGs_setLife(dComIfGs_getMaxLife());
+    }
     const auto plan = perf_tour::zones();
     const auto& zone = plan[r.tourIndex];
     auto& z = tour_zone();
@@ -1543,9 +1758,20 @@ void finish_tour_report() {
     report.achievementsSuspendedDuringRun = r.achievements != nullptr && AchievementSystem::get().suspended();
     report.fileName = perf_tour::report_file_name(utc_stamp_for_file(report.startedUnix), build_id());
 
+    if (r.tourLabSet) {
+        frame_telemetry::restore_lab(r.tourLabSaved);  // V1-rc9: the matrix's toggles back as they were
+        r.tourLabSet = false;
+    }
     const auto plan = perf_tour::zones();
     const std::string json = perf_tour::build_report(report, plan);
     const WriteResult written = write_report_atomic(ConfigPath / "benchmarks", report.fileName, json);
+    {
+        std::string csv = perf::csv_header();
+        for (std::size_t i = 0; i < report.zones.size(); ++i) {
+            perf::append_csv(csv, report.zones[i].telemetry, report.zones[i].telemetryBudgetMs, static_cast<int>(i));
+        }
+        write_frames_csv(report.fileName, csv);
+    }
 
     std::string text = perf_tour::summary_text(report, plan);
     text += report.returned ? "You are back where you started.\n" : "Could not return to where you started.\n";
@@ -1595,9 +1821,14 @@ std::string status_text() {
     return g_status;
 }
 
-bool can_start(std::string& whyNot) {
+// What every run needs, measuring or not.
+static bool can_start_common(std::string& whyNot) {
     if (active()) {
         whyNot = "A run is already in progress.";
+        return false;
+    }
+    if (drs_stress::active()) {
+        whyNot = "The DRS stress test is running.";
         return false;
     }
     if (daAlink_getAlinkActorClass() == nullptr) {
@@ -1618,6 +1849,15 @@ bool can_start(std::string& whyNot) {
         return false;
     }
     return true;
+}
+
+// aleks2 (SHADERS-c1): a run that measures does not start while the startup shader pass is
+// still compiling -- that work would be counted as the game's. Prepare Shaders may.
+bool can_start(std::string& whyNot) {
+    if (!can_start_common(whyNot)) {
+        return false;
+    }
+    return !shader_warmup::busy(whyNot);
 }
 
 bool can_start_matrix(std::string& whyNot) {
@@ -1696,13 +1936,17 @@ bool matrix_active() {
 }
 
 bool can_start_prep(std::string& whyNot) {
-    return can_start(whyNot);
+    return can_start_common(whyNot);
 }
 
 bool start_prep(std::string& error) {
     if (!can_start_prep(error)) {
         return false;
     }
+    // The Shader Tour (lab) or the six player zones: fixed for the whole run.
+    shader_prep::use_master_tour(shader_warmup::lab_options().masterTour);
+    shader_prep::use_harvest_zones(shader_warmup::lab_options().harvestTour ? harvest_zone_list()
+                                                                           : std::vector<shader_prep::Zone>{});
     g_run = Run{};
     auto& r = g_run;
     r.prep = true;
@@ -1729,6 +1973,16 @@ bool start_prep(std::string& error) {
     report.queuedMax = report.queuedAtStart;
     report.knownAtStart = r.createdAtRunStart;
     report.zones.assign(shader_prep::zones().size(), shader_prep::ZoneResult{});
+    if (shader_prep::harvest_tour()) {
+        // Continue an interrupted harvest; the rooms already visited are marked as such.
+        const std::size_t resume = std::min(harvest_saved_index(), shader_prep::zones().size() - 1);
+        for (std::size_t i = 0; i < resume; ++i) {
+            report.zones[i].status = shader_prep::ZoneStatus::Skipped;
+            report.zones[i].detail = "visited in an earlier run";
+        }
+        r.prepIndex = resume;
+        Log.info("harvest tour: {} rooms, starting at {}", shader_prep::zones().size(), resume);
+    }
 
     // From here nothing reaches the card and no achievement is evaluated, whatever the game
     // asks for; the config baseline is read once the UI (and its own save) is closed.
@@ -1748,6 +2002,12 @@ bool prep_active() {
 }
 
 bool can_start_tour(std::string& whyNot) {
+    // V1-rc7: not as a wolf. A tour started in wolf form warped a wolf into Link's House and broke the run on the
+    // console; forcing the human form would mean changing the save's transformation state, so the tour asks instead.
+    if (daAlink_getAlinkActorClass() != nullptr && daPy_py_c::checkNowWolf()) {
+        whyNot = "Link is a wolf: change back to human form, then start the tour.";
+        return false;
+    }
     return can_start(whyNot);
 }
 
@@ -1795,6 +2055,8 @@ bool start_tour(std::string& error) {
     report.predictiveInterpolation = s.game.predictiveInterpolation.getValue();
     report.uniformReuseModeAtStart = fifo_report::mode_name(aurora_gx_get_uniform_reuse_mode());
     report.pipelineMemo = s.game.pipelineMemo.getValue();
+    report.minimalHud = s.game.minimalHUD.getValue();
+    report.dualScreen = s.game.dualScreen.getValue();
     report.maxFrameRate = s.video.maxFrameRate.getValue();
     report.vsync = s.video.enableVsync.getValue();
     char backend[64], device[128], driver[256];
@@ -1807,6 +2069,32 @@ bool start_tour(std::string& error) {
     }
     report.pipelinesKnownAtStart = r.createdAtRunStart;
     report.queuedAtStart = queued_pipelines();
+    // V1-rc9: perf-lab.ini tour_matrix: the heavy zones once per value, switched at run time (perf_tour.hpp).
+    perf_tour::set_plan({}, "");
+    if (const auto& spec = frame_telemetry::lab().tourMatrix; !spec.empty()) {
+        std::string notes;
+        auto axes = perf_tour::parse_matrix(spec, notes);
+        std::erase_if(axes, [&](const perf_tour::MatrixAxis& a) {
+            std::string why;
+            const perf::LabOptions keep = frame_telemetry::lab();
+            const bool ok = frame_telemetry::set_lab_value(a.key, a.values[0], why);
+            frame_telemetry::restore_lab(keep);
+            if (!ok) {
+                notes += a.key + " (" + why + "); ";
+            }
+            return !ok;
+        });
+        if (!notes.empty()) {
+            Log.warn("performance tour: tour_matrix leaves out {}", notes);
+        }
+        if (!axes.empty()) {
+            r.tourLabSaved = frame_telemetry::lab();
+            r.tourLabSet = true;
+            perf_tour::set_plan(perf_tour::build_plan(perf_tour::base_zones(), axes), spec);
+            Log.info("performance tour: matrix '{}' read as {}, {} measurements", spec,
+                perf_tour::describe_axes(axes), perf_tour::zones().size());
+        }
+    }
     report.zones.assign(perf_tour::zones().size(), perf_tour::ZoneResult{});
 
     Log.info("performance tour started from {} room {} point {}: {} zones ({} {}, profile {}, interpolation {} {}, "

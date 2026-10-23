@@ -82,14 +82,17 @@ void refresh_entries() {
         const auto* local = ModLoader::instance().find_mod(entry.result.id);
         if (local == nullptr || local->metadata.version != entry.result.installedVersion) {
             reason = "The installed version changed.";
+        } else if (const auto staged = ModLoader::instance().staged_version(entry.result.id); !staged.empty()) {
+            // aleks2 (DM1-c): an update already on the card, waiting for the restart -- not offered again.
+            reason = fmt::format("v{} is installed; restart the game to run it.", staged);
         } else if (!store.fresh) {
-            reason = "Check for updates again.";
+            reason = "Your mods changed; checking again.";
         } else if (entry.result.target) {
             const auto& target = *entry.result.target;
             if (!ModLoader::instance().can_update(*local)) {
                 reason = "Development directories cannot be updated in-game.";
             } else if (const auto blocked = hardware::catalog_block_reason(
-                           entry.result.id, target.version, target.download.sha256);
+                           entry.result.id, target.version, target.download.sha256, local->metadata.version);
                        hardware::kApplies && !blocked.empty())
             {
                 // aleks2 (H38-c6): never replace a Switch build, or install a known-incompatible one.
@@ -103,6 +106,14 @@ void refresh_entries() {
         const bool actionable = entry.result.target && reason.empty() && queueKey.empty();
         if (entry.reason != reason || entry.queueKey != queueKey || entry.actionable != actionable)
         {
+            // aleks2 (DM1-b): record every update decision with the platforms it was made for.
+            Log.info("Update {} {} -> {}: {} (device {}, package platform {}{})", entry.result.id,
+                entry.result.installedVersion,
+                entry.result.target ? entry.result.target->version : std::string{"-"},
+                actionable ? std::string{"available"} : (reason.empty() ? std::string{"queued"} : reason),
+                catalog::device_platform(), store.environment.platform,
+                entry.result.target && entry.result.target->compatibility.containsNativeCode
+                    ? ", native" : "");
             entry.reason = std::move(reason);
             entry.queueKey = std::move(queueKey);
             entry.actionable = actionable;
@@ -325,8 +336,11 @@ void update() {
         auto environment = capture_environment();
         if (!store.initialized || environment != store.environment) {
             store.environment = std::move(environment);
+            // V1-rc9: a check already made goes stale when a mod is turned on or off; make it again by itself
+            // (rc8 console: 9 of 9 mods showed "Check for updates again" after Twilit was turned off).
+            const bool hadResults = store.fresh || !store.entries.empty();
             store.fresh = false;
-            if (store.automatic || store.tracking) {
+            if (store.automatic || store.tracking || hadResults) {
                 store.requested = true;
                 store.checkAt = Clock::now() + std::chrono::seconds{1};
             }

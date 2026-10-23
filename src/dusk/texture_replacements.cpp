@@ -31,4 +31,8 @@ void shutdown() {
     s_directoryGroup.registrations.clear();
 }
 
+std::size_t directory_registrations() {
+    return s_directoryGroup.registrations.size();
+}
+
 }

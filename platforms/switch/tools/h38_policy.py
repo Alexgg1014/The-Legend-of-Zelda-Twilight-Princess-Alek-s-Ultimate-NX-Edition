@@ -43,7 +43,7 @@ HARDWARE_FINDINGS = pathlib.Path("src/dusk/mods/hardware_findings.inc")  # relat
 HARDWARE_STATUSES = {"Tested": "tested", "Unverified": "unverified", "Inactive": "inactive", "Incompatible": "incompatible"}
 UNVERIFIED_REASON = "Not shown to work on the console for this build yet."
 _FINDING = re.compile(r'^DUSK_MOD_HARDWARE\("([^"\\]+)", "([^"\\]+)", "([0-9a-f]{64}|)", (\w+), "([^"\\]*)"\)$')
-_VARIANT = re.compile(r'^DUSK_MOD_SWITCH_VARIANT\("([^"\\]+)", "([^"\\]*)"\)$')
+_VARIANT = re.compile(r'^DUSK_MOD_SWITCH_VARIANT\("([^"\\]+)", "([^"\\]+)", "([^"\\]*)"\)$')
 
 
 def hardware_findings(path) -> dict:
@@ -61,7 +61,7 @@ def hardware_findings(path) -> dict:
             continue
         m = _VARIANT.match(line)
         if m:
-            variants[m.group(1)] = m.group(2)
+            variants[m.group(1)] = m.group(3)  # V1-rc5: (id, bundled version, note); the gate reads the note
             continue
         raise ValueError(f"{path}:{number}: not a DUSK_MOD_HARDWARE/DUSK_MOD_SWITCH_VARIANT entry this reader knows")
     return {"findings": findings, "switch_variants": variants}
@@ -157,10 +157,10 @@ def combined_capacity(pages_by_mod: dict) -> dict:
     out = {"mods": dict(sorted(pages_by_mod.items())), "pages": cap["pages"], "arena_objects": cap["arena_objects"],
            "arena_table": package_audit.CODE_ARENA_MAX, "within_planned_budget": cap["within_planned_budget"],
            "within_arena_table": cap["within_arena_table"], "problems": [], "notes": []}
-    table_pages = package_audit.CODE_ARENA_MAX * package_audit.CODE_ARENA_PAGES
+    table_pages = package_audit.CODE_ARENA_MAX * package_audit.HOOKS_PER_ARENA
     out["table_pages"] = table_pages
     out["remaining_pages"] = table_pages - cap["pages"]
-    if cap["within_arena_table"] and out["remaining_pages"] < package_audit.CODE_ARENA_PAGES:
+    if cap["within_arena_table"] and out["remaining_pages"] < package_audit.HOOKS_PER_ARENA:
         out["notes"].append(
             f"{cap['pages']} of {table_pages} hook pages in use: only {out['remaining_pages']} remain, so another "
             "package with hooks may not fit next to all of these")

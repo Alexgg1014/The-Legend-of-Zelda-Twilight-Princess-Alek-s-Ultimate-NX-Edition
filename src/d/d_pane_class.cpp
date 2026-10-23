@@ -241,7 +241,7 @@ bool J2DWindow::setBlack(JUtility::TColor black) {
     return true;
 }
 
-void CPaneMgr::setBlackWhite(JUtility::TColor black, JUtility::TColor white) {
+DUSK_NOINLINE void CPaneMgr::setBlackWhite(JUtility::TColor black, JUtility::TColor white) {
     switch (mPane->getKind()) {
     case 'WIN1':
     case 'WIN2':

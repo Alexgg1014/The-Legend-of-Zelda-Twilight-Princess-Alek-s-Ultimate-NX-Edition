@@ -444,7 +444,7 @@ void daE_ZS_c::cc_set() {
     }
 }
 
-int daE_ZS_c::execute() {
+DUSK_NOINLINE int daE_ZS_c::execute() {
     if (field_0x670 != 0) {
         --field_0x670;
     }

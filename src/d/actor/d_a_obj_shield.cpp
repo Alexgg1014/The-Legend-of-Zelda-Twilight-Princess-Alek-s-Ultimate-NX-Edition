@@ -106,7 +106,7 @@ int daItemShield_c::__CreateHeap() {
     return 1;
 }
 
-int daItemShield_c::create() {
+DUSK_NOINLINE int daItemShield_c::create() {
     fopAcM_ct(this, daItemShield_c);
     m_itemNo = dItemNo_WOOD_SHIELD_e;
     DUSK_ITEM_CHECK_PREVIEW("ordon_shield", m_itemNo, this);

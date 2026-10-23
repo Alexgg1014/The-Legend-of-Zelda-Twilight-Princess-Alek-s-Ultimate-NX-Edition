@@ -91,7 +91,7 @@ static u8 hio_set;
 
 static daE_MM_HIO_c l_HIO;
 
-static void damage_checkMetOn(e_mm_class* i_this) {
+static DUSK_NOINLINE void damage_checkMetOn(e_mm_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
 
     if (actor->health <= 0 || i_this->action == ACTION_DAMAGE) {
@@ -161,7 +161,7 @@ static void damage_checkMetOn(e_mm_class* i_this) {
     }
 }
 
-static void damage_check(e_mm_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_mm_class* i_this) {
     fopAc_ac_c* actor = &i_this->enemy;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
 

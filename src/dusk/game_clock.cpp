@@ -6,6 +6,9 @@
 #include "dusk/interp_frames.hpp"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
+#ifdef __SWITCH__
+#include "dusk/frame_telemetry.hpp"  // V1-rc12: interp_floor_fps
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -190,19 +193,50 @@ const FrameTiming& advance_impl() {
     {
         s_governor.disable();
     } else if (governorSample) {
+#ifdef __SWITCH__
+        // V1-rc12: Capped at 60 on the 60 Hz panel: interpolate only where 60 is within reach (interp_floor_fps).
+        // V1-rc16: the floor is off by default, so Capped 60 gives up only where Unlimited does (worse than 30).
+        {
+            const unsigned floorFps = dusk::frame_telemetry::lab().interpFloorFps;
+            const bool capped60 = getSettings().game.enableFrameInterpolation.getValue() == FrameInterpMode::Capped &&
+                                  getSettings().video.maxFrameRate.getValue() >= 55.0;
+            if (floorFps != 0 && capped60) {
+                s_governor.set_thresholds(1.0f / static_cast<float>(floorFps), 0.015f);
+                // V1-rc12: one GPU frame has to fit in the floor's interval, with a 10 % margin (interp_governor.hpp).
+                s_governor.set_gpu_gate(0.9f / static_cast<float>(floorFps));
+                // post-rc12: a sustained miss to stall, a quick first retry, back-off in a scene that keeps failing.
+                if (s_governor.pacing().enterDwellFrames != dusk::governor::kCapped60Pacing.enterDwellFrames) {
+                    s_governor.set_pacing(dusk::governor::kCapped60Pacing);
+                }
+            } else {
+                s_governor.set_thresholds(dusk::governor::kGiveUpSeconds, dusk::governor::kResumeSeconds);
+                s_governor.set_gpu_gate(0.f);
+                if (s_governor.pacing().enterDwellFrames != dusk::governor::Pacing{}.enterDwellFrames) {
+                    s_governor.set_pacing(dusk::governor::Pacing{});
+                }
+            }
+        }
+#endif
         const double nowSeconds =
             std::chrono::duration<double>(nativeNow.time_since_epoch()).count();
         const float waitSeconds = static_cast<float>(waitNs) * 1e-9f;
-        const auto event = s_governor.sample(nowSeconds, gapSeconds, waitSeconds);
+        float gpuSeconds = -1.f;
+#ifdef __SWITCH__
+        // V1-rc12: the last frame's GPU time (deko3d's timestamps; Dawn's when GPU timing is on), for the gpu gate.
+        if (const float gpuMs = dusk::frame_telemetry::last().gpuMs; gpuMs >= 0.f) {
+            gpuSeconds = gpuMs * 1e-3f;
+        }
+#endif
+        const auto event = s_governor.sample(nowSeconds, gapSeconds, waitSeconds, gpuSeconds);
         if (event != dusk::governor::Event::None) {
             const auto& st = s_governor.stats();
             DuskLog.info(
-                "interp: {} (quality={} work={:.1f} ms gap={:.1f} ms cooldown={:.0f} s enters={} exits={} "
-                "failures={})",
+                "interp: {} (quality={} work={:.1f} ms gap={:.1f} ms gpu={:.1f} ms cooldown={:.0f} s enters={} "
+                "exits={} failures={} gpu_blocked={})",
                 event == dusk::governor::Event::Entered ? "stalled" : "resumed",
                 getSettings().game.interpolationQuality.getValue() == InterpQuality::Fancy ? "Fancy" : "Fast",
-                st.lastWorkSeconds * 1000.f, st.lastGapSeconds * 1000.f, st.cooldownSeconds, st.enters,
-                st.exits, st.failures);
+                st.lastWorkSeconds * 1000.f, st.lastGapSeconds * 1000.f, st.lastGpuSeconds * 1000.f,
+                st.cooldownSeconds, st.enters, st.exits, st.failures, st.gpuBlockedFrames);
         }
     }
     const bool interpolating = interpolationWanted && !s_governor.stalled();

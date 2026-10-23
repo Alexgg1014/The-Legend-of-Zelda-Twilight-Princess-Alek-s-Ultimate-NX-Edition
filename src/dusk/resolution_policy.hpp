@@ -38,6 +38,10 @@ inline constexpr int kCarouselValues[] = {0, ladder::kFirstExact + 0, ladder::kF
                                           ladder::kFirstExact + 2, ladder::kFirstExact + 3};
 inline constexpr int kCarouselCount = static_cast<int>(sizeof(kCarouselValues) / sizeof(kCarouselValues[0]));
 
+// post-rc12: whether the renderer in use is deko3d (switch_display.cpp sets it every frame from aurora_get_backend()).
+// The default of policy_rows/resolve below, so every caller follows the running backend; the host tests pass it.
+inline bool g_deko3dRenderer = false;
+
 constexpr int sanitize_policy(int policy) {
     return (policy >= kPolicyLegacy && policy <= kPolicyPerformance) ? policy : kPolicyLegacy;
 }
@@ -47,11 +51,16 @@ constexpr int max_rows(Mode mode) {
 }
 
 // Rows Auto stands for. Legacy is the pre-H33 behavior.
-constexpr int policy_rows(int policy, Mode mode) {
+// post-rc12: `deko3d` -- the renderer is deko3d. Balanced in handheld is then 720 rows: the rc12 tour (Quality, 720
+// rows handheld, deko3d) measured a GPU frame of 17.1-19.0 ms p50 and 20.5 ms p99 with heavier effects than Balanced's
+// (shadows x4, DoF Dusk), so one interpolated frame fits under the Capped 60 floor (45 FPS, 22 ms). With Dawn/NVK there
+// is no such measurement and its render worker costs 3-5x as much per draw: 540 as before. Flip and docked unchanged.
+constexpr int policy_rows(int policy, Mode mode, bool deko3d = g_deko3dRenderer) {
     switch (sanitize_policy(policy)) {
     case kPolicyQuality:
         return mode == Mode::Docked ? 900 : (mode == Mode::Flip ? 540 : 720);
     case kPolicyBalanced:
+        return mode == Mode::Docked ? 720 : (mode == Mode::Handheld && deko3d ? 720 : 540);
     case kPolicyPerformance:
         return mode == Mode::Docked ? 720 : 540;
     default:
@@ -102,11 +111,11 @@ struct Resolved {
     bool repaired; // the stored value was corrupt or unsafe and was treated as Auto
 };
 
-constexpr Resolved resolve(int stored, int policy, Mode mode) {
+constexpr Resolved resolve(int stored, int policy, Mode mode, bool deko3d = g_deko3dRenderer) {
     const StoredClass cls = classify(stored);
     const int cap = max_rows(mode);
     if (cls == StoredClass::Auto || cls == StoredClass::Corrupt || cls == StoredClass::UnsafeSwitch) {
-        int rows = policy_rows(policy, mode);
+        int rows = policy_rows(policy, mode, deko3d);
         if (rows > cap) {
             rows = cap;
         }

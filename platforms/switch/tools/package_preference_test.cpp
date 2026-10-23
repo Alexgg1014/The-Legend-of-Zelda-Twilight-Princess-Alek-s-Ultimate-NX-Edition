@@ -221,8 +221,7 @@ void installs() {
     // 5. Linux over a Switch copy is refused, and says so
     CHECK(refuses_non_switch_update(kLinux, bundledSwitch, true));
     CHECK(refuses_non_switch_update(kOther, bundledSwitch, true));
-    CHECK(k_nonSwitchUpdateMessage ==
-          "This update has no switch-arm64 library; the compatible Switch version was kept.");
+    CHECK(k_nonSwitchUpdateMessage.starts_with("A Switch build of this mod at least as new is installed"));
     // a Switch update, or a package with both libraries, goes in
     CHECK(!refuses_non_switch_update(kSwitch, bundledSwitch, true));
     CHECK(!refuses_non_switch_update(kBoth, bundledSwitch, true));

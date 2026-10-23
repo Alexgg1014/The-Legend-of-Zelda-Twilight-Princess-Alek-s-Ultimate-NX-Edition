@@ -1,0 +1,7 @@
+{
+  "id": "dev.aleks2.iostream_lab",
+  "name": "iostream Lab (DM2-b)",
+  "version": "1.0.0",
+  "author": "Alek's Ultimate NX Edition",
+  "description": "LAB. A Linux-built mod that checks file streams, string streams, ctype and std::regex at start-up and logs one line per check. Hooks nothing; writes and removes sdmc:/switch/dusklight/iostream-lab.txt."
+}

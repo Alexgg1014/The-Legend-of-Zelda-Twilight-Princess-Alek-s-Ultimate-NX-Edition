@@ -2017,7 +2017,7 @@ bool Z2SceneMgr::loadSceneWave(u32 wave, u32 bank) {
 }
 #endif
 
-bool Z2SceneMgr::loadSeWave(u32 wave) {
+DUSK_NOINLINE bool Z2SceneMgr::loadSeWave(u32 wave) {
     JAUSectionHeap* sectionHeap = JASGlobalInstance<JAUSectionHeap>::getInstance();
     JUT_ASSERT(3030, sectionHeap);
 

@@ -498,7 +498,7 @@ BOOL daNpc_grA_c::Delete() {
     return TRUE;
 }
 
-BOOL daNpc_grA_c::Execute() {
+DUSK_NOINLINE BOOL daNpc_grA_c::Execute() {
     int ret = execute();
     setPrtcl();
     return ret;
@@ -2119,7 +2119,7 @@ static u8 l_offsetHeight[32] = {
     0xBA, 0xBA, 0xBE, 0xC6, 0xCA, 0xCE, 0xD1, 0xCE, 0xC6, 0xBA, 0xCA, 0xCE, 0xCA, 0xBE, 0xB6, 0xB6,
 };
 
-void daNpc_grA_c::setOtherObjMtx() {
+DUSK_NOINLINE void daNpc_grA_c::setOtherObjMtx() {
     if (field_0x150C != 0) {
         switch (mType) {
         case 7:

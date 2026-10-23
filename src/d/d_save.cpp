@@ -339,7 +339,7 @@ void dSv_player_item_c::init() {
     }
 }
 
-void dSv_player_item_c::setItem(int i_slotNo, u8 i_itemNo) {
+DUSK_NOINLINE void dSv_player_item_c::setItem(int i_slotNo, u8 i_itemNo) {
     if (i_slotNo < MAX_ITEM_SLOTS) {
         mItems[i_slotNo] = i_itemNo;
         setLineUpItem();
@@ -439,7 +439,7 @@ u8 dSv_player_item_c::getItem(int i_slotNo, bool i_checkCombo) const {
     return dItemNo_NONE_e;
 }
 
-void dSv_player_item_c::setLineUpItem() {
+DUSK_NOINLINE void dSv_player_item_c::setLineUpItem() {
     static u8 i_item_lst[23] = {
         10, 8,  6,  2,  9,  4,  3,
         0,  1,  23, 20, 5,  15, 16,
@@ -470,7 +470,7 @@ u8 dSv_player_item_c::getLineUpItem(int i_slotNo) const {
     return dItemNo_NONE_e;
 }
 
-void dSv_player_item_c::setBottleItemIn(u8 curItemIn, u8 newItemIn) {
+DUSK_NOINLINE void dSv_player_item_c::setBottleItemIn(u8 curItemIn, u8 newItemIn) {
     curItemIn = dSv_item_rename(curItemIn);
     newItemIn = dSv_item_rename(newItemIn);
 
@@ -514,7 +514,7 @@ void dSv_player_item_c::setEmptyBottle(u8 i_itemNo) {
     }
 }
 
-void dSv_player_item_c::setEquipBottleItemIn(u8 curItemIn, u8 newItemIn) {
+DUSK_NOINLINE void dSv_player_item_c::setEquipBottleItemIn(u8 curItemIn, u8 newItemIn) {
     newItemIn = dSv_item_rename(newItemIn);
 
     if (dComIfGs_getSelectItemIndex(curItemIn) >= SLOT_11 &&
@@ -1176,17 +1176,17 @@ BOOL dSv_memBit_c::isTbox(int i_no) const {
     return 1 << (i_no & 0x1f) & mTbox[i_no >> 5] ? TRUE : FALSE;
 }
 
-void dSv_memBit_c::onSwitch(int i_no) {
+DUSK_NOINLINE void dSv_memBit_c::onSwitch(int i_no) {
     JUT_ASSERT(2786, 0 <= i_no && i_no < 128);
     mSwitch[i_no >> 5] |= 1 << (i_no & 0x1F);
 }
 
-void dSv_memBit_c::offSwitch(int i_no) {
+DUSK_NOINLINE void dSv_memBit_c::offSwitch(int i_no) {
     JUT_ASSERT(2800, 0 <= i_no && i_no < 128);
     mSwitch[i_no >> 5] &= ~u32(1 << (i_no & 0x1F));
 }
 
-BOOL dSv_memBit_c::isSwitch(int i_no) const {
+DUSK_NOINLINE BOOL dSv_memBit_c::isSwitch(int i_no) const {
     JUT_ASSERT(2814, 0 <= i_no && i_no < 128);
     return (mSwitch[i_no >> 5] & 1 << (i_no & 0x1F)) ? TRUE : FALSE;
 }
@@ -1200,7 +1200,7 @@ BOOL dSv_memBit_c::revSwitch(int i_no) {
     return mSwitch[switchInd] & tmp ? TRUE : FALSE;
 }
 
-void dSv_memBit_c::onItem(int i_no) {
+DUSK_NOINLINE void dSv_memBit_c::onItem(int i_no) {
     JUT_ASSERT(2847, 0 <= i_no && i_no < 64);
     mItem[i_no >> 5] |= 1 << (i_no & 0x1F);
 }
@@ -1300,7 +1300,7 @@ BOOL dSv_memory2_c::isVisitedRoom(int i_no) {
     return (1 << (i_no & 0x1F) & mVisitedRoom[i_no >> 5]) ? TRUE : FALSE;
 }
 
-bool dSv_danBit_c::init(s8 i_stageNo) {
+DUSK_NOINLINE bool dSv_danBit_c::init(s8 i_stageNo) {
     OS_REPORT("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     OS_REPORT("\n!!! dSv_danBit_c::init i_stage=[%d] mStageNo=[%d]", i_stageNo, mStageNo);
     OS_REPORT("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -1337,7 +1337,7 @@ void dSv_danBit_c::offSwitch(int i_no) {
     mSwitch[i_no >> 5] &= ~u32(1 << (i_no & 0x1F));
 }
 
-BOOL dSv_danBit_c::isSwitch(int i_no) const {
+DUSK_NOINLINE BOOL dSv_danBit_c::isSwitch(int i_no) const {
     JUT_ASSERT(3412, 0 <= i_no && i_no < 64);
     return mSwitch[i_no >> 5] & (1 << (i_no & 0x1F)) ? TRUE : FALSE;
 }
@@ -1402,7 +1402,7 @@ void dSv_zoneBit_c::offSwitch(int i_no) {
     mSwitch[i_no >> 4] &= ~(1 << (i_no & 0xF));
 }
 
-BOOL dSv_zoneBit_c::isSwitch(int i_no) const {
+DUSK_NOINLINE BOOL dSv_zoneBit_c::isSwitch(int i_no) const {
     JUT_ASSERT(3615, 0 <= i_no && i_no < SWITCH_ZONE_MAX);
     return mSwitch[i_no >> 4] & 1 << (i_no & 0xF) ? TRUE : FALSE;
 }

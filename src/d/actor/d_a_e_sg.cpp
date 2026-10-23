@@ -224,7 +224,8 @@ static dmg_rod_class* search_esa(e_sg_class* i_this) {
     return NULL;
 }
 
-static void e_sg_move(e_sg_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE void e_sg_move(e_sg_class* i_this) {
     fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
     fopAc_ac_c* player = (fopAc_ac_c*)dComIfGp_getPlayer(0);
     fopAc_ac_c* target;
@@ -359,7 +360,8 @@ static void e_sg_move(e_sg_class* i_this) {
     i_this->mRotationTarget = 0;
 }
 
-static void e_sg_search(e_sg_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE void e_sg_search(e_sg_class* i_this) {
     fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
     fopAc_ac_c* player = (fopAc_ac_c*)dComIfGp_getPlayer(0);
 
@@ -836,7 +838,8 @@ static void damage_check(e_sg_class* i_this) {
     }
 }
 
-static void action(e_sg_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE void action(e_sg_class* i_this) {
     s8 move_flag = false;
     s8 att_flag = true;
     s8 link_search_flag = false;

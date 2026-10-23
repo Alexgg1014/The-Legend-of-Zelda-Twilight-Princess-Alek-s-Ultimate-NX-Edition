@@ -16,6 +16,18 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 project(dusklight LANGUAGES C CXX VERSION ${BOREALIS_APP_VERSION})
 
 if (DUSK_PLATFORM_SWITCH)
+    # aleks2 (rc21): mods hook any game function at run time, and a hook (the host dispatcher, then the mod's own
+    # code) is an ordinary AAPCS64 call that may clobber every caller-saved register. GCC's IPA register allocation
+    # lets a caller keep values in caller-saved registers across a call to a function it knows leaves them alone,
+    # which a hook then breaks (rc19/rc20: Twilit Essentials hooks dMenu_Collect2D_c::getItemTag; cursorMove kept
+    # x4 across the call and faulted on it). So no IPA-RA anywhere in this build; the gate checks the flag
+    # (platforms/switch/tools/test-no-ipa-ra.sh). rc22: before SwitchOptions, which fetches SDL, so SDL has it too.
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fno-ipa-ra>")
+    # 1.0.0: a function with a single caller stays out of line, so a mod update that hooks a new file-local function
+    # (an actor's action/execute, Dawnlight 5.3.0's d_a_e_sf.cpp#action) finds it without a new build. Measured:
+    # .text +0.59 %; it would have covered 3 of the 5 catalog alarms so far. Several-caller inlining is still caught
+    # by the hook-inline gate. Checked with -fno-ipa-ra by the same gate step.
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fno-inline-functions-called-once>")
     include(cmake/SwitchOptions.cmake)
 endif ()
 
@@ -137,9 +149,17 @@ option(DUSK_ENABLE_OPUS "Enable loading Opus audio files for mods" OFF)
 # loader, and the codegen ones cost frames on Tegra.
 set(ALEKS2_STATIC_MODS "" CACHE STRING "Mods compiled into the Switch NRO (directory names under mods/)")
 # aleks2 (H37): native mods loaded from the card at run time on Switch, by the ELF loader in
-# src/dusk/mods/loader/elf_loader.cpp (docs/switch-h37-dynamic-loader.md). Its Loader Mode
+# src/dusk/mods/loader/elf_loader.cpp (docs/history/mod-platform.md). Its Loader Mode
 # (Off / Dry Run / Execute) is a setting, so one NRO tests any package.
 option(ALEKS2_NATIVE_MOD_LOADER "Load native mods from the card at run time on Switch" OFF)
+# aleks2 (TLS-lab): dynamic thread-local storage for linux-aarch64 modules (TLSDESC, __tls_get_addr,
+# __cxa_thread_atexit; src/dusk/mods/loader/elf_tls.cpp, design: aleks2 dusklight-aleks2/docs/investigaciones/tls-dinamico-diseno.md).
+# Off: such modules are refused as in H38.
+option(ALEKS2_MOD_TLS "Provide dynamic TLS to native mods loaded at run time (TLS-lab)" OFF)
+# aleks2 (DM2-b): glibc-layout std::basic_filebuf / basic_[io]fstream<char> for linux-aarch64 mods
+# (src/dusk/mods/loader/linux_fstream.cpp, platforms/switch/cmake/LinuxStreams.cmake). Off: a Linux
+# module importing a file stream is refused (its string streams, ios_base and locale bind either way).
+option(ALEKS2_MOD_LINUX_STREAMS "Give linux-aarch64 native mods glibc-layout file streams (DM2-b lab)" OFF)
 # Either way, the Switch build then has code mods: hooks, the mod services, hook-friendly codegen.
 set(ALEKS2_SWITCH_CODE_MODS OFF)
 if (DUSK_PLATFORM_SWITCH AND (ALEKS2_STATIC_MODS OR ALEKS2_NATIVE_MOD_LOADER))
@@ -305,6 +325,9 @@ if (DUSK_HAS_FUNCHOOK)
     list(APPEND _fetch_content_deps funchook)
 endif ()
 FetchContent_MakeAvailable(${_fetch_content_deps})
+# aleks2 (rc18): zip64 packages over 2 GiB (cmake/PatchMiniz.cmake); before anything compiles miniz.c.
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${miniz_SOURCE_DIR}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchMiniz.cmake"
+    COMMAND_ERROR_IS_FATAL ANY)
 
 if (DUSK_HAS_FUNCHOOK AND APPLE)
     target_sources(funchook-static PRIVATE src/dusk/mods/loader/code_patch_macos.cpp)
@@ -372,6 +395,12 @@ if (DUSK_ENABLE_CODE_MODS OR ALEKS2_STATIC_MODS OR ALEKS2_SWITCH_CODE_MODS)
 endif ()
 if (ALEKS2_NATIVE_MOD_LOADER AND DUSK_PLATFORM_SWITCH)
     list(APPEND GAME_COMPILE_DEFS ALEKS2_NATIVE_MOD_LOADER=1)
+    if (ALEKS2_MOD_TLS)
+        list(APPEND GAME_COMPILE_DEFS ALEKS2_MOD_TLS=1)
+    endif ()
+    if (ALEKS2_MOD_LINUX_STREAMS)
+        list(APPEND GAME_COMPILE_DEFS ALEKS2_MOD_LINUX_STREAMS=1)
+    endif ()
 endif ()
 list(APPEND GAME_COMPILE_DEFS
         DUSK_HAS_FUNCHOOK=$<BOOL:${DUSK_HAS_FUNCHOOK}>
@@ -446,6 +475,17 @@ if (DUSK_PLATFORM_SWITCH)
     # byte-identical rather than carrying a Switch branch inside it.
     list(REMOVE_ITEM DUSK_INTERNAL_FILES src/dusk/mods/loader/native_module.cpp)
     list(APPEND DUSK_INTERNAL_FILES src/dusk/switch_native_module.cpp)
+    # aleks2 (DM2-c): template instances catalog mods hook by name and neutral stubs for PC-only
+    # symbols, both from platforms/switch/mod_compat_symbols.txt (gen_mod_compat.py). The headers
+    # declare the instances extern template on Switch, so this file must always be linked.
+    list(APPEND DUSK_INTERNAL_FILES src/dusk/mods/compat/mod_compat.cpp)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/platforms/switch/tools/gen_mod_compat.py"
+            generate --check RESULT_VARIABLE _aleks2_compat_stale)
+    if (_aleks2_compat_stale)
+        message(FATAL_ERROR "aleks2: the mod compat code is stale: python platforms/switch/tools/gen_mod_compat.py generate")
+    endif ()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/platforms/switch/mod_compat_symbols.txt")
     if (ALEKS2_NATIVE_MOD_LOADER)
         # aleks2 (H37): the ELF loader and its Horizon backend. The first four are
         # platform-neutral and host-tested (platforms/switch/tools/test-elf-loader.sh);
@@ -456,8 +496,23 @@ if (DUSK_PLATFORM_SWITCH)
                 src/dusk/mods/loader/elf_image_runtime.c
                 src/dusk/mods/loader/image_symbols.cpp
                 src/dusk/mods/loader/mod_services.cpp)
+        if (ALEKS2_MOD_TLS)
+            enable_language(ASM)
+            list(APPEND _aleks2_loader_files src/dusk/mods/loader/elf_tls.cpp src/dusk/mods/loader/elf_tls_once.cpp
+                    src/dusk/mods/loader/glibc_abi.cpp src/dusk/mods/loader/glibc_net.cpp src/dusk/mods/loader/elf_dl.cpp
+                    src/dusk/mods/loader/elf_tls_aarch64.S)
+        endif ()
         list(APPEND DUSK_INTERNAL_FILES ${_aleks2_loader_files}
                 src/dusk/switch_elf_memory.cpp src/dusk/switch_native_loader.cpp)
+        if (ALEKS2_MOD_TLS)
+            list(APPEND DUSK_INTERNAL_FILES src/dusk/switch_tls_selftest.cpp src/dusk/switch_net_selftest.cpp)
+        endif ()
+        if (ALEKS2_MOD_LINUX_STREAMS)
+            # DM2-b: ctype<char> with glibc's mask table for Linux modules (the file streams are in
+            # platforms/switch/cmake/LinuxStreams.cmake).
+            list(APPEND DUSK_INTERNAL_FILES src/dusk/mods/loader/linux_ctype.cpp)
+            set_source_files_properties(src/dusk/mods/loader/linux_ctype.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+        endif ()
         if (NOT ALEKS2_STATIC_MODS)
             list(APPEND DUSK_INTERNAL_FILES src/dusk/switch_builtin_none.cpp)
         endif ()
@@ -480,9 +535,17 @@ if (DUSK_PLATFORM_SWITCH)
     # aleks2 (companion): libnx touchscreen -> companion, and the legacy line
     # logger. They live here rather than in dusk_switch_runtime because they
     # need the aurora/webgpu and borealis headers the game TUs already have.
-    target_sources(dusk_internal PRIVATE src/dusk/switch_touch.cpp src/dusk/switch_jit.cpp src/dusk/switch_log.cpp src/dusk/dynres.cpp src/dusk/session_log.cpp src/dusk/switch_net.cpp src/dusk/switch_mod_libc.cpp src/dusk/switch_mod_libstdcxx.cpp
+    target_sources(dusk_internal PRIVATE src/dusk/dev_mode.cpp src/dusk/switch_touch.cpp src/dusk/switch_jit.cpp src/dusk/switch_log.cpp src/dusk/dynres.cpp src/dusk/session_log.cpp src/dusk/switch_net.cpp src/dusk/switch_mod_libc.cpp src/dusk/switch_mod_libstdcxx.cpp
             src/dusk/benchmark.cpp src/dusk/benchmark_report.cpp
-            src/dusk/shader_prep.cpp src/dusk/fifo_report.cpp src/dusk/perf_tour.cpp)
+            src/dusk/shader_prep.cpp src/dusk/fifo_report.cpp src/dusk/perf_tour.cpp src/dusk/director.cpp src/dusk/sampler.cpp src/dusk/texrep_report.cpp src/dusk/hd_rumble.cpp src/dusk/gpu_boost.cpp src/dusk/pgo_dump.cpp
+            src/dusk/shader_warmup.cpp src/dusk/shader_warmup_runtime.cpp
+            src/dusk/perf_core.cpp src/dusk/perf_report.cpp src/dusk/frame_telemetry.cpp src/dusk/drs_stress.cpp
+            src/dusk/self_update.cpp src/dusk/self_update_core.cpp
+            src/dusk/deko3d_policy.cpp)
+    # aleks2 (deko3d rc12): the default-backend switch reaches this one file (cmake/SwitchOptions.cmake)
+    if (ALEKS2_DEKO3D AND ALEKS2_DEKO3D_DEFAULT)
+        set_source_files_properties(src/dusk/deko3d_policy.cpp PROPERTIES COMPILE_DEFINITIONS ALEKS2_DEKO3D_DEFAULT=1)
+    endif ()
     # aleks2 (H28): the benchmark names the build it ran on.
     include(platforms/switch/cmake/BuildIdentity.cmake)
     # Standard-library territory: the game's forced-include PCH collides with it.
@@ -502,6 +565,10 @@ borealis_configure_android_application(dusklight)
 target_compile_definitions(dusklight PRIVATE ${GAME_COMPILE_DEFS})
 target_include_directories(dusklight PRIVATE ${miniz_SOURCE_DIR})
 target_link_libraries(dusklight PRIVATE dusk_internal aurora::main ${GAME_LIBS} ${JSYSTEM_LINK_LIBRARIES})
+if (ALEKS2_NATIVE_MOD_LOADER AND DUSK_PLATFORM_SWITCH AND ALEKS2_MOD_LINUX_STREAMS)
+    include(platforms/switch/cmake/LinuxStreams.cmake)
+    aleks2_linux_streams(dusklight)
+endif ()
 target_precompile_headers(dusklight PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/dusk_pch.hpp>")
 
 if (DUSK_ENABLE_CODE_MODS)
@@ -537,6 +604,13 @@ endif ()
 # which this port cannot spend. If a mod turns up that needs a target which is
 # genuinely inlined rather than cloned, that is the moment to weigh it -- with
 # a measurement, not a guess.
+#
+# V1: what turned up instead is one function at a time. Every function the
+# catalog hooks -- by address (DEFINE_HOOK(&f)) or by name -- that -O3 inlined
+# into a caller carries DUSK_NOINLINE, which costs a call and nothing else;
+# platforms/switch/tools/hook_inline_elf_audit.py finds them in the linked
+# image (157 on V1-rc14, Dawnlight 5's dRes_control_c::setRes among them) and
+# the gate fails on a new one.
 if (ALEKS2_SWITCH_CODE_MODS AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(DUSK_GAME_ABI_INLINE_OPTIONS
             $<$<COMPILE_LANGUAGE:CXX>:-fno-partial-inlining>
@@ -921,4 +995,51 @@ install_bundled_mods()
 
 if (DUSK_PLATFORM_SWITCH)
     add_subdirectory(platforms/switch)
+endif ()
+
+# aleks2 (V1-PGO): profile-guided optimisation of the game, JSystem and Aurora (Switch). OFF builds as before.
+# GENERATE: counters in every unit of those targets, registered in the gcov_info section (no libgcov constructor or
+#   exit-time .gcda writes); src/dusk/pgo_dump.cpp writes them to the card. -fno-profile-values: arcs only.
+# USE: the profile from the build dir (.gcda next to each object, from platforms/switch/tools/pgo_stream.py).
+#   -fprofile-partial-training keeps code the runs never reached optimised as without a profile.
+# The workflow follows the idea of Chansey's sa2-nx PGO notes (our own build code; THIRD_PARTY_NOTICES).
+set(ALEKS2_PGO "OFF" CACHE STRING "Profile-guided optimisation: OFF, GENERATE or USE")
+set_property(CACHE ALEKS2_PGO PROPERTY STRINGS OFF GENERATE USE)
+if (DUSK_PLATFORM_SWITCH AND NOT ALEKS2_PGO STREQUAL "OFF")
+    set(_aleks2_pgo_targets dusklight dusk_internal dusk_switch_runtime aurora_dvd ${JSYSTEM_LIBRARIES})
+    get_property(_aleks2_aurora_targets DIRECTORY extern/aurora PROPERTY BUILDSYSTEM_TARGETS)
+    foreach (_t IN LISTS _aleks2_aurora_targets)
+        if (_t MATCHES "^aurora_")
+            list(APPEND _aleks2_pgo_targets ${_t})
+        endif ()
+    endforeach ()
+    if (ALEKS2_PGO STREQUAL "GENERATE")
+        set(_aleks2_pgo_flags -fprofile-generate -fprofile-update=single -fno-profile-values
+            -fprofile-info-section=gcov_info)
+    elseif (ALEKS2_PGO STREQUAL "USE")
+        # rc17: a function whose code changed after the profile run (any added call adds an arc counter) is a
+        # warning, not an error: GCC builds that function without a profile and keeps the profile of the rest; one
+        # that only moved keeps its profile. The build log lists them ("does not match its profile data").
+        set(_aleks2_pgo_flags -fprofile-use -fprofile-correction -fprofile-partial-training -Wno-missing-profile
+            -Wno-error=coverage-mismatch)
+    else ()
+        message(FATAL_ERROR "ALEKS2_PGO must be OFF, GENERATE or USE (got ${ALEKS2_PGO})")
+    endif ()
+    set(_aleks2_pgo_count 0)
+    foreach (_t IN LISTS _aleks2_pgo_targets)
+        if (NOT TARGET ${_t})
+            continue ()
+        endif ()
+        get_target_property(_type ${_t} TYPE)
+        if (NOT _type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY|EXECUTABLE)$")
+            continue ()  # interface and custom targets: nothing compiled
+        endif ()
+        target_compile_options(${_t} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:${_aleks2_pgo_flags}>")
+        math(EXPR _aleks2_pgo_count "${_aleks2_pgo_count} + 1")
+    endforeach ()
+    if (ALEKS2_PGO STREQUAL "GENERATE")
+        target_compile_definitions(dusk_internal PRIVATE ALEKS2_PGO_GENERATE=1)
+        target_link_options(dusklight PRIVATE -fprofile-generate)
+    endif ()
+    message(STATUS "aleks2: PGO ${ALEKS2_PGO} on ${_aleks2_pgo_count} targets")
 endif ()

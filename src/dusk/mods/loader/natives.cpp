@@ -4,6 +4,9 @@
 #include "native_module.hpp"
 
 #include "dusk/data.hpp"
+#include "dusk/hash.hpp"
+#include "dusk/logging.h"
+#include "lib_cache.hpp"
 #ifdef __SWITCH__
 #include "dusk/switch_builtin_mods.hpp"
 #endif
@@ -18,9 +21,13 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <variant>
@@ -89,6 +96,9 @@ static constexpr std::string_view k_nativeLibName = "mod.so"sv;
 static constexpr std::string_view k_nativePlatform = ""sv;
 static constexpr std::string_view k_nativeLibName = ""sv;
 #endif
+
+// aleks2 (V1-rc19): perf-lab.ini mod_lib_cache (frame_telemetry.cpp); on unless it says 0.
+bool g_duskModLibCache = true;
 
 namespace dusk::mods {
 
@@ -390,6 +400,7 @@ std::string native_status_message(const NativeModStatus status) {
     return "native mod failed to load";
 }
 
+
 }  // namespace
 
 fs::path ModLoader::external_native_lib_path(const LoadedMod& mod) const {
@@ -461,64 +472,101 @@ void ModLoader::load_native(
             return;
         }
 
-        // Every generation gets a new directory. The main module and all of its runtime
-        // libraries therefore have fresh paths and can coexist with a previous generation
-        // that is still unwinding after a reload.
-        runtimeDir = cacheDir / fmt::format("g{}", ++mod.cacheGeneration);
-        runtimeDirRollback.set_path(runtimeDir);
-        fs::create_directories(runtimeDir, ec);
-        if (ec) {
-            log::write(mod.metadata.id, LOG_LEVEL_ERROR,
-                "failed to create native runtime directory {}: {}",
-                data::abbreviated_path_string(runtimeDir), ec.message());
-            return;
+#if ALEKS2_NATIVE_MOD_LOADER
+        // aleks2 (V1-rc19): the library from mods/.libcache when this package version was extracted before
+        // (perf-lab.ini mod_lib_cache); anything else, the extraction below as it always was.
+        fs::path cached;
+        if (g_duskModLibCache && mod.bundle != nullptr) {
+            auto served = lib_cache::serve(m_cacheDir.parent_path() / ".libcache", mod.metadata.id, mod.modPath,
+                fs::path{dllEntry}.parent_path().generic_string() + "/", runtimeEntries,
+                [&mod](const std::string& entry) { return mod.bundle->readFile(entry); });
+            if (!served.note.empty()) {
+                log::write(mod.metadata.id, served.dir.empty() ? LOG_LEVEL_WARN : LOG_LEVEL_INFO, "{}", served.note);
+            }
+            cached = std::move(served.dir);
         }
-
-        // The folder the main library came from (aleks2: not always this platform's own).
-        const std::string platformPrefix = fs::path{dllEntry}.parent_path().generic_string() + "/";
-        for (const auto& entry : runtimeEntries) {
-            if (!entry.starts_with(platformPrefix)) {
-                continue;
-            }
-            const std::string_view relativeName{
-                entry.data() + platformPrefix.size(), entry.size() - platformPrefix.size()};
-            if (!utils::is_safe_resource_path(relativeName)) {
-                log::write(mod.metadata.id, LOG_LEVEL_ERROR,
-                    "unsafe native runtime path '{}'; skipping", entry);
-                return;
-            }
-
-            const fs::path outputPath = runtimeDir / fs::path{relativeName};
-            fs::create_directories(outputPath.parent_path(), ec);
+#else
+        const fs::path cached;
+#endif
+        if (!cached.empty()) {
+            runtimeDir = cached;
+            libPath = cached / fs::path{dllEntry}.filename();
+        } else {
+            // Every generation gets a new directory. The main module and all of its runtime
+            // libraries therefore have fresh paths and can coexist with a previous generation
+            // that is still unwinding after a reload.
+            runtimeDir = cacheDir / fmt::format("g{}", ++mod.cacheGeneration);
+            runtimeDirRollback.set_path(runtimeDir);
+            fs::create_directories(runtimeDir, ec);
             if (ec) {
                 log::write(mod.metadata.id, LOG_LEVEL_ERROR,
-                    "failed to create directory for {}: {}", entry, ec.message());
+                    "failed to create native runtime directory {}: {}",
+                    data::abbreviated_path_string(runtimeDir), ec.message());
                 return;
             }
 
-            std::vector<u8> data;
-            try {
-                data = mod.bundle->readFile(entry);
-            } catch (const std::exception& e) {
-                log::write(
-                    mod.metadata.id, LOG_LEVEL_ERROR, "failed to extract {}: {}", entry, e.what());
-                return;
-            }
+            // rc18: where the extraction time goes, per mod (inflating from the package vs writing to the card).
+            using ExtractClock = std::chrono::steady_clock;
+            double inflateSeconds = 0, writeSeconds = 0;
+            size_t extractedFiles = 0, extractedBytes = 0;
+            const auto extractStart = ExtractClock::now();
+            // The folder the main library came from (aleks2: not always this platform's own).
+            const std::string platformPrefix = fs::path{dllEntry}.parent_path().generic_string() + "/";
+            for (const auto& entry : runtimeEntries) {
+                if (!entry.starts_with(platformPrefix)) {
+                    continue;
+                }
+                const std::string_view relativeName{
+                    entry.data() + platformPrefix.size(), entry.size() - platformPrefix.size()};
+                if (!utils::is_safe_resource_path(relativeName)) {
+                    log::write(mod.metadata.id, LOG_LEVEL_ERROR,
+                        "unsafe native runtime path '{}'; skipping", entry);
+                    return;
+                }
 
-            std::ofstream out(outputPath, std::ios::binary | std::ios::out);
-            if (!out) {
-                log::write(mod.metadata.id, LOG_LEVEL_ERROR, "failed to write {}", entry);
-                return;
+                const fs::path outputPath = runtimeDir / fs::path{relativeName};
+                fs::create_directories(outputPath.parent_path(), ec);
+                if (ec) {
+                    log::write(mod.metadata.id, LOG_LEVEL_ERROR,
+                        "failed to create directory for {}: {}", entry, ec.message());
+                    return;
+                }
+
+                std::vector<u8> data;
+                auto stage = ExtractClock::now();
+                try {
+                    data = mod.bundle->readFile(entry);
+                } catch (const std::exception& e) {
+                    log::write(
+                        mod.metadata.id, LOG_LEVEL_ERROR, "failed to extract {}: {}", entry, e.what());
+                    return;
+                }
+
+                inflateSeconds += std::chrono::duration<double>(ExtractClock::now() - stage).count();
+                stage = ExtractClock::now();
+                std::ofstream out(outputPath, std::ios::binary | std::ios::out);
+                if (!out) {
+                    log::write(mod.metadata.id, LOG_LEVEL_ERROR, "failed to write {}", entry);
+                    return;
+                }
+                out.write(reinterpret_cast<const char*>(data.data()),
+                    static_cast<std::streamsize>(data.size()));
+                if (!out) {
+                    log::write(mod.metadata.id, LOG_LEVEL_ERROR, "failed to write {}", entry);
+                    return;
+                }
+                out.close();
+                writeSeconds += std::chrono::duration<double>(ExtractClock::now() - stage).count();
+                ++extractedFiles;
+                extractedBytes += data.size();
             }
-            out.write(reinterpret_cast<const char*>(data.data()),
-                static_cast<std::streamsize>(data.size()));
-            if (!out) {
-                log::write(mod.metadata.id, LOG_LEVEL_ERROR, "failed to write {}", entry);
-                return;
-            }
+            log::write(mod.metadata.id, LOG_LEVEL_INFO,
+                "extract: {} file(s), {} bytes in {:.2f} s (inflate {:.2f} s, write to the card {:.2f} s)", extractedFiles,
+                extractedBytes, std::chrono::duration<double>(ExtractClock::now() - extractStart).count(), inflateSeconds,
+                writeSeconds);
+
+            libPath = runtimeDir / fs::path{dllEntry}.filename();
         }
-
-        libPath = runtimeDir / fs::path{dllEntry}.filename();
     }
 
     auto nativeMod = std::make_unique<NativeMod>();
@@ -672,7 +720,11 @@ void ModLoader::unload_native(LoadedMod& mod) {
     }
     // Deferred dlclose: this mod's code may still be on the stack below the current tick
     m_retiredNatives.push_back(
-        {std::move(mod.native), mod.nativeInPlace ? fs::path{} : std::move(mod.nativeDir)});
+        {std::move(mod.native), mod.nativeInPlace
+#if ALEKS2_NATIVE_MOD_LOADER
+                                        || lib_cache::served(mod.nativeDir)  // aleks2 (V1-rc19): kept
+#endif
+                                    ? fs::path{} : std::move(mod.nativeDir)});
     mod.nativePath.clear();
     mod.nativeDir.clear();
     mod.nativeDirUtf8.clear();
@@ -722,5 +774,6 @@ ModManifestInfo build_manifest_info(const ModMetaParsed& parsed) {
     }
     return info;
 }
+
 
 }  // namespace dusk::mods

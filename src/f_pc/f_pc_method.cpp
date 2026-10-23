@@ -5,7 +5,7 @@
 
 #include "f_pc/f_pc_method.h"
 
-int fpcMtd_Method(process_method_func i_method, void* i_process) {
+DUSK_NOINLINE int fpcMtd_Method(process_method_func i_method, void* i_process) {
     if (i_method != NULL)
         return i_method(i_process);
     else

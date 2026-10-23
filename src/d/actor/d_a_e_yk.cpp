@@ -258,7 +258,7 @@ static int pl_check(e_yk_class* i_this, f32 i_distance, s16 i_angle) {
  * - Handles death state when health reaches 0
  * - Manages collision flags and status
  */
-static void damage_check(e_yk_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_yk_class* i_this) {
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
 
     if (i_this->mInvulnerabilityTimer == 0) {

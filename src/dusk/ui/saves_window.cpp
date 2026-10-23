@@ -7,10 +7,13 @@
 #include "button.hpp"
 #include "context_menu.hpp"
 #include "dusk/data.hpp"
+#include "dusk/file_copy.hpp"
 #include "dusk/game_mode.hpp"
+#include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/mod_loader.hpp"
 #include "dusk/mods/svc/save.hpp"
+#include "dusk/save_context.hpp"
 #include "dusk/save_manager.hpp"
 #include "dusk/settings.h"
 #include "dusk/utilities.hpp"
@@ -25,7 +28,10 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <atomic>
+#include <ctime>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -45,10 +51,9 @@ struct SaveOption {
     std::string label;
 };
 
-struct Context {
-    SaveIdentity identity;
-    Storage storage;
-};
+using Context = save_manager::SaveContext;
+using save_manager::active_save_name;
+using save_manager::context_for_save;
 
 struct ImportItem {
     Context context;
@@ -82,10 +87,6 @@ std::vector<SaveOption> registered_save_options() {
     return modes;
 }
 
-std::string active_save_name() {
-    return gamemode::getGameModeManager().getCurrentGameMode()->getSaveName();
-}
-
 bool is_registered_save(std::string_view saveName) {
     return std::ranges::any_of(registered_save_options(),
         [saveName](const SaveOption& mode) { return mode.saveName == saveName; });
@@ -98,39 +99,6 @@ std::string mode_label(std::string_view saveName) {
         }
     }
     return std::string{saveName};
-}
-
-save_manager::ValueResult<Context> context_for_save(const std::string& saveName) {
-    const auto& state = prelaunch_state();
-    if (data::is_data_path_restart_pending() ||
-        (!state.activeDiscPath.empty() && state.configuredDiscPath != state.activeDiscPath))
-    {
-        return {{.message = "Restart required before managing saves."}, {}};
-    }
-    auto identity = save_manager::identity_for_disc(state.configuredDiscInfo, saveName);
-    if (!state.configuredDiscCanLaunch || !identity) {
-        return {{.message = "A disc must be configured before managing saves."}, {}};
-    }
-    const auto preferredKind = getSettings().backend.cardFileType.getValue() == 0 ?
-                                   save_manager::StorageKind::RawImage :
-                                   save_manager::StorageKind::GciDirectory;
-    auto storage = save_manager::resolve_storage(identity->game, preferredKind);
-    if (!storage) {
-        return {storage.result, {}};
-    }
-    if (auto migrated =
-            mods::svc::migrate_legacy_sidecar(storage.value, identity->maker, identity->game);
-        !migrated)
-    {
-        return {std::move(migrated), {}};
-    }
-    return {
-        {.ok = true},
-        Context{
-            .identity = std::move(*identity),
-            .storage = std::move(storage.value),
-        },
-    };
 }
 
 void dismiss_modal(Modal& modal) {
@@ -176,7 +144,55 @@ bool installed_mod(std::string_view id) {
         [id](const mods::LoadedMod& mod) { return mod.metadata.id == id; });
 }
 
+#ifdef __SWITCH__
+// aleks2 (V1-rc5): the Switch has no file picker. Exports go to one folder on the card, named with the date, and
+// Import lists that folder.
+std::filesystem::path exports_directory() {
+    return ConfigPath / "exports";
+}
+
+std::string exports_display(const std::string& name = {}) {
+    return (ConfigPath / "exports").generic_string() + "/" + name;
+}
+
+void export_to_card(const save_manager::ExportArtifact& artifact) {
+    const std::filesystem::path suggested{artifact.suggestedName};
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+    localtime_r(&now, &local);
+    std::array<char, 32> stamp{};
+    std::strftime(stamp.data(), stamp.size(), "%Y-%m-%d_%H%M%S", &local);
+    // aleks2 (rc18): only [A-Za-z0-9._-] in the name: a save name may hold characters FAT and exFAT refuse.
+    const std::string name = utils::safe_filename(fmt::format(
+        "{}-{}{}", suggested.stem().string(), stamp.data(), suggested.extension().string()));
+    std::error_code ec;
+    const char* step = "create the folder";
+    std::filesystem::create_directories(exports_directory(), ec);
+    if (!ec) {
+        // aleks2 (rc18): not std::filesystem::copy_file, which fails on the card after copying (file_copy.hpp).
+        step = "copy the save";
+        file_copy::copy_file(artifact.path, exports_directory() / name, ec);
+    }
+    if (ec) {
+        DuskLog.error("save export: could not {} ({} -> {}): errno {} ({})", step, artifact.path.generic_string(),
+            (exports_directory() / name).generic_string(), ec.value(), ec.message());
+    }
+    save_manager::remove_temporary_export(artifact);
+    if (ec) {
+        show_message("Export Failed",
+            fmt::format("The save could not be written to {}: {}", exports_display(), ec.message()), true);
+        return;
+    }
+    show_message("Save Exported", fmt::format("Saved to {}", exports_display(name)));
+}
+#endif
+
 void export_artifact(save_manager::ExportArtifact artifact, std::string pattern) {
+#ifdef __SWITCH__
+    (void)pattern;
+    export_to_card(artifact);
+    return;
+#endif
     borealis::file_select::ExportOptions options{
         .parentWindow = aurora::window::get_sdl_window(),
         .sourceLocation = borealis::io::fs_path_to_string(artifact.path),
@@ -448,7 +464,66 @@ void process_next_import() {
     confirm_import(std::move(artifact.value));
 }
 
+#ifdef __SWITCH__
+void begin_card_import() {
+    struct Entry {
+        std::filesystem::path path;
+        std::filesystem::file_time_type modified;
+    };
+    std::vector<Entry> entries;
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it{exports_directory(), ec}, end; !ec && it != end;
+         it.increment(ec))
+    {
+        std::string extension = it->path().extension().string();
+        std::ranges::transform(extension, extension.begin(), [](unsigned char c) { return std::tolower(c); });
+        std::error_code entryEc;
+        if ((extension == ".dusksave" || extension == ".gci" || extension == ".raw") &&
+            it->is_regular_file(entryEc))
+        {
+            entries.push_back({it->path(), it->last_write_time(entryEc)});
+        }
+    }
+    if (entries.empty()) {
+        show_message("Import Save",
+            fmt::format("There are no saves in {}. Export Save writes them there; to bring a save from another "
+                        "device, copy its .dusksave or .gci file into that folder.",
+                exports_display()));
+        return;
+    }
+    std::ranges::sort(entries, std::greater{}, &Entry::modified);
+    constexpr size_t kMaxListed = 12;
+    std::vector<ModalAction> actions;
+    for (size_t i = 0; i < entries.size() && i < kMaxListed; ++i) {
+        actions.push_back({
+            .label = entries[i].path.filename().string(),
+            .onPressed =
+                [location = entries[i].path.string()](Modal& modal) {
+                    modal.pop();
+                    import_save_location(location);
+                },
+        });
+    }
+    actions.push_back({.label = "Cancel", .onPressed = &dismiss_modal});
+    if (auto* host = top_document()) {
+        host->push(std::make_unique<Modal>(Modal::Props{
+            .title = "Import Save",
+            .bodyText = entries.size() > kMaxListed ?
+                            fmt::format("The {} newest saves in {}:", kMaxListed, exports_display()) :
+                            fmt::format("Saves in {}:", exports_display()),
+            .actions = std::move(actions),
+            .onDismiss = &dismiss_modal,
+            .isVertical = true,
+        }));
+    }
+}
+#endif
+
 void begin_import() {
+#ifdef __SWITCH__
+    begin_card_import();
+    return;
+#endif
     borealis::file_select::open_file(
         {
             .parentWindow = aurora::window::get_sdl_window(),
@@ -470,6 +545,100 @@ public:
             .on_pressed(&begin_import);
     }
 };
+
+// aleks2 (V1-rc5): copies one profile's save and mod data onto another (Vanilla -> Co-op), backing up the
+// destination first. The GCI's file name is the profile's, so the copy is renamed before it goes through
+// the same apply as an import.
+void perform_copy(const std::string& fromName, const std::string& toName) {
+    if (!is_prelaunch_open()) {
+        show_message("Copy Failed", "Reset to the main menu before copying saves.", true);
+        return;
+    }
+    auto from = context_for_save(fromName);
+    auto to = context_for_save(toName);
+    if (!from || !to) {
+        show_message("Copy Failed", !from ? from.result.message : to.result.message, true);
+        return;
+    }
+    auto gci = save_manager::read_save_gci(from.value.storage, from.value.identity);
+    if (!gci || gci.value.empty()) {
+        show_message("Copy Failed", !gci ? gci.result.message : "There is no save to copy.", true);
+        return;
+    }
+    auto modFiles = save_manager::read_save_mod_files(from.value.storage, from.value.identity);
+    if (!modFiles) {
+        show_message("Copy Failed", modFiles.result.message, true);
+        return;
+    }
+    constexpr size_t kNameOffset = 8;
+    constexpr size_t kNameSize = 32;
+    if (toName.size() >= kNameSize || gci.value.size() < kNameOffset + kNameSize) {
+        show_message("Copy Failed", "The destination save name does not fit a GCI file name.", true);
+        return;
+    }
+    std::fill_n(gci.value.begin() + kNameOffset, kNameSize, uint8_t{0});
+    std::ranges::copy(toName, gci.value.begin() + kNameOffset);
+    auto header = save_manager::parse_gci(gci.value);
+    if (!header) {
+        show_message("Copy Failed", header.result.message, true);
+        return;
+    }
+    const Artifact artifact{
+        .kind = save_manager::ArtifactKind::DuskSave,
+        .header = std::move(header.value),
+        .gci = std::move(gci.value),
+        .modFiles = std::move(modFiles.value),
+        .sourceName = fromName,
+    };
+    show_result("Copy to Profile",
+        fmt::format("The {} save was copied to {}. Its previous save, if any, is in View Backups.",
+            mode_label(fromName), mode_label(toName)),
+        save_manager::import_artifact(
+            to.value.storage, to.value.identity, artifact, ModDataAction::Replace));
+}
+
+void confirm_copy(const std::string& fromName, const std::string& toName) {
+    if (auto* host = top_document()) {
+        host->push(std::make_unique<Modal>(Modal::Props{
+            .title = "Copy to Profile",
+            .bodyRml = fmt::format("Copy the <b>{}</b> save and its mod data to <b>{}</b>? The current {} save "
+                                   "is backed up first.",
+                escape(mode_label(fromName)), escape(mode_label(toName)), escape(mode_label(toName))),
+            .actions =
+                {
+                    {.label = "Cancel", .onPressed = &dismiss_modal},
+                    {
+                        .label = "Copy",
+                        .onPressed =
+                            [fromName, toName](Modal& modal) {
+                                modal.pop();
+                                perform_copy(fromName, toName);
+                            },
+                    },
+                },
+            .onDismiss = &dismiss_modal,
+            .icon = "warning",
+        }));
+    }
+}
+
+void begin_copy(Rml::Element* anchor, const std::string& fromName) {
+    std::vector<ContextMenu::Item> items;
+    for (const auto& option : registered_save_options()) {
+        if (option.saveName != fromName) {
+            items.push_back({
+                .text = option.label,
+                .icon = "content_copy",
+                .onPressed = [fromName, toName = option.saveName] { confirm_copy(fromName, toName); },
+            });
+        }
+    }
+    if (items.empty()) {
+        show_message("Copy to Profile", "There is no other game mode to copy this save to.");
+        return;
+    }
+    push_document(std::make_unique<ContextMenu>(anchor, std::move(items)));
+}
 
 void begin_delete(const std::string& saveName) {
     auto context = context_for_save(saveName);
@@ -817,6 +986,14 @@ void build_save_detail(Pane& pane, const std::string& saveName) {
                         },
                     }));
     });
+#ifdef __SWITCH__
+    append_text_element(pane.root(), "file-path", exports_display());
+#endif
+    auto& copyButton = pane.add_button(ControlledButton::Props{
+        .text = "Copy to Profile...",
+        .isDisabled = [savePresent] { return !savePresent || borealis::file_select::busy(); },
+    });
+    copyButton.on_pressed([anchor = copyButton.root(), saveName] { begin_copy(anchor, saveName); });
 
     if (info && !info.value.mods.empty()) {
         pane.add_section(fmt::format("Mod Data ({})", info.value.mods.size()));

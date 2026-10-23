@@ -31,15 +31,22 @@ static_assert(verdict("dev.nobody.unlisted", "1.0.0").status == Status::Unverifi
 static_assert(!verdict("dev.nobody.unlisted", "1.0.0").listed);
 
 // what the browser and the update check refuse
-static_assert(!catalog_block_reason(kTpClassic, "1.3.1", kTpClassicSha).empty());
-static_assert(catalog_block_reason(kTpClassic, "1.3.2").empty());  // a future version is not blocked
-static_assert(catalog_block_reason("alexandre.cooper_hat.texture_selector", "1.1.0").empty());
-static_assert(!catalog_block_reason("dev.automata.deferred_fog", "2.0.0").empty());
-static_assert(catalog_block_reason("dev.automata.deferred_fog", "2.0.1").empty());
-static_assert(!catalog_block_reason("dev.twilitrealm.randomizer", "1.0.6").empty());       // any catalog copy
-static_assert(!catalog_block_reason("dev.twilitrealm.randomizer", "9.0.0").empty());
-static_assert(!catalog_block_reason("com.dusklight.twilit_essentials", "2.5.0").empty());
-static_assert(catalog_block_reason("dev.albt.albw", "0.3.0").empty());  // not delivered: no variant to protect
+static_assert(!catalog_block_reason(kTpClassic, "1.3.1", kTpClassicSha, "").empty());
+static_assert(catalog_block_reason(kTpClassic, "1.3.2", "", "").empty());  // a future version is not blocked
+static_assert(catalog_block_reason("alexandre.cooper_hat.texture_selector", "1.1.0", "", "").empty());
+static_assert(!catalog_block_reason("dev.automata.deferred_fog", "2.0.0", "", "").empty());
+static_assert(catalog_block_reason("dev.automata.deferred_fog", "2.0.1", "", "").empty());
+// V1-rc5: our Switch package installed: a catalog copy up to its version is refused, a newer one replaces it
+static_assert(!catalog_block_reason("dev.twilitrealm.randomizer", "1.0.5", "", "1.0.6").empty());
+static_assert(!catalog_block_reason("dev.twilitrealm.randomizer", "1.0.6", "", "1.0.6").empty());
+static_assert(catalog_block_reason("dev.twilitrealm.randomizer", "9.0.0", "", "1.0.6").empty());
+static_assert(!catalog_block_reason("com.dusklight.twilit_essentials", "2.5.0", "", "2.5.0").empty());
+static_assert(catalog_block_reason("com.dusklight.twilit_essentials", "2.8.4", "", "2.5.0").empty());
+// V1-rc5: nothing installed: the catalog's version installs (Randomizer 1.0.5 was not installable)
+static_assert(catalog_block_reason("dev.twilitrealm.randomizer", "1.0.5", "", "").empty());
+static_assert(compare_versions("2.8.4", "2.5.0") > 0 && compare_versions("1.0.5", "1.0.6") < 0 &&
+              compare_versions("1.0", "1.0.0") == 0 && compare_versions("1.0.6-rc1", "1.0.6") == 0);
+static_assert(catalog_block_reason("dev.albt.albw", "0.3.0", "", "").empty());  // not delivered: no variant to protect
 
 static_assert(status_name(Status::Incompatible) == "incompatible" && status_name(Status::Unverified) == "unverified");
 }  // namespace

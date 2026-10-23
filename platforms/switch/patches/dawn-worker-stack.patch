@@ -1,0 +1,115 @@
+--- a/src/dawn/platform/WorkerThread.h
++++ b/src/dawn/platform/WorkerThread.h
+@@ -34,6 +34,10 @@
+ #include <queue>
+ #include <thread>
+ #include <vector>
++
++#if defined(__SWITCH__)
++#include <pthread.h>
++#endif
+ 
+ #include "dawn/platform/DawnPlatform.h"
+ #include "partition_alloc/pointers/raw_ptr.h"
+@@ -80,6 +84,16 @@
+     std::atomic<bool> mCancelled = false;
+     bool mJoined = false;
+     std::once_flag mJoinFlag;
++#if defined(__SWITCH__)
++    // aleks2 (DM1-b): Tint's resolver recurses deeply (AnalyzeUniformity); on Horizon the default
++    // thread stack overflowed compiling a mod's WGSL (Deferred Fog 2.0.0, H38-c6, Data Abort with SP
++    // below the stack). The thread gets an explicit stack instead; std::thread cannot be given one.
++    static void* SwitchThreadEntry(void* self);
++    PostWorkerJobCallback mCallback = nullptr;
++    void* mCallbackUserdata = nullptr;
++    pthread_t mPThread{};
++    bool mPThreadStarted = false;
++#endif
+     // The thread object uses other member fields so it needs to be the last member constructed.
+     std::thread mThread;
+ };
+--- a/src/dawn/platform/WorkerThread.cpp
++++ b/src/dawn/platform/WorkerThread.cpp
+@@ -33,6 +33,22 @@
+ 
+ #include "src/utils/assert.h"
+ 
++#if defined(__SWITCH__)
++#include <atomic>
++#include <cstddef>
++
++// aleks2 (DM1-b): logged by the game (ModLoader::settle_update_journal, loader.cpp): the default and chosen stack
++// of Dawn's worker threads, how many were started, and the last pthread_create error.
++namespace aleks2::dawn_worker {
++constexpr std::size_t kStackSize = 8u << 20;  // as Aurora's pipeline worker, which runs the same Tint passes
++std::atomic<std::size_t> stackDefault{0};
++std::atomic<std::size_t> stackSize{0};
++std::atomic<unsigned> threads{0};
++std::atomic<unsigned> fallbacks{0};
++std::atomic<int> lastError{0};
++}  // namespace aleks2::dawn_worker
++#endif
++
+ namespace dawn::platform {
+ 
+ namespace {
+@@ -84,8 +100,43 @@
+ 
+ // AsyncJobHandleImpl
+ 
++#if defined(__SWITCH__)
++void* AsyncJobHandleImpl::SwitchThreadEntry(void* self) {
++    auto* job = static_cast<AsyncJobHandleImpl*>(self);
++    job->JobThreadLoop(job->mCallback, job->mCallbackUserdata);
++    return nullptr;
++}
++
++AsyncJobHandleImpl::AsyncJobHandleImpl(PostWorkerJobCallback cb, void* userdata)
++    : mCallback(cb), mCallbackUserdata(userdata) {
++    namespace w = aleks2::dawn_worker;
++    pthread_attr_t attr;
++    std::size_t defaultSize = 0;
++    int error = pthread_attr_init(&attr);
++    if (error == 0) {
++        pthread_attr_getstacksize(&attr, &defaultSize);
++        error = pthread_attr_setstacksize(&attr, w::kStackSize);
++        if (error == 0) {
++            error = pthread_create(&mPThread, &attr, &AsyncJobHandleImpl::SwitchThreadEntry, this);
++        }
++        pthread_attr_destroy(&attr);
++    }
++    w::stackDefault.store(defaultSize, std::memory_order_relaxed);
++    if (error == 0) {
++        mPThreadStarted = true;
++        w::stackSize.store(w::kStackSize, std::memory_order_relaxed);
++        w::threads.fetch_add(1, std::memory_order_relaxed);
++    } else {
++        // Out of memory for the stack, say: keep Dawn working on the default stack, and say so in the log.
++        w::lastError.store(error, std::memory_order_relaxed);
++        w::fallbacks.fetch_add(1, std::memory_order_relaxed);
++        mThread = std::thread(&AsyncJobHandleImpl::JobThreadLoop, this, cb, userdata);
++    }
++}
++#else
+ AsyncJobHandleImpl::AsyncJobHandleImpl(PostWorkerJobCallback cb, void* userdata)
+     : mThread(&AsyncJobHandleImpl::JobThreadLoop, this, cb, userdata) {}
++#endif
+ 
+ AsyncJobHandleImpl::~AsyncJobHandleImpl() {
+     DAWN_ASSERT(mJoined);
+@@ -97,7 +148,15 @@
+ 
+ void AsyncJobHandleImpl::Join() {
+     std::call_once(mJoinFlag, [&]() {
++#if defined(__SWITCH__)
++        if (mPThreadStarted) {
++            pthread_join(mPThread, nullptr);
++        } else {
++            mThread.join();
++        }
++#else
+         mThread.join();
++#endif
+         mJoined = true;
+     });
+ }

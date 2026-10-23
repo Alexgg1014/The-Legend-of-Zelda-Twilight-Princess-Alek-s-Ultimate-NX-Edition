@@ -13,7 +13,7 @@
 
 namespace dusk::wii {
 
-enum class CutStyle { Keep, Vertical, Left, Right };
+enum class CutStyle { Keep, Vertical, Left, Right, Stab };
 
 // Where in checkCutAction a cut is being chosen.
 enum class CutBranch {
@@ -46,6 +46,8 @@ inline CutStyle select_cut(SwordGesture g, CutBranch branch, bool mirrorMode, bo
     case SwordGesture::Vertical: return CutStyle::Vertical;
     case SwordGesture::LeftToRight: return flip ? CutStyle::Right : CutStyle::Left;
     case SwordGesture::RightToLeft: return flip ? CutStyle::Left : CutStyle::Right;
+    // V1-rc7: a thrust is the stab -- not in a chain, which alternates left and right cuts.
+    case SwordGesture::Thrust: return branch == CutBranch::Chain ? CutStyle::Keep : CutStyle::Stab;
     default: return CutStyle::Keep;  // Generic and None: the game's own choice
     }
 }

@@ -1,6 +1,15 @@
 /* H37: part B of code_arena_test.c -- funchook itself hooking real functions through the code
  * arenas, on aarch64 (under qemu-user), against the same fake kernel.
  *
+ * DM2-a: with the 12-byte patch, several trampolines to a page. Checked here:
+ *   - Twilit 343 + Dawnlight 318 + Randomizer 92 + Zora Swim 43 + Dark Link 28 = 824 real hooks in
+ *     ONE CodeMemory object, every one wide and leading to its own slot; ALBT's 331 on top, two;
+ *   - the functions the wide patch must step back from (too short, a loop head at +8, near or 260
+ *     bytes away) take the 8-byte patch in a page-boundary slot; adrp/cbz inside the 12 bytes are
+ *     relocated; a branch back to +4 is refused and the function left as it was (shapes.S);
+ *   - Dawnlight off and on five times while another thread calls a hook whose slot shares pages
+ *     with them, never seeing a wrong result.
+ *
  * funchook.c is v1.1.3 as the build fetches it, patched by cmake/PatchFunchook.cmake and compiled
  * with __SWITCH__ so its page writes take the patched route; funchook_arena_glue.c and
  * code_arena.c are the files the console build compiles. Only what needs libnx is replaced, here:
@@ -128,26 +137,58 @@ int funchook_arenas_permitted(void *funchook)
     return 1;
 }
 
+/* DM2-a: the end of the mapped region holding `func`, as svcQueryMemory gives it on the console. */
+uintptr_t funchook_switch_scan_end(const void *func)
+{
+    const uintptr_t at = (uintptr_t)func;
+    uintptr_t end = (at + 0x1000) & ~(uintptr_t)0xFFF;
+    FILE *maps = fopen("/proc/self/maps", "r");
+    if (maps == NULL) {
+        return end;
+    }
+    char line[512];
+    while (fgets(line, sizeof line, maps) != NULL) {
+        unsigned long lo = 0, hi = 0;
+        if (sscanf(line, "%lx-%lx", &lo, &hi) == 2 && lo <= at && at < hi) {
+            end = hi;
+            break;
+        }
+    }
+    fclose(maps);
+    return end;
+}
+
 /* ---------------------------------------------------------------------- the test -- */
 
-static funchook_t *g_handle[256];
+static funchook_t *g_handle[2048];
+
+static int hook_one(int i, void *target, void *hook, int (**orig)(int), funchook_t **handle)
+{
+    funchook_t *fh = funchook_create();
+    void *fn = target;
+    int rv = funchook_prepare(fh, &fn, hook);
+    if (rv == 0) {
+        *orig = (int (*)(int))fn;
+        rv = funchook_install(fh, 0);
+    }
+    if (rv != 0) {
+        if (i >= 0) {
+            fprintf(stderr, "hook %d: %s\n", i, funchook_error_message(fh));
+        }
+        funchook_destroy(fh);
+        return rv;
+    }
+    *handle = fh;
+    return 0;
+}
 
 static int hook_range(int first, int count)
 {
     for (int i = first; i < first + count; i++) {
-        funchook_t *fh = funchook_create();
-        void *fn = (void *)k_targets[i];
-        int rv = funchook_prepare(fh, &fn, (void *)k_hooks[i]);
-        if (rv == 0) {
-            g_orig[i] = (int (*)(int))fn;
-            rv = funchook_install(fh, 0);
-        }
+        const int rv = hook_one(i, (void *)k_targets[i], (void *)k_hooks[i], &g_orig[i], &g_handle[i]);
         if (rv != 0) {
-            fprintf(stderr, "hook %d: %s\n", i, funchook_error_message(fh));
-            funchook_destroy(fh);
             return rv;
         }
-        g_handle[i] = fh;
     }
     return 0;
 }
@@ -173,37 +214,234 @@ static int all_hooked(int first, int count, int hooked)
     return 1;
 }
 
+/* What was written over a hooked function: 12 (adrp + add + br x9) or 8 (adrp + br x9) bytes, and
+ * where it leads. 0 if it is neither. */
+static int patch_width(const void *fn, uintptr_t *dest)
+{
+    const uint32_t *p = fn;
+    if ((p[0] & 0x9F00001F) != 0x90000009) {
+        return 0;
+    }
+    const int64_t immhi = (int64_t)((int32_t)(p[0] << 8) >> 13);
+    const int64_t immlo = (p[0] >> 29) & 3;
+    const uintptr_t page = ((uintptr_t)fn & ~(uintptr_t)0xFFF) + (uintptr_t)(((immhi << 2) | immlo) << 12);
+    if ((p[1] & 0xFFC003FF) == 0x91000129 && p[2] == 0xd61f0120) {
+        *dest = page + ((p[1] >> 10) & 0xFFF);
+        return 12;
+    }
+    if (p[1] == 0xd61f0120) {
+        *dest = page;
+        return 8;
+    }
+    return 0;
+}
+
+/* Every installed hook leads to its own slot: the patch's destination is the entry's transit, at
+ * the slot's start, and the trampoline handed back is in that slot. */
+static int leads_to_own_slot(const void *fn, int (*orig)(int), int want_width)
+{
+    uintptr_t dest = 0;
+    const int width = patch_width(fn, &dest);
+    const uintptr_t slot = (uintptr_t)orig & ~(uintptr_t)(CODE_ARENA_SLOT - 1);
+    if (width != want_width || dest != slot) {
+        fprintf(stderr, "patch at %p: width %d (want %d), leads to %#lx, slot %#lx\n", fn, width, want_width,
+                (unsigned long)dest, (unsigned long)slot);
+        return 0;
+    }
+    return want_width == 12 || slot % CODE_ARENA_PAGE == 0;
+}
+
+/* Function shapes the wide patch must handle or step back from (generated shapes.S): each returns
+ * 3x + k for x >= 1, and its hook returns that plus 1000.
+ *   short_k        add (3x) + ret: two instructions, the next function right after -> 8 bytes
+ *   loop8_k        a loop whose head is the third instruction -> 8 bytes
+ *   loopfar_k      the same, with the branch back 260 bytes in (funchook's own check sees 64) -> 8
+ *   adrp_k         adrp as the third instruction, its add outside the patch -> 12, relocated
+ *   cbz_k          cbz as the second instruction -> 12, relocated
+ *   fpos_k         no branch back, but upstream's check misread it as one (decoded the word after
+ *                  the patch with a later b.ne's id) -> 12 now that each instruction is decoded
+ *   bad4_k         a loop whose head is the second instruction -> refused, left unpatched
+ *   badfar4_k      the same, 260 bytes in -> refused */
+typedef struct {
+    const char *name;
+    int (*fn)(int);
+    int k;
+    int width; /* 12, 8, or 0 for refused */
+} shape;
+
+#define SHAPE_HOOK(n)                                                                              \
+    extern int n(int);                                                                             \
+    static int (*orig_##n)(int);                                                                   \
+    static int hook_##n(int x) { return orig_##n(x) + 1000; }
+SHAPE_HOOK(short_0)
+SHAPE_HOOK(short_1)
+SHAPE_HOOK(short_2)
+SHAPE_HOOK(loop8_0)
+SHAPE_HOOK(loopfar_0)
+SHAPE_HOOK(adrp_0)
+SHAPE_HOOK(cbz_0)
+SHAPE_HOOK(fpos_0)
+SHAPE_HOOK(bad4_0)
+SHAPE_HOOK(badfar4_0)
+
+static void shapes(void)
+{
+    struct {
+        shape s;
+        int (**orig)(int);
+        int (*hook)(int);
+        funchook_t *fh;
+    } t[] = {
+        {{"short_0", short_0, 0, 8}, &orig_short_0, hook_short_0, NULL},
+        {{"short_1", short_1, 0, 8}, &orig_short_1, hook_short_1, NULL},
+        {{"short_2", short_2, 0, 8}, &orig_short_2, hook_short_2, NULL},
+        {{"loop8_0", loop8_0, 200, 8}, &orig_loop8_0, hook_loop8_0, NULL},
+        {{"loopfar_0", loopfar_0, 201, 8}, &orig_loopfar_0, hook_loopfar_0, NULL},
+        {{"adrp_0", adrp_0, 300, 12}, &orig_adrp_0, hook_adrp_0, NULL},
+        {{"cbz_0", cbz_0, 400, 12}, &orig_cbz_0, hook_cbz_0, NULL},
+        {{"fpos_0", fpos_0, 600, 12}, &orig_fpos_0, hook_fpos_0, NULL},
+        {{"bad4_0", bad4_0, 500, 0}, &orig_bad4_0, hook_bad4_0, NULL},
+        {{"badfar4_0", badfar4_0, 501, 0}, &orig_badfar4_0, hook_badfar4_0, NULL},
+    };
+    const int n = (int)(sizeof t / sizeof t[0]);
+    for (int i = 0; i < n; i++) {
+        CHECK(t[i].s.fn(7) == 21 + t[i].s.k);
+        const int rv = hook_one(-1, (void *)t[i].s.fn, (void *)t[i].hook, t[i].orig, &t[i].fh);
+        if (t[i].s.width == 0) {
+            if (rv == 0) {
+                fprintf(stderr, "%s: hooked, should have been refused\n", t[i].s.name);
+            }
+            CHECK(rv != 0);
+            CHECK(t[i].s.fn(7) == 21 + t[i].s.k); /* untouched, still works */
+            continue;
+        }
+        if (rv != 0) {
+            fprintf(stderr, "%s: refused, want a %d-byte patch\n", t[i].s.name, t[i].s.width);
+            CHECK(rv == 0);
+            continue;
+        }
+        CHECK(leads_to_own_slot((void *)t[i].s.fn, *t[i].orig, t[i].s.width));
+        if (t[i].s.fn(7) != 1021 + t[i].s.k || t[i].s.fn(1) != 1003 + t[i].s.k) {
+            fprintf(stderr, "%s hooked: %d, %d\n", t[i].s.name, t[i].s.fn(7), t[i].s.fn(1));
+            CHECK(0);
+        }
+    }
+    /* short_0..2 sit back to back: hooking all three never touched a neighbour */
+    CHECK(short_0(7) == 1021 && short_1(7) == 1021 && short_2(7) == 1021);
+    for (int i = 0; i < n; i++) {
+        if (t[i].fh != NULL) {
+            CHECK(funchook_uninstall(t[i].fh, 0) == 0);
+            CHECK(funchook_destroy(t[i].fh) == 0);
+            CHECK(t[i].s.fn(7) == 21 + t[i].s.k);
+        }
+    }
+    printf("shapes       2-instruction functions back to back, loop heads at +8 (near and 260 bytes away): "
+           "8-byte patch in a page-boundary slot; adrp and cbz inside the 12 bytes: relocated; upstream's false "
+           "'jumping back' (fpos) gone; a branch back to +4 (near or far): refused, the function untouched\n");
+}
+
+/* DM2-e: functions shorter than the patch (code_arena_shapes.S). ret1_0 is a lone ret before zero
+ * padding (Twilit's dMenu_Ring_c::_delete() in the game): hooked with the 12-byte patch over the
+ * padding. ret1_tight is a lone ret with ret1_next right after it: refused, ret1_next untouched. */
+extern int ret1_0(int);
+extern int ret1_tight(int);
+extern int ret1_next(int);
+static int (*orig_ret1_0)(int);
+static int hook_ret1_0(int x) { return orig_ret1_0(x) + 1000; }
+static int (*orig_ret1_tight)(int);
+static int hook_ret1_tight(int x) { return orig_ret1_tight(x) + 1000; }
+
+static void short_functions(void)
+{
+    funchook_t *fh = NULL, *tight = NULL;
+    CHECK(ret1_0(7) == 7 && ret1_tight(7) == 7 && ret1_next(7) == 721);
+    CHECK(hook_one(-1, (void *)ret1_0, (void *)hook_ret1_0, &orig_ret1_0, &fh) == 0);
+    CHECK(leads_to_own_slot((void *)ret1_0, orig_ret1_0, 12));
+    CHECK(ret1_0(7) == 1007 && ret1_0(1) == 1001);
+    CHECK(hook_one(-1, (void *)ret1_tight, (void *)hook_ret1_tight, &orig_ret1_tight, &tight) != 0);
+    CHECK(ret1_tight(7) == 7 && ret1_next(7) == 721);
+    CHECK(funchook_uninstall(fh, 0) == 0);
+    CHECK(funchook_destroy(fh) == 0);
+    CHECK(ret1_0(7) == 7);
+    printf("short        a lone ret before zero padding: 12-byte patch over the padding; a lone ret with a "
+           "function right after it: refused, the neighbour untouched\n");
+}
+
+/* A thread runs a hooked function without pause while hooks whose slots share its page are
+ * installed and removed: it must never see anything but the hooked result. */
+static volatile int g_stop;
+static volatile long g_calls, g_wrong;
+
+static void *runner(void *arg)
+{
+    const int i = (int)(intptr_t)arg;
+    while (!g_stop) {
+        if (k_targets[i](7) != 3 * 7 + i + 1000) {
+            g_wrong++;
+        }
+        g_calls++;
+    }
+    return NULL;
+}
+
 void run_funchook_part(void)
 {
     code_arena_test_reset_kernel(10);
-    CHECK(k_target_count >= 124);
-    const int cosmetics = 0, roll = 28, rando = 32;
-    CHECK(hook_range(cosmetics, 28) == 0);
-    CHECK(all_hooked(cosmetics, 28, 1));
-    CHECK(code_arena_test_live_objects() == 1);
-    CHECK(hook_range(roll, 4) == 0);
-    CHECK(all_hooked(0, 32, 1));
-    CHECK(code_arena_test_live_objects() == 1);
+    CHECK(k_target_count >= 1155);
+    /* The combination H37 could not hold: 824 hooks. */
+    const int twilit = 0, dawn = 343, rando = 661, zora = 753, dark = 796, albt = 824;
+    CHECK(hook_range(twilit, 343) == 0);
+    CHECK(hook_range(dawn, 318) == 0);
     CHECK(hook_range(rando, 92) == 0);
-    CHECK(all_hooked(0, 124, 1));
+    CHECK(hook_range(zora, 43) == 0);
+    CHECK(hook_range(dark, 28) == 0);
+    CHECK(all_hooked(0, 824, 1));
+    const uint32_t five = code_arena_test_live_objects();
+    CHECK(five == 1);
+    int wide = 1;
+    for (int i = 0; i < 824; i++) {
+        wide &= leads_to_own_slot((void *)k_targets[i], g_orig[i], 12);
+    }
+    CHECK(wide);
+    CHECK(hook_range(albt, 331) == 0);
+    CHECK(all_hooked(0, 1155, 1));
     CHECK(code_arena_test_live_objects() == 2);
 
+    shapes();
+    short_functions();
+
+    /* Dawnlight off and on five times while another thread runs a Twilit hook nonstop. */
+    pthread_t thread;
+    g_stop = 0;
+    const int threaded = getenv("CODE_ARENA_TEST_NO_THREAD") == NULL;
+    if (threaded) {
+        CHECK(pthread_create(&thread, NULL, runner, (void *)(intptr_t)5) == 0);
+    }
     for (int cycle = 0; cycle < 5; cycle++) {
-        unhook_range(cosmetics, 28);
-        CHECK(all_hooked(cosmetics, 28, 0));  /* the originals again */
-        CHECK(all_hooked(roll, 96, 1));       /* the others never stopped */
-        CHECK(hook_range(cosmetics, 28) == 0);
-        CHECK(all_hooked(0, 124, 1));
+        if (getenv("CODE_ARENA_TEST_VERBOSE") != NULL) {
+            fprintf(stderr, "cycle %d\n", cycle);
+        }
+        unhook_range(dawn, 318);
+        CHECK(all_hooked(dawn, 318, 0));
+        CHECK(all_hooked(twilit, 343, 1) && all_hooked(rando, 1155 - rando, 1));
+        CHECK(hook_range(dawn, 318) == 0);
+        CHECK(all_hooked(0, 1155, 1));
+    }
+    g_stop = 1;
+    if (threaded) {
+        pthread_join(thread, NULL);
+        CHECK(g_wrong == 0 && g_calls > 0);
     }
     CHECK(code_arena_test_live_objects() == 2 && code_arena_test_peak_objects() == 2);
-    char line[320];
+    char line[512];
     funchook_arenas_acquire();
     code_arena_describe(&s_arenas, line, sizeof line);
     funchook_arenas_release();
-    printf("funchook     124 real hooks (28 + 4 + 92) installed, called and removed through the arenas; "
-           "Cosmetics off/on x5; %u CodeMemory object(s), peak %u, kernel limit 10\n",
-        code_arena_test_live_objects(), code_arena_test_peak_objects());
+    printf("funchook     Twilit 343 + Dawnlight 318 + Randomizer 92 + Zora Swim 43 + Dark Link 28 = 824 real hooks "
+           "with the 12-byte patch: %u CodeMemory object; + ALBT 331: %u; Dawnlight off/on x5 while a thread "
+           "made %ld calls through a hook in the same pages, %ld wrong; kernel limit 10\n",
+        five, code_arena_test_live_objects(), (long)g_calls, (long)g_wrong);
     printf("             %s\n", line);
-    unhook_range(0, 124);
-    CHECK(all_hooked(0, 124, 0));
+    unhook_range(0, 1155);
+    CHECK(all_hooked(0, 1155, 0));
 }

@@ -97,7 +97,8 @@ daB_OB_HIO_c::daB_OB_HIO_c() {
     mRange = 3.0f;
 }
 
-static void anm_init(b_ob_class* i_this, int i_anmID, f32 i_morf, u8 i_mode, f32 i_speed) {
+// DM1-d: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE void anm_init(b_ob_class* i_this, int i_anmID, f32 i_morf, u8 i_mode, f32 i_speed) {
     J3DAnmTransform* pbck = (J3DAnmTransform*)dComIfG_getObjectRes("B_oh", i_anmID);
     i_this->mBodyParts[0].mpMorf->setAnm(pbck, i_mode, i_morf, i_speed, 0.0f, -1.0f, NULL);
     i_this->mAnmID = i_anmID;
@@ -870,7 +871,8 @@ static void core_end(b_ob_class* i_this) {
     }
 }
 
-static void core_action(b_ob_class* i_this) {
+// DM1-d: Dawnlight 4.0.3 hooks this local function by name; -O3 inlined every call (DM1-d audit).
+static DUSK_NOINLINE void core_action(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     cXyz sp30;
@@ -974,7 +976,8 @@ static void core_action(b_ob_class* i_this) {
     }
 }
 
-static void core_damage_check(b_ob_class* i_this) {
+// DM1-c: Zora Swim 1.3.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE void core_damage_check(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
 
     if (fopAcM_CheckStatus(a_this, 0x100000)) {
@@ -1013,7 +1016,8 @@ static void core_damage_check(b_ob_class* i_this) {
     }
 }
 
-static void fish_damage_check(b_ob_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE void fish_damage_check(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
 
@@ -1088,7 +1092,8 @@ static void fish_damage_check(b_ob_class* i_this) {
     }
 }
 
-static BOOL pl_check(b_ob_class* i_this, f32 i_range, s16 i_maxAngle) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE BOOL pl_check(b_ob_class* i_this, f32 i_range, s16 i_maxAngle) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     fopAc_ac_c* player = (fopAc_ac_c*)dComIfGp_getPlayer(0);
 
@@ -1108,7 +1113,8 @@ static BOOL pl_check(b_ob_class* i_this, f32 i_range, s16 i_maxAngle) {
     return false;
 }
 
-static int fish_normal(b_ob_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE int fish_normal(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
 
@@ -1351,7 +1357,8 @@ static int fish_normal(b_ob_class* i_this) {
     return ret;
 }
 
-static int fish_vacume(b_ob_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE int fish_vacume(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
 
@@ -1653,7 +1660,8 @@ static void dmcalc(b_ob_class* i_this) {
     }
 }
 
-static void fish_move(b_ob_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 and Dawnlight 4.0.3 hook this local function by name; inlined into its caller (DM1C-c1 audit).
+static DUSK_NOINLINE void fish_move(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     cXyz sp84;
@@ -1993,7 +2001,8 @@ static void* s_hasidel_sub(void* i_this, void* i_data) {
     return NULL;
 }
 
-static void demo_camera(b_ob_class* i_this) {
+// DM1-c: Dark Morpheel 1.0.0 hooks this local function by name; -O3 inlined every call (DM1B-c1 audit).
+static DUSK_NOINLINE void demo_camera(b_ob_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));

@@ -6,7 +6,7 @@
 # in this order:
 #
 #   1. DUSK_APP_VERSION_OVERRIDE, when set: "v1.0.0" or "v1.0.0-beta.1" (anything else stops the configure). The H38
-#      preset sets it to v1.0.0-beta.1. Numeric version a.b.c.0.
+#      release preset sets it to v1.0.0. Numeric version a.b.c.0.
 #   2. a version tag git found (v1.0.0, or v1.0.0-12 for twelve commits after it): kept as Borealis made it.
 #   3. otherwise the Build ID, "<ALEKS2_BUILD_TAG>-<commit>" (H38-c4-0123456789): that is what the menu shows, with the
 #      numeric version DUSK_APP_BASE_VERSION.0 (1.0.0.0), so the NACP and the project version stay valid.

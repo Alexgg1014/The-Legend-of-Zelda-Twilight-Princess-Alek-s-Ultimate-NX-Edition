@@ -195,7 +195,7 @@ void daE_GE_c::setActionMode(int i_actionMode) {
     attention_info.distances[fopAc_attn_BATTLE_e] = 3;
 }
 
-void daE_GE_c::damage_check() {
+DUSK_NOINLINE void daE_GE_c::damage_check() {  // aleks2 (rc17): a catalog hook target (dawnlight), inlined by the PGO build
     if (mDamageCooldownTimer == 0) {
         mStts.Move();
         if (mActionMode != ACTION_DOWN) {
@@ -282,7 +282,7 @@ bool daE_GE_c::searchNextAttacker() {
     return true;
 }
 
-bool daE_GE_c::checkCircleSpeedAdd(cXyz* i_src, cXyz* param_1) {
+DUSK_NOINLINE bool daE_GE_c::checkCircleSpeedAdd(cXyz* i_src, cXyz* param_1) {
     cXyz position;
     cLib_offsetPos(&position, i_src, field_0xb8c, param_1);
     s16 targetAngleY = cLib_targetAngleY(i_src, &position);
@@ -1150,7 +1150,7 @@ void daE_GE_c::action() {
     mpMorfSO->play(0, dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
 }
 
-void daE_GE_c::mtx_set() {
+DUSK_NOINLINE void daE_GE_c::mtx_set() {
     mDoMtx_stack_c::transS(current.pos);
     mDoMtx_stack_c::ZXYrotM(shape_angle);
     mpMorfSO->getModel()->setBaseTRMtx(mDoMtx_stack_c::get());

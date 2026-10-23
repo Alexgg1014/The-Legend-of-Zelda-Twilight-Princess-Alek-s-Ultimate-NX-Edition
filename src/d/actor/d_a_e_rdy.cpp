@@ -3086,7 +3086,7 @@ static void small_damage(e_rdy_class* i_this, int i_collider) {
     i_this->mHitDirection = i_this->mAtInfo.mHitDirection.y;
 }
 
-static void damage_check(e_rdy_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_rdy_class* i_this) {
     fopAc_ac_c* _this = (fopAc_ac_c*)i_this;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     if (i_this->field_0xa8f != 0) {

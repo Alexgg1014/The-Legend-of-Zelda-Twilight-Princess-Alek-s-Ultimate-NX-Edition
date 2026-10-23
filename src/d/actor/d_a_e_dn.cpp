@@ -2301,7 +2301,7 @@ static void big_damage(e_dn_class* i_this) {
     i_this->field_0x710 = 0;
 }
 
-static void small_damage(e_dn_class* i_this) {
+static DUSK_NOINLINE void small_damage(e_dn_class* i_this) {
     fopEn_enemy_c* actor = (fopEn_enemy_c*)&i_this->actor;
 
     i_this->action = ACTION_S_DAMAGE;
@@ -2319,7 +2319,7 @@ static void small_damage(e_dn_class* i_this) {
     i_this->field_0x70c = i_this->at_info.mHitDirection.y;
 }
 
-static void damage_check(e_dn_class* i_this) {
+static DUSK_NOINLINE void damage_check(e_dn_class* i_this) {
     fopEn_enemy_c* actor = (fopEn_enemy_c*)&i_this->actor;
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
 

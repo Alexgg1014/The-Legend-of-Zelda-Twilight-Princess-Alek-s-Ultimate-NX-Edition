@@ -1,0 +1,7 @@
+{
+  "id": "dev.aleks2.cross_save",
+  "name": "Cloud Save (lab)",
+  "version": "0.1.0",
+  "author": "aleks2",
+  "description": "Lab build of cross-save: keeps the same Twilight Princess save in step across PC, Android and Switch through a Firebase project you own. Off until you link an account. Never replaces a save without a backup and asks when two copies diverge. Not tested on console."
+}

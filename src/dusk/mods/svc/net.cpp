@@ -1,3 +1,4 @@
+#include "dusk/mods/net_buffers.hpp"
 #include "registry.hpp"
 
 #include "internal.hpp"
@@ -18,6 +19,11 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+
+#ifdef __SWITCH__
+#include "dusk/switch_net.h"
+#endif
 
 namespace dusk::mods::svc {
 namespace {
@@ -46,6 +52,14 @@ struct HandleState {
     bool openPublished = false;
 };
 
+struct ModState;
+
+// aleks2 (DM3): every live state, so a resume from sleep can close what each mod holds.
+std::unordered_set<ModState*>& live_states() {
+    static std::unordered_set<ModState*> s_live;
+    return s_live;
+}
+
 struct ModState {
     ModState()
         : context{borealis::net::ContextOptions{
@@ -55,11 +69,17 @@ struct ModState {
               .maxListeners = MaxListenersPerMod,
               .maxDatagramSockets = MaxDatagramsPerMod,
               .maxResolvers = MaxResolversPerMod,
-          }} {}
+          }} {
+        live_states().insert(this);
+    }
+    ~ModState() { live_states().erase(this); }
 
     borealis::net::Context context;
     std::unordered_map<borealis::net::SocketId, NetHandle> handles;
     borealis::net::Event currentEvent;
+    // DM3: sockets closed because the console slept; their Closed event says so.
+    std::unordered_set<borealis::net::SocketId> closedBySleep;
+    bool warnedOffline = false;
 };
 
 SlotMap<HandleState> s_handles;
@@ -167,7 +187,64 @@ size_t count_handles(const LoadedMod& mod, HandleKind kind) {
     return count;
 }
 
+#ifdef __SWITCH__
+// DM3: sockets do not survive sleep. On resume every socket a mod holds through this service is closed; the
+// Closed event it then gets carries NET_ERROR_NETWORK and says why, so the mod treats it as a disconnect.
+void close_after_sleep() {
+    size_t closed = 0;
+    for (ModState* state : live_states()) {
+        for (const auto& [socket, handle] : state->handles) {
+            state->closedBySleep.insert(socket);
+            state->context.close(socket);
+            closed++;
+        }
+    }
+    if (closed != 0) {
+        DuskLog.info("[net] resumed from sleep: closed {} mod socket(s)", closed);
+    }
+}
+
+void watch_sleep() {
+    static const int s_listener = dusk::switchnet::add_resume_listener(close_after_sleep);
+    (void)s_listener;
+}
+
+// DM3: a clear answer when the console has no network at all, rather than a resolver timeout later.
+bool offline(LoadedMod& mod, ModState& state, std::string_view what) {
+    if (dusk::switchnet::link() != dusk::switchnet::Link::Offline) {
+        return false;
+    }
+    if (!state.warnedOffline) {
+        state.warnedOffline = true;
+        DuskLog.warn("[{}] {}: the console has no network connection (airplane mode or no Wi-Fi?)",
+            mod.metadata.id, what);
+    }
+    return true;
+}
+
+// DM3 LAN option: a listener on 127.0.0.1 listens on every interface instead (Settings, off by default).
+std::string lan_bind(LoadedMod& mod, std::string_view bind) {
+    const auto parsed = borealis::net::parse_endpoint(bind);
+    if (!dusk::switchnet::lan_listen_allowed() || !parsed || parsed->host != "127.0.0.1") {
+        return std::string{bind};
+    }
+    dusk::switchnet::IpConfig ip;
+    std::string where = "this console's address";
+    if (dusk::switchnet::ip_config(ip)) {
+        const auto* b = reinterpret_cast<const uint8_t*>(&ip.address);
+        where = fmt::format("{}.{}.{}.{}", b[0], b[1], b[2], b[3]);
+    }
+    DuskLog.warn("[{}] listens on the local network (port {}), not only on this console: reachable at {}:{}. "
+                 "Turn it off in Settings > Aleks if you did not mean it.",
+        mod.metadata.id, parsed->port, where, parsed->port);
+    return "tcp://0.0.0.0:" + std::to_string(parsed->port);
+}
+#endif
+
 ModState& state_for(LoadedMod& mod) {
+#ifdef __SWITCH__
+    watch_sleep();
+#endif
     return s_modStates.get_or_create(mod);
 }
 
@@ -210,6 +287,11 @@ ModResult net_connect(ModContext* context, const NetConnectDesc* desc, NetHandle
         return MOD_CONFLICT;
     }
     auto& state = state_for(*mod);
+#ifdef __SWITCH__
+    if (offline(*mod, state, "connect")) {
+        return MOD_UNAVAILABLE;
+    }
+#endif
     const size_t maxSendQueueBytes = bounded_send_queue(desc->max_send_queue_bytes);
     const borealis::net::SocketId socket = state.context.connect(endpoint,
         borealis::net::StreamOptions{
@@ -260,7 +342,12 @@ ModResult net_listen(ModContext* context, const NetListenDesc* desc, NetHandle* 
     }
     auto& state = state_for(*mod);
     const size_t maxSendQueueBytes = bounded_send_queue(desc->max_send_queue_bytes);
-    const auto result = state.context.listen(bind,
+#ifdef __SWITCH__
+    const std::string effectiveBind = lan_bind(*mod, bind);
+#else
+    const std::string effectiveBind{bind};
+#endif
+    const auto result = state.context.listen(effectiveBind,
         borealis::net::ListenOptions{
             .accepted =
                 borealis::net::StreamOptions{
@@ -325,8 +412,13 @@ ModResult net_open_datagram(ModContext* context, const NetDatagramDesc* desc, Ne
     const auto result = state.context.open_datagram(bind,
         borealis::net::DatagramOptions{
             .maxSendQueueBytes = maxSendQueueBytes,
+#ifdef __SWITCH__
+            .recvBufferBytes = net_buffers::kModUdpReceiveBytes,  // V1-rc5: one pool for every socket
+            .sendBufferBytes = net_buffers::kModUdpSendBytes,
+#else
             .recvBufferBytes = 1024 * 1024,
             .sendBufferBytes = 1024 * 1024,
+#endif
         },
         desc->user_data);
     if (result.id == 0) {
@@ -370,6 +462,11 @@ ModResult net_resolve(
         return MOD_CONFLICT;
     }
     auto& state = state_for(*mod);
+#ifdef __SWITCH__
+    if (offline(*mod, state, "resolve")) {
+        return MOD_UNAVAILABLE;
+    }
+#endif
     const auto socket = state.context.resolve(endpointText, userData);
     if (socket == 0) {
         return MOD_CONFLICT;
@@ -409,6 +506,13 @@ ModResult net_poll_event(ModContext* context, NetEvent* outEvent) {
         output.dropped = state->currentEvent.dropped;
         output.error = map_error(state->currentEvent.error);
         output.error_message = state->currentEvent.message.c_str();
+        if (state->currentEvent.kind == borealis::net::Event::Kind::Closed &&
+            state->closedBySleep.erase(state->currentEvent.id) != 0)
+        {
+            state->currentEvent.message = "The console went to sleep; the connection was lost";
+            output.error = NET_ERROR_NETWORK;
+            output.error_message = state->currentEvent.message.c_str();
+        }
         if (!copy_endpoint(output.endpoint, state->currentEvent.endpoint)) {
             output.endpoint = {};
         }

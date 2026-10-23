@@ -40,9 +40,10 @@ public:
     COutFont_c(u8);
     void initialize();
     void setBlendAnime(J2DPicture*, DUSK_IF_ELSE(f32, s16));
-    // Static: reads no members, so the companion reader can share the same
-    // index -> texture table instead of keeping a copy that drifts.
-    static const char* getBtiName(int);
+    // A member, as upstream declares it: mods call it with `this` in x0 (V1-rc4: it had been made static,
+    // which read the index from the wrong register for them). The companion uses btiName, the same table.
+    const char* getBtiName(int);
+    static const char* btiName(int);
 
     virtual ~COutFont_c();
     virtual void setPane(J2DPicture*);

@@ -1,4 +1,5 @@
 #include "registry.hpp"
+#include "hook.hpp"
 
 #include "dusk/mods/loader/loader.hpp"
 #if DUSK_HAS_PREPATCH
@@ -25,13 +26,100 @@
 #endif
 #endif
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+
+#include "arg_shield.hpp"
+
+// V1-rc9: perf-lab.ini arg_shield (frame_telemetry.cpp); on unless it says 0.
+bool g_duskArgShield = true;
+// V1-rc16: perf-lab.ini hook_fast (frame_telemetry.cpp); on unless it says 0. The dispatch's lookup cache and early-outs.
+bool g_duskHookFast = true;
+// V1-PGO: perf-lab.ini hook_fast = verify. The cache is used, but every hit is checked against the registry; a cached
+// slot that differs is logged (the first 16) and the registry's used. Diagnosis for the PGO build's Dawnlight crash.
+bool g_duskHookVerify = false;
 #include <vector>
 #endif
 
 namespace dusk::mods::svc {
+
+// V1-rc6: see hook.hpp. A few dozen slots, searched linearly: there are a handful of mods.
+namespace {
+constexpr size_t kCpuSlots = 32;
+CpuProfileEntry s_cpu[kCpuSlots];
+size_t s_cpuCount = 0;
+std::thread::id s_cpuThread;
+
+// V1-rc9: one hooked call in kSampleEvery is timed (on the game thread only) and counted kSampleEvery times: the
+// rc8 dispatcher read the clock twice per callback on every call, ~258 hooked functions with Twilit Essentials.
+constexpr uint32_t kSampleEvery = 64;
+
+uint64_t now_ns() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+}
+
+struct ScopedModCpu {
+    const void* context;
+    uint64_t start = 0;
+    // V1-rc16: the same sampled time also goes to the hook's slot and to the callback itself (hook statistics: how
+    // much of a target's dispatch is its callbacks, and which callback).
+    uint64_t* slotSink = nullptr;
+    uint64_t* hookSink = nullptr;
+    ScopedModCpu(const void* modContext, bool sampled, uint64_t* slotNs = nullptr, uint64_t* hookNs = nullptr)
+        : context{sampled ? modContext : nullptr}, slotSink{slotNs}, hookSink{hookNs} {
+        if (context != nullptr) {
+            start = now_ns();
+        }
+    }
+    ~ScopedModCpu() {
+        if (context != nullptr) {
+            const uint64_t ns = (now_ns() - start) * kSampleEvery;
+            cpu_profile_add(context, ns);
+            if (slotSink != nullptr) {
+                *slotSink += ns;
+            }
+            if (hookSink != nullptr) {
+                *hookSink += ns;
+            }
+        }
+    }
+};
+}  // namespace
+
+void cpu_profile_set_thread() {
+    s_cpuThread = std::this_thread::get_id();
+}
+
+bool on_profiled_thread() {
+    return std::this_thread::get_id() == s_cpuThread;
+}
+
+void cpu_profile_add(const void* modContext, uint64_t nanoseconds) {
+    if (modContext == nullptr || std::this_thread::get_id() != s_cpuThread) {
+        return;
+    }
+    for (size_t i = 0; i < s_cpuCount; ++i) {
+        if (s_cpu[i].modContext == modContext) {
+            s_cpu[i].nanoseconds += nanoseconds;
+            return;
+        }
+    }
+    if (s_cpuCount < kCpuSlots) {
+        s_cpu[s_cpuCount++] = {modContext, nanoseconds};
+    }
+}
+
+std::vector<CpuProfileEntry> cpu_profile_take() {
+    std::vector<CpuProfileEntry> out(s_cpu, s_cpu + s_cpuCount);
+    s_cpuCount = 0;
+    return out;
+}
+
 namespace {
 
 #if DUSK_CODE_MODS
@@ -41,6 +129,7 @@ struct PreHookFn {
     HookPreFn callback = nullptr;
     HookOptions options = HOOK_OPTIONS_INIT;
     uint64_t order = 0;
+    uint64_t sampledNs = 0;  // V1-rc16: this callback's time since the last report, sampled and scaled
 };
 
 struct VoidHookFn {
@@ -49,12 +138,20 @@ struct VoidHookFn {
     HookPostFn postCallback = nullptr;
     HookOptions options = HOOK_OPTIONS_INIT;
     uint64_t order = 0;
+    uint64_t sampledNs = 0;  // V1-rc16: as PreHookFn::sampledNs
 };
 
 struct HookSlot {
     std::vector<PreHookFn> pre;
     VoidHookFn replace{};
     std::vector<VoidHookFn> post;
+    // V1-rc9: game-thread statistics since the last report (hook_stats_take): every call is counted, one in
+    // kSampleEvery is timed -- the whole dispatch and the callbacks in it, scaled.
+    uint64_t calls = 0;
+    uint64_t dispatchNs = 0;
+    uint64_t callbackNs = 0;
+    uint32_t preTick = 0;
+    uint32_t postTick = 0;
 };
 
 // One per mod that requested a hook on a target: its template-generated trampoline and the
@@ -100,6 +197,24 @@ std::unordered_map<uintptr_t, HookSlot> s_registry;
 std::unordered_map<uintptr_t, InstalledHook> s_installed;
 std::unordered_map<const ModContext*, std::vector<uintptr_t>> s_declaredTargets;
 uint64_t s_nextOrder = 0;
+HookStats s_lastStats;  // V1-rc9: the last report, for the heartbeat
+
+// V1-rc16: a direct-mapped cache in front of s_registry for the dispatch, game thread only (no other thread reads or
+// writes it, so an entry can never be seen half-written). Keyed by the address the trampoline passes, before
+// resolve_target; a miss is cached too (slot nullptr). Every change to the registry bumps s_registryGen, which drops
+// all entries at once -- including cached misses when a target gains its first callback. unordered_map keeps element
+// addresses across rehashing, and an erased slot is never reached again because the generation moved.
+struct SlotCacheEntry {
+    uintptr_t key = 0;
+    struct HookSlot* slot = nullptr;
+    uint32_t gen = 0;
+};
+constexpr size_t kSlotCacheSize = 512;
+SlotCacheEntry s_slotCache[kSlotCacheSize];
+uint32_t s_registryGen = 1;
+void registry_changed() {
+    ++s_registryGen;
+}
 
 bool declared_target(const ModContext* context, void* fnAddr) {
     if (context == nullptr) {
@@ -141,6 +256,10 @@ std::string target_label(const ModContext* context, void* fnAddr) {
                 return hook_mem_display_name(*record);
             }
         }
+    }
+    // V1-rc16: a game function hooked by address has no record above; the symbol manifest names it.
+    if (const char* name = manifest::name_at(fnAddr)) {
+        return name;
     }
     return fmt::format("{:p}", fnAddr);
 }
@@ -303,7 +422,7 @@ funchook_t* install_funchook(void* fnAddr, void* trampoline, void** outOriginal)
         DuskLog.warn("HookSystem: funchook failed for {:p} (prepare={} install={}): {}", fnAddr,
             prep, inst, message != nullptr && message[0] != '\0' ? message : "no details");
 #if defined(__SWITCH__)
-        char summary[320];
+        char summary[512];
         funchook_switch_describe(summary, sizeof summary);
         DuskLog.warn("HookSystem: {}", summary);
 #endif
@@ -337,7 +456,14 @@ bool install_backend(
     // aleks2: successes were silent, so a log with no failures in it could
     // mean "all four installed" or "none was ever attempted" -- and on Switch
     // those two look identical and need completely different work.
-    DuskLog.info("HookSystem: installed at {:p}", fnAddr);
+    // V1-rc5: Debug, not Info: one flushed line per hook cost ~18 ms on the console's card (265 hooks of
+    // Twilit Essentials ~5 s of the boot). The per-mod declared/installed count still says what ran.
+    DuskLog.debug("HookSystem: installed at {:p}", fnAddr);
+    // V1-rc6: a trace every 64, so that a crash while installing shows how far it got.
+    static uint32_t s_installedCount = 0;
+    if (++s_installedCount % 64 == 0) {
+        DuskLog.info("HookSystem: {} hooks installed so far (last at {:p})", s_installedCount, fnAddr);
+    }
     return true;
 #else
 #if DUSK_HAS_PREPATCH
@@ -512,6 +638,7 @@ ModResult hook_add_pre(
     if (!declared_target(context, fnAddr)) {
         return reject_undeclared(context, fnAddr);
     }
+    registry_changed();  // V1-rc16
     auto& hooks = s_registry[reinterpret_cast<uintptr_t>(fnAddr)].pre;
     hooks.push_back({context, callback, normalize_options(options), s_nextOrder++});
     sort_hooks(hooks);
@@ -527,6 +654,7 @@ ModResult hook_add_post(
     if (!declared_target(context, fnAddr)) {
         return reject_undeclared(context, fnAddr);
     }
+    registry_changed();  // V1-rc16
     auto& hooks = s_registry[reinterpret_cast<uintptr_t>(fnAddr)].post;
     hooks.push_back({context, nullptr, callback, normalize_options(options), s_nextOrder++});
     sort_hooks(hooks);
@@ -544,6 +672,7 @@ ModResult hook_replace(
     if (!declared_target(context, fnAddr)) {
         return reject_undeclared(context, fnAddr);
     }
+    registry_changed();  // V1-rc16
     auto& slot = s_registry[reinterpret_cast<uintptr_t>(fnAddr)];
     if (slot.replace.replaceCallback == nullptr) {
         slot.replace = {context, callback, nullptr, normalized, s_nextOrder++};
@@ -617,6 +746,7 @@ ModResult hook_uninstall(ModContext* context, void* fnAddr, void** originalFnSlo
     }
 #endif
 
+    registry_changed();  // V1-rc16
     if (const auto registryIt = s_registry.find(key);
         registryIt != s_registry.end() && erase_callbacks(registryIt->second, context))
     {
@@ -642,6 +772,52 @@ ModResult hook_uninstall(ModContext* context, void* fnAddr, void** originalFnSlo
     return MOD_OK;
 }
 
+// V1-rc16: the slot a dispatched call belongs to, or nullptr. On the game thread with hook_fast, through the cache.
+// (Returning early when there is nothing to do: an idea from Chansey's sa2-nx docs; THIRD_PARTY_NOTICES.)
+HookSlot* find_slot(void* fnAddr, bool gameThread) {
+    const auto raw = reinterpret_cast<uintptr_t>(fnAddr);
+    SlotCacheEntry* entry = nullptr;
+    if (gameThread && g_duskHookFast) {
+        entry = &s_slotCache[((raw >> 2) ^ (raw >> 11)) & (kSlotCacheSize - 1)];
+        if (entry->key == raw && entry->gen == s_registryGen) {
+            if (!g_duskHookVerify) {
+                return entry->slot;
+            }
+            const auto fresh = s_registry.find(reinterpret_cast<uintptr_t>(resolve_target(fnAddr)));
+            HookSlot* freshSlot = fresh == s_registry.end() ? nullptr : &fresh->second;
+            if (freshSlot != entry->slot) {
+                static int s_reported = 0;
+                if (s_reported++ < 16) {
+                    DuskLog.warn("HookSystem: hook_fast verify: cached slot {} for {:p} (index {}, gen {}) but the "
+                                 "registry has {}",
+                        static_cast<const void*>(entry->slot), fnAddr, entry - s_slotCache, entry->gen,
+                        static_cast<const void*>(freshSlot));
+                }
+                entry->slot = freshSlot;
+            }
+            return freshSlot;
+        }
+    }
+    const auto it = s_registry.find(reinterpret_cast<uintptr_t>(resolve_target(fnAddr)));
+    HookSlot* slot = it == s_registry.end() ? nullptr : &it->second;
+    if (entry != nullptr) {
+        *entry = {raw, slot, s_registryGen};
+    }
+    return slot;
+}
+
+// V1-rc9: the dispatch of a sampled call, timed whole (lookup, callbacks, bookkeeping), scaled to all calls.
+struct SlotTimer {
+    HookSlot& slot;
+    bool sampled;
+    uint64_t start;
+    ~SlotTimer() {
+        if (sampled) {
+            slot.dispatchNs += (now_ns() - start) * kSampleEvery;
+        }
+    }
+};
+
 ModResult hook_dispatch_pre(
     ModContext*, void* fnAddr, void* args, void* retval, int* outSkipOriginal) {
     if (outSkipOriginal != nullptr) {
@@ -651,18 +827,30 @@ ModResult hook_dispatch_pre(
         return MOD_INVALID_ARGUMENT;
     }
 
-    fnAddr = resolve_target(fnAddr);
-    const auto it = s_registry.find(reinterpret_cast<uintptr_t>(fnAddr));
-    if (it == s_registry.end()) {
+    const bool gameThread = on_profiled_thread();
+    HookSlot* found = find_slot(fnAddr, gameThread);
+    if (found == nullptr) {
         return MOD_OK;
     }
-    auto& slot = it->second;
+    auto& slot = *found;
+    if (gameThread) {
+        ++slot.calls;
+    }
+    // V1-rc16: a target with only post callbacks has nothing to do here (no copy of the first argument either).
+    if (g_duskHookFast && slot.pre.empty() && slot.replace.replaceCallback == nullptr) {
+        return MOD_OK;
+    }
+    const bool sampled = gameThread && (slot.preTick++ % kSampleEvery) == 0;
+    const uint64_t t0 = sampled ? now_ns() : 0;
+    const SlotTimer timer{slot, sampled, t0};
+    const ArgShield shield{args, g_duskArgShield};  // V1-rc9: args[0] is a copy here (arg_shield.hpp)
     for (auto& hook : slot.pre) {
         if (hook.callback == nullptr) {
             continue;
         }
         HookAction action = HOOK_CONTINUE;
         try {
+            const ScopedModCpu cpu{hook.context, sampled, &slot.callbackNs, &hook.sampledNs};
             action = hook.callback(hook.context, args, retval, hook.options.userdata);
         } catch (const std::exception& e) {
             fail_hook_callback(hook.context, "pre", e);
@@ -680,6 +868,7 @@ ModResult hook_dispatch_pre(
     }
     if (slot.replace.replaceCallback != nullptr) {
         try {
+            const ScopedModCpu cpu{slot.replace.context, sampled, &slot.callbackNs, &slot.replace.sampledNs};
             slot.replace.replaceCallback(
                 slot.replace.context, args, retval, slot.replace.options.userdata);
         } catch (const std::exception& e) {
@@ -696,19 +885,110 @@ ModResult hook_dispatch_pre(
     return MOD_OK;
 }
 
+// V1-rc9: the hook statistics since the last call, per frame, and resets them.
+// V1-rc16: with the callbacks' share (sampled the same way), so dispatch - callbacks is what the dispatcher itself
+// costs, and the top target's callbacks one by one (mod and callback address: "mapped at" in the log gives the offset).
+HookStats hook_stats_take_impl(uint32_t frames) {
+    HookStats out;
+    if (frames == 0) {
+        frames = 1;
+    }
+    struct Row {
+        uintptr_t key;
+        HookSlot* slot;
+    };
+    std::vector<Row> rows;
+    uint64_t calls = 0, dispatchNs = 0, callbackNs = 0;
+    for (auto& [key, slot] : s_registry) {
+        calls += slot.calls;
+        dispatchNs += slot.dispatchNs;
+        callbackNs += slot.callbackNs;
+        if (slot.calls != 0) {
+            rows.push_back({key, &slot});
+        }
+    }
+    std::ranges::sort(rows, std::greater{}, [](const Row& r) { return r.slot->dispatchNs; });
+    const double perFrame = 1e6 * static_cast<double>(frames);
+    out.callsPerFrame = static_cast<double>(calls) / frames;
+    out.dispatchMsPerFrame = static_cast<double>(dispatchNs) / perFrame;
+    out.callbacksMsPerFrame = static_cast<double>(callbackNs) / perFrame;
+    out.targets = rows.size();
+    for (size_t i = 0; i < rows.size() && i < 5; ++i) {
+        const HookSlot& slot = *rows[i].slot;
+        ModContext* owner = !slot.pre.empty()    ? slot.pre.front().context
+                            : !slot.post.empty() ? slot.post.front().context
+                                                 : slot.replace.context;
+        const size_t callbacks = slot.pre.size() + slot.post.size() + (slot.replace.replaceCallback != nullptr);
+        out.top += fmt::format("{}{} {:.0f}/f {:.3f} ms (callbacks {:.3f} ms, {})", out.top.empty() ? "" : ", ",
+            target_label(owner, reinterpret_cast<void*>(rows[i].key)), static_cast<double>(slot.calls) / frames,
+            static_cast<double>(slot.dispatchNs) / perFrame, static_cast<double>(slot.callbackNs) / perFrame,
+            callbacks);
+    }
+    if (!rows.empty()) {
+        struct Cb {
+            ModContext* context;
+            const void* fn;
+            const char* kind;
+            uint64_t ns;
+        };
+        std::vector<Cb> cbs;
+        const HookSlot& top = *rows.front().slot;
+        for (const auto& h : top.pre) {
+            cbs.push_back({h.context, reinterpret_cast<const void*>(h.callback), "pre", h.sampledNs});
+        }
+        for (const auto& h : top.post) {
+            cbs.push_back({h.context, reinterpret_cast<const void*>(h.postCallback), "post", h.sampledNs});
+        }
+        if (top.replace.replaceCallback != nullptr) {
+            cbs.push_back({top.replace.context, reinterpret_cast<const void*>(top.replace.replaceCallback), "replace",
+                top.replace.sampledNs});
+        }
+        std::ranges::sort(cbs, std::greater{}, [](const Cb& c) { return c.ns; });
+        for (size_t i = 0; i < cbs.size() && i < 12; ++i) {
+            out.topCallbacks += fmt::format("{}{} {} {:p} {:.3f} ms", i == 0 ? "" : ", ",
+                mod_id_from_context(cbs[i].context), cbs[i].kind, cbs[i].fn,
+                static_cast<double>(cbs[i].ns) / perFrame);
+        }
+    }
+    for (auto& [key, slot] : s_registry) {
+        slot.calls = slot.dispatchNs = slot.callbackNs = 0;
+        for (auto& h : slot.pre) {
+            h.sampledNs = 0;
+        }
+        for (auto& h : slot.post) {
+            h.sampledNs = 0;
+        }
+        slot.replace.sampledNs = 0;
+    }
+    s_lastStats = out;
+    return out;
+}
+
+HookStats hook_stats_last_impl() {
+    return s_lastStats;
+}
+
 ModResult hook_dispatch_post(ModContext*, void* fnAddr, void* args, void* retval) {
     if (fnAddr == nullptr) {
         return MOD_INVALID_ARGUMENT;
     }
 
-    fnAddr = resolve_target(fnAddr);
-    const auto it = s_registry.find(reinterpret_cast<uintptr_t>(fnAddr));
-    if (it == s_registry.end()) {
+    const bool gameThread = on_profiled_thread();
+    HookSlot* found = find_slot(fnAddr, gameThread);
+    if (found == nullptr) {
         return MOD_OK;
     }
-    for (auto& hook : it->second.post) {
+    auto& slot = *found;
+    if (slot.post.empty()) {
+        return MOD_OK;  // V1-rc9: most targets have only pre hooks
+    }
+    const bool sampled = gameThread && (slot.postTick++ % kSampleEvery) == 0;
+    const SlotTimer timer{slot, sampled, sampled ? now_ns() : 0};
+    const ArgShield shield{args, g_duskArgShield};
+    for (auto& hook : slot.post) {
         if (hook.postCallback != nullptr) {
             try {
+                const ScopedModCpu cpu{hook.context, sampled, &slot.callbackNs, &hook.sampledNs};
                 hook.postCallback(hook.context, args, retval, hook.options.userdata);
             } catch (const std::exception& e) {
                 fail_hook_callback(hook.context, "post", e);
@@ -966,10 +1246,33 @@ void* resolve_member_record(const unsigned char* pmf, size_t pmfSize, const char
 #endif
 }
 
+HookCounts hook_counts_impl(const LoadedMod& mod) {
+    HookCounts c;
+    const ModContext* context = mod.context.get();
+    for (const auto& [target, slot] : s_registry) {
+        for (const auto& pre : slot.pre) c.callbacks += pre.context == context;
+        c.callbacks += slot.replace.context == context && slot.replace.replaceCallback != nullptr;
+        for (const auto& post : slot.post) c.callbacks += post.context == context;
+    }
+    for (const auto& [target, entry] : s_installed) {
+        for (const auto& cand : entry.candidates) {
+            if (cand.context == context) {
+                ++c.installed;
+                break;
+            }
+        }
+    }
+    if (const auto it = s_declaredTargets.find(context); it != s_declaredTargets.end()) {
+        c.declared = it->second.size();
+    }
+    return c;
+}
+
 void hook_remove_mod(LoadedMod& mod) {
     ModContext* context = mod.context.get();
     s_declaredTargets.erase(context);
 
+    registry_changed();  // V1-rc16
     for (auto it = s_registry.begin(); it != s_registry.end();) {
         if (erase_callbacks(it->second, context)) {
             it = s_registry.erase(it);
@@ -1010,6 +1313,10 @@ void hook_remove_mod(LoadedMod& mod) {
 
 #else  // DUSK_CODE_MODS
 
+HookCounts hook_counts_impl(const LoadedMod&) {
+    return {};
+}
+
 ModResult hook_install(ModContext*, void*, void*, void**) {
     return MOD_UNSUPPORTED;
 }
@@ -1033,6 +1340,12 @@ ModResult hook_dispatch_pre(ModContext*, void*, void*, void*, int* outSkipOrigin
 }
 ModResult hook_dispatch_post(ModContext*, void*, void*, void*) {
     return MOD_UNSUPPORTED;
+}
+HookStats hook_stats_take_impl(uint32_t) {
+    return {};
+}
+HookStats hook_stats_last_impl() {
+    return {};
 }
 void hook_remove_mod(LoadedMod&) {}
 
@@ -1069,6 +1382,106 @@ constexpr HookService s_hookService{
 };
 
 }  // namespace
+
+// V1-rc9: the hook statistics (hook.hpp), outside the anonymous namespace the dispatch lives in.
+HookStats hook_stats_take(uint32_t frames) {
+    return hook_stats_take_impl(frames);
+}
+HookStats hook_stats_last() {
+    return hook_stats_last_impl();
+}
+
+HookCounts hook_counts(const LoadedMod& mod) {
+    return hook_counts_impl(mod);
+}
+
+#if DUSK_CODE_MODS && DUSK_HAS_FUNCHOOK && defined(__SWITCH__) && !defined(ALEKS2_HOOK_ROOM)
+#define ALEKS2_HOOK_ROOM 1
+#endif
+#if defined(ALEKS2_HOOK_ROOM)
+// The code arenas' count (funchook_arena_glue.c; hook_room_test.cpp supplies its own).
+extern "C" void funchook_switch_usage(uint32_t* used, uint32_t* free_now, uint32_t* capacity);
+#endif
+
+HookRoom hook_room() {
+    HookRoom room;
+#if defined(ALEKS2_HOOK_ROOM)
+    room.known = true;
+    funchook_switch_usage(&room.used, nullptr, &room.capacity);
+#endif
+    return room;
+}
+
+size_t hook_new_targets(const LoadedMod& mod) {
+#if DUSK_CODE_MODS
+    const auto it = s_declaredTargets.find(mod.context.get());
+    if (it == s_declaredTargets.end()) {
+        return 0;
+    }
+    std::vector<uintptr_t> fresh;
+    for (const uintptr_t target : it->second) {
+        if (s_installed.contains(target) || std::ranges::find(fresh, target) != fresh.end()) {
+            continue;  // already hooked (shared, no new slot) or declared twice
+        }
+#if DUSK_HAS_PREPATCH
+        if (prepatch::lookup(reinterpret_cast<void*>(target))) {
+            continue;  // a prepatched gateway, no trampoline
+        }
+#endif
+        fresh.push_back(target);
+    }
+    return fresh.size();
+#else
+    (void)mod;
+    return 0;
+#endif
+}
+
+bool hook_room_check(const LoadedMod& mod, std::string& why) {
+    const HookRoom room = hook_room();
+    const size_t need = hook_new_targets(mod);
+    if (!room.known || need == 0) {
+        return true;
+    }
+    const size_t left = room.capacity > room.used ? room.capacity - room.used : 0;
+    if (need <= left) {
+        DuskLog.info("HookSystem: {} takes {} new hook slot(s); {} of {} in use before it",
+            mod.metadata.id, need, room.used, room.capacity);
+        return true;
+    }
+#if DUSK_CODE_MODS
+    // Who holds the room: the hooked functions each running mod takes part in.
+    std::vector<std::pair<size_t, std::string>> holders;
+    for (const auto& [target, entry] : s_installed) {
+        for (const auto& candidate : entry.candidates) {
+            const auto* holder = mod_from_context(candidate.context);
+            if (holder == nullptr) {
+                continue;
+            }
+            auto found = std::ranges::find_if(holders,
+                [&](const auto& h) { return h.second == holder->metadata.name; });
+            if (found == holders.end()) {
+                holders.emplace_back(1, holder->metadata.name);
+            } else {
+                ++found->first;
+            }
+        }
+    }
+    std::ranges::sort(holders, [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::string most;
+    for (size_t i = 0; i < holders.size() && i < 3; ++i) {
+        most += fmt::format("{}{} {}", i == 0 ? "" : ", ", holders[i].second, holders[i].first);
+    }
+    why = fmt::format("No room for its hooks: it needs {} and {} of {} are left. Using the most: {}. "
+                      "Disable one of them and restart.",
+        need, left, room.capacity, most.empty() ? "nothing yet" : most);
+#else
+    why = fmt::format("No room for its hooks: it needs {} and {} of {} are left.", need, left,
+        room.capacity);
+#endif
+    DuskLog.warn("HookSystem: {} refused before it started: {}", mod.metadata.id, why);
+    return false;
+}
 
 #if DUSK_CODE_MODS
 void hook_resolve_mod_records(LoadedMod& mod) {

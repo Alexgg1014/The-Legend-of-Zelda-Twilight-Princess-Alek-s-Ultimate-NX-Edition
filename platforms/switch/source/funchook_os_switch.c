@@ -308,6 +308,15 @@ static const code_arena_ops s_ops = {
 };
 
 /* A zero Mutex is an unlocked one, so the lock needs no initialisation of its own. */
+/* aleks2 (V1-rc9): the arenas' release at exit (switch_startup.cpp, userAppExit). */
+int aleks2_release_hook_arenas(uint32_t *released, uint32_t *last_rc)
+{
+    if (s_arenas.ops == NULL) {
+        return 0;
+    }
+    return code_arenas_release(&s_arenas, released, last_rc);
+}
+
 code_arenas *funchook_arenas_acquire(void)
 {
     static int initialized = 0;
@@ -327,6 +336,20 @@ void funchook_arenas_release(void)
 int funchook_arenas_permitted(funchook_t *funchook)
 {
     return hooks_permitted(funchook);
+}
+
+/* aleks2 (DM2-a): how far past a hooked function's start funchook may read the code, looking for
+ * branches back into the patch (cmake/PatchFunchookSlots.cmake): the end of the memory region
+ * holding it, so the scan never runs off the mapped image. */
+uintptr_t funchook_switch_scan_end(const void *func)
+{
+    MemoryInfo info;
+    u32 page_info;
+    if (R_FAILED(svcQueryMemory(&info, &page_info, (u64)func)) || info.size == 0 ||
+        (info.perm & Perm_R) == 0) {
+        return ((uintptr_t)func + 0x1000) & ~(uintptr_t)0xFFF;  /* its own page is mapped */
+    }
+    return (uintptr_t)(info.addr + info.size);
 }
 
 /* ------------------------------------------------------ the game's code -- */

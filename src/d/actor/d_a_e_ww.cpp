@@ -287,7 +287,7 @@ bool daE_WW_c::checkBck(int i_index) {
     return 0;
 }
 
-void daE_WW_c::setActionMode(int i_action_id, int i_attack_action_id) {
+DUSK_NOINLINE void daE_WW_c::setActionMode(int i_action_id, int i_attack_action_id) {
     gravity = -5.0f;
     mAction = i_action_id;
     mActionMode = i_attack_action_id;

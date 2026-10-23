@@ -733,7 +733,7 @@ void dMsgScrnItem_c::setBpk1Animation(J2DAnmColor* param_0) {
     mpScreen->search(MULTI_CHAR('moyou_1'))->setAnimation(param_0);
 }
 
-bool dMsgScrnItem_c::isOugiID() {
+DUSK_NOINLINE bool dMsgScrnItem_c::isOugiID() {
     switch(dMsgObject_getMessageID()) {
     case 0x17ed:
     case 0x1823:

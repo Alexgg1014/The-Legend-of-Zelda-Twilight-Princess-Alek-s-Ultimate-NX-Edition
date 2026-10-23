@@ -143,7 +143,7 @@ void dPaPo_c::clearID(u32* param_0, u8* param_1) {
     }
 }
 
-int dPaPoT_c::setEffectTwo(dKy_tevstr_c const* param_0, cXyz const* param_1, u32 param_2,
+DUSK_NOINLINE int dPaPoT_c::setEffectTwo(dKy_tevstr_c const* param_0, cXyz const* param_1, u32 param_2,
                            u32 param_3, cXyz const* param_4, cXyz const* param_5,
                            cXyz const* param_6, csXyz const* param_7, cXyz const* param_8,
                            s8 param_9, f32 param_10, f32 param_11) {

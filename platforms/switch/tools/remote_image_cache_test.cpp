@@ -244,6 +244,43 @@ void test_failures() {
     CHECK(cache.take_publishes().empty());
 }
 
+// V1-rc5: with maxAttempts, transient failures come back after a delay; permanent ones do not.
+void test_retries() {
+    ri::Limits limits;
+    limits.maxAttempts = 3;
+    ri::Cache cache{limits};
+    const auto net = src(1), gone = src(2), busy = src(3);
+    for (const auto& s : {net, gone, busy}) {
+        cache.lookup(s, 1, 1);
+    }
+    auto starts = cache.take_starts();
+    CHECK(starts.size() == 3);
+    ri::FetchOutcome failure;
+    failure.kind = ri::FetchOutcome::Kind::NetworkError;
+    CHECK(cache.complete(net, find_start(starts, net)->ticket, failure) == ri::Cache::Completion::Retry);
+    failure.kind = ri::FetchOutcome::Kind::HttpError;
+    failure.httpStatus = 404;
+    CHECK(cache.complete(gone, find_start(starts, gone)->ticket, failure) == ri::Cache::Completion::Failed);
+    failure.httpStatus = 503;
+    CHECK(cache.complete(busy, find_start(starts, busy)->ticket, failure) == ri::Cache::Completion::Retry);
+    CHECK(cache.take_starts().empty());  // not before its delay
+    cache.set_now(1.5);
+    starts = cache.take_starts();
+    CHECK(starts.size() == 2 && cache.attempts_of(net) == 2);
+    CHECK(cache.complete(busy, find_start(starts, busy)->ticket, ok_image(4, 4)) == ri::Cache::Completion::Stored);
+    failure.kind = ri::FetchOutcome::Kind::NetworkError;
+    CHECK(cache.complete(net, find_start(starts, net)->ticket, failure) == ri::Cache::Completion::Retry);
+    cache.set_now(3.0);
+    CHECK(cache.take_starts().empty());  // the second delay is longer
+    cache.set_now(5.0);
+    starts = cache.take_starts();
+    CHECK(starts.size() == 1);
+    CHECK(cache.complete(net, starts[0].ticket, failure) == ri::Cache::Completion::Failed);
+    CHECK(cache.attempts_of(net) == 3 && cache.state_of(net) == ri::State::Failed);
+    cache.set_now(100.0);
+    CHECK(cache.take_starts().empty());
+}
+
 void test_hits_and_publish_budget() {
     ri::Cache cache({.publishBytesPerFrame = 1024 * 1024, .maxPublishesPerFrame = 4});
     std::vector<std::string> sources;
@@ -588,6 +625,7 @@ int main() {
     test_dedup_and_priority();
     test_tickets_and_late_results();
     test_failures();
+    test_retries();
     test_hits_and_publish_budget();
     test_memory_and_eviction();
     test_tracked_limit();

@@ -397,7 +397,7 @@ void J3DShapePacket::draw() {
     }
 }
 
-void J3DShapePacket::drawFast() {
+DUSK_NOINLINE void J3DShapePacket::drawFast() {
     ZoneScoped;
     if (!checkFlag(J3DShpFlag_Hidden) && mpShape != NULL) {
         prepareDraw();

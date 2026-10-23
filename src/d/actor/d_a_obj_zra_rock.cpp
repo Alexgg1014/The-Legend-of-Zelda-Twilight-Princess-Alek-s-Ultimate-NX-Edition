@@ -71,7 +71,7 @@ int daObjZraRock_c::CreateHeap() {
     return 1;
 }
 
-cPhs_Step daObjZraRock_c::create() {
+DUSK_NOINLINE cPhs_Step daObjZraRock_c::create() {
     fopAcM_ct(this, daObjZraRock_c);
     cPhs_Step step = dComIfG_resLoad(&mPhaseReq, l_arcName);
     if (step == cPhs_ERROR_e || step == cPhs_UNK3_e) {

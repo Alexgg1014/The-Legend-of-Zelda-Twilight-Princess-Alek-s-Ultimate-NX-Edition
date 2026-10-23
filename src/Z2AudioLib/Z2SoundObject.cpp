@@ -89,7 +89,7 @@ bool Z2SoundObjBase::stopOK(Z2SoundHandlePool& handlePool) {
     }
 }
 
-Z2SoundHandlePool* Z2SoundObjBase::startSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
+DUSK_NOINLINE Z2SoundHandlePool* Z2SoundObjBase::startSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
     DUSK_AUDIO_SKIP(NULL);
     
     if (!alive_) {
@@ -135,7 +135,7 @@ Z2SoundHandlePool* Z2SoundObjBase::startSound(JAISoundID soundID, u32 mapinfo, s
     return handle;
 }
 
-Z2SoundHandlePool* Z2SoundObjBase::startLevelSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
+DUSK_NOINLINE Z2SoundHandlePool* Z2SoundObjBase::startLevelSound(JAISoundID soundID, u32 mapinfo, s8 reverb) {
     DUSK_AUDIO_SKIP(NULL);
 
     if (!alive_) {

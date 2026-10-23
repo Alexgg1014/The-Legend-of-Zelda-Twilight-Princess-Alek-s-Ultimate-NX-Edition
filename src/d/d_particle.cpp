@@ -1193,7 +1193,7 @@ dPa_control_c::dPa_control_c() {
 #endif
 }
 
-u8 dPa_control_c::getRM_ID(u16 param_0) {
+DUSK_NOINLINE u8 dPa_control_c::getRM_ID(u16 param_0) {
     return (param_0 & 0x8000) == 0 ? FALSE : TRUE;
 }
 
@@ -1730,7 +1730,7 @@ static void dPa_kankyocolor_set(f32 param_0, JPABaseEmitter* param_1,
     }
 }
 
-u32 dPa_control_c::set(u32 param_0, u8 param_1, u16 param_2, cXyz const* pos,
+DUSK_NOINLINE u32 dPa_control_c::set(u32 param_0, u8 param_1, u16 param_2, cXyz const* pos,  // aleks2 (rc17): a catalog hook target (dawnlight, coop_mod), inlined by the PGO build
                        dKy_tevstr_c const* param_4, csXyz const* i_rotation, cXyz const* i_scale,
                        u8 alpha, dPa_levelEcallBack* param_8, s8 param_9, GXColor const* param_10,
                        GXColor const* param_11, cXyz const* param_12, f32 param_13) {

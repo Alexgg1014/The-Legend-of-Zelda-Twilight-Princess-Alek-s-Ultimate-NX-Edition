@@ -529,7 +529,7 @@ void daE_YMB_c::checkWaterPos() {
     }
 }
 
-void daE_YMB_c::checkGroundPos() {
+DUSK_NOINLINE void daE_YMB_c::checkGroundPos() {
     cXyz pos(current.pos);
     pos.y += 500.0f;
     field_0x6d0 = field_0x6cc;

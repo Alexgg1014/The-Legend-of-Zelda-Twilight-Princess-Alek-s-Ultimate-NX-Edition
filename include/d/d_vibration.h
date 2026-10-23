@@ -96,6 +96,13 @@ public:
 
 #if DEBUG
     /* 0x00 */ dVibTest_c mVibTest;
+#elif PARTIAL_DEBUG
+    // dVibTest_c's ctor/virtuals are only defined under #if DEBUG (d_vibration.cpp)
+    // aleks2 (V1-rc4): upstream's layout. Mods are compiled against upstream's headers; without this storage every
+    // member of dComIfG_play_c after mVibration -- and g_dComIfG_gameInfo.drawlist after it -- sat 0x20 bytes
+    // lower than a mod expects (Crests of Courage 1.10.0 walked g_dComIfG_gameInfo's 2D list past the image and
+    // crashed the console). platforms/switch/tools/abi_parity.py checks the layouts against an upstream checkout.
+    alignas(dVibTest_c) u8 mVibTest[sizeof(dVibTest_c)];
 #endif
 
     class {

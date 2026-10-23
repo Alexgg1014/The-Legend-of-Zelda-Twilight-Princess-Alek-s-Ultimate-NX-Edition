@@ -1172,7 +1172,7 @@ static int daCstatue_Execute(daCstatue_c* actor) {
     return static_cast<daCstatue_c*>(actor)->execute();
 }
 
-int daCstatue_c::draw() {
+DUSK_NOINLINE int daCstatue_c::draw() {
     int tevstrType = checkBossType() ? 0x10 : 8;
     g_env_light.settingTevStruct(tevstrType, &current.pos, &tevStr);
     g_env_light.setLightTevColorType_MAJI(mModel, &tevStr);

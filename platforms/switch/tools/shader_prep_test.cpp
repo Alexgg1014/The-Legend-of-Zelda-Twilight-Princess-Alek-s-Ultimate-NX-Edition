@@ -13,6 +13,7 @@
 #include <iostream>
 #include <regex>
 #include <set>
+#include <span>
 #include <sstream>
 #include <string>
 
@@ -35,7 +36,8 @@ bool contains(const std::string& text, const std::string& needle) {
 
 // Every zone must be a stage/room/point the warp table itself lists, so the tour never
 // asks for a place the game's own warp menu would not.
-void test_zones_against_warp_table(const std::string& mapDefinitionsPath) {
+void test_zones_against_warp_table(const std::string& mapDefinitionsPath, std::span<const sp::Zone> zones,
+                                   size_t minZones, size_t maxZones) {
     std::ifstream in(mapDefinitionsPath);
     CHECK(in.good());
     std::stringstream buffer;
@@ -43,8 +45,7 @@ void test_zones_against_warp_table(const std::string& mapDefinitionsPath) {
     const std::string table = buffer.str();
     CHECK(!table.empty());
 
-    const auto zones = sp::zones();
-    CHECK(zones.size() >= 5 && zones.size() <= 8);
+    CHECK(zones.size() >= minZones && zones.size() <= maxZones);
     std::set<std::string> stages;
     std::set<std::string> categories;
     for (const auto& zone : zones) {
@@ -76,6 +77,10 @@ void test_zones_against_warp_table(const std::string& mapDefinitionsPath) {
         std::stringstream points(match[1].str());
         std::string token;
         while (std::getline(points, token, ',')) {
+            // Long point lists span lines and may end in a comma: skip blank tokens.
+            if (token.find_first_of("0123456789") == std::string::npos) {
+                continue;
+            }
             if (std::stoi(token) == zone.point) {
                 pointFound = true;
             }
@@ -256,7 +261,13 @@ int main(int argc, char** argv) {
         std::cerr << "usage: shader_prep_test <path to src/dusk/map_loader_definitions.h>\n";
         return 2;
     }
-    test_zones_against_warp_table(argv[1]);
+    test_zones_against_warp_table(argv[1], sp::player_zones(), 5, 8);
+    // aleks2 (SHADERS-c1): the Shader Tour's list, same checks; zones() follows the switch.
+    test_zones_against_warp_table(argv[1], sp::master_zones(), 15, 40);
+    CHECK(sp::zones().size() == sp::player_zones().size());
+    sp::use_master_tour(true);
+    CHECK(sp::zones().size() == sp::master_zones().size());
+    sp::use_master_tour(false);
     test_decide();
     test_progress();
     test_report();

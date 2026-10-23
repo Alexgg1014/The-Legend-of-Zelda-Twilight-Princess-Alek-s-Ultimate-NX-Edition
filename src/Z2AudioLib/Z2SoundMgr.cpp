@@ -287,7 +287,7 @@ void Z2SoundMgr::resetFilterAll() {
     }
 }
 
-void Z2SoundMgr::mixOut() {
+DUSK_NOINLINE void Z2SoundMgr::mixOut() {  // aleks2 (rc17): a catalog hook target (gz), inlined by the PGO build
     if (Z2Param::DARK_SE_FILTER_ON && Z2GetSceneMgr()->isInDarkness()) {
         int i = 1;
         if (Z2Param::SYSTEM_SE_USE_DARK_SE_SETTING) {

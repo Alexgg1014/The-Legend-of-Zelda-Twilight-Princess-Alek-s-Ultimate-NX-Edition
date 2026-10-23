@@ -1260,7 +1260,7 @@ void daE_KK_c::cc_set() {
     }
 }
 
-int daE_KK_c::execute() {
+DUSK_NOINLINE int daE_KK_c::execute() {
     if (field_0x679 == 2) {
         if (!checkItemGet(dItemNo_IRONBALL_e, 1)) {
             return 1;

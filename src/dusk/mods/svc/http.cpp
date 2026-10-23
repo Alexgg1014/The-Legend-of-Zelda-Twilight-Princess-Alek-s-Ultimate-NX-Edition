@@ -5,6 +5,7 @@
 
 #include "dusk/main.h"
 #include "dusk/mount_path.hpp"
+#include "dusk/file_copy.hpp"  // aleks2 (rc18)
 #include "dusk/mods/loader/loader.hpp"
 #include "mods/svc/http.h"
 
@@ -146,8 +147,7 @@ borealis::http::Result publish_download(borealis::http::Result result,
         std::filesystem::path temporary = destination;
         temporary += fmt::format(".{}.part", borealis::io::fs_path_to_string(staging.filename()));
         std::error_code ec;
-        std::filesystem::copy_file(
-            staging, temporary, std::filesystem::copy_options::overwrite_existing, ec);
+        file_copy::copy_file(staging, temporary, ec);  // aleks2 (rc18): file_copy.hpp
         if (ec) {
             const std::string copyError = ec.message();
             std::error_code ignored;

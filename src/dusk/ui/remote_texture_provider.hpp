@@ -28,6 +28,8 @@ void update_remote_texture_provider() noexcept;
 void set_remote_image_hints(
     uint64_t owner, const std::vector<std::pair<std::string, remote_image::Priority>>& hints) noexcept;
 void clear_remote_image_hints(uint64_t owner) noexcept;
+/// V1-rc5: the image will not show (every attempt failed): the caller shows its placeholder.
+[[nodiscard]] bool remote_image_failed(std::string_view source) noexcept;
 
 /// H34: aggregated, low-cost telemetry. A snapshot is cheap to take; the summary is one
 /// log-friendly line of what happened between two snapshots. UI thread only.

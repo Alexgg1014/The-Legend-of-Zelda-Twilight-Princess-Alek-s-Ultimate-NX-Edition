@@ -462,7 +462,7 @@ void dMeter2Info_c::getStringKana(u32 i_stringID, TEXT_SPAN o_string, JMSMesgEnt
     }
 }
 
-void dMeter2Info_c::getStringKanji(u32 i_stringID, TEXT_SPAN o_string, JMSMesgEntry_c* i_msgEntry) {
+DUSK_NOINLINE void dMeter2Info_c::getStringKanji(u32 i_stringID, TEXT_SPAN o_string, JMSMesgEntry_c* i_msgEntry) {  // aleks2 (rc17): a catalog hook target (twilit_essentials, english_names, twilit_essentials), inlined by the PGO build
     SAFE_STRCPY(o_string, "");
 
     u8* msgRes;
@@ -1170,7 +1170,7 @@ s16 dMeter2Info_c::get4thTexture(u8 i_itemType) {
     }
 }
 
-void dMeter2Info_c::set1stColor(u8 i_itemType, J2DPicture* i_pic) {
+DUSK_NOINLINE void dMeter2Info_c::set1stColor(u8 i_itemType, J2DPicture* i_pic) {
     // TODO: probably some way to rectify this for both versions
     #if VERSION == VERSION_SHIELD_DEBUG
     static JUtility::TColor const black_color[37] = {
@@ -1374,7 +1374,7 @@ void dMeter2Info_c::set1stColor(u8 i_itemType, J2DPicture* i_pic) {
                             *(JUtility::TColor*)&vertex_color_rd[i_itemType]);
 }
 
-void dMeter2Info_c::set2ndColor(u8 i_itemType, J2DPicture* i_pic) {
+DUSK_NOINLINE void dMeter2Info_c::set2ndColor(u8 i_itemType, J2DPicture* i_pic) {
     // TODO: probably some way to rectify this for both versions
     #if VERSION == VERSION_SHIELD_DEBUG
     static JUtility::TColor const black_color[37] = {
@@ -1600,7 +1600,7 @@ void dMeter2Info_c::set3rdColor(u8 i_itemType, J2DPicture* i_pic) {
     }
 }
 
-void dMeter2Info_c::set4thColor(u8 i_itemType, J2DPicture* i_pic) {
+DUSK_NOINLINE void dMeter2Info_c::set4thColor(u8 i_itemType, J2DPicture* i_pic) {
     UNUSED(i_itemType);
 
     i_pic->setBlackWhite(JUtility::TColor(0, 0, 0, 0), JUtility::TColor(0xff, 0xff, 0xff, 0xff));

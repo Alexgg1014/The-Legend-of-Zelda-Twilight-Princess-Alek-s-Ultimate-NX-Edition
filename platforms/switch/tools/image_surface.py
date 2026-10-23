@@ -41,6 +41,16 @@ IMAGE_RUNTIME_ENTRY = 24  # struct Aleks2ImageRuntimeEntry: name, address, libra
 # funchook_arm64.h: JUMP32_SIZE, the instructions overwritten at the entry.
 HOOK_PATCH_BYTES = 8
 NOP = 0xD503201F
+# DM2-c: the PC-only stubs of platforms/switch/mod_compat_symbols.txt exist so that a hook on them
+# installs and never fires; "nothing calls it" is what they are for, not a problem.
+MOD_COMPAT_SYMBOLS = __import__("pathlib").Path(__file__).resolve().parents[1] / "mod_compat_symbols.txt"
+
+
+def pc_only_symbols() -> frozenset:
+    if not MOD_COMPAT_SYMBOLS.exists():
+        return frozenset()
+    return frozenset(line.split()[3] for line in MOD_COMPAT_SYMBOLS.read_text(encoding="utf-8").splitlines()
+                     if line.startswith("pc-only ") and len(line.split()) == 5)
 
 
 class SurfaceError(Exception):
@@ -534,19 +544,27 @@ def hook_targets(elf, symtab, relocs, addresses: dict, exported=frozenset()) -> 
             following = bisect.bisect_right(starts, address)
             room = min(starts[following] if following < len(starts) else segment[0], segment[0]) - address
             padding = range(address + size, address + min(HOOK_PATCH_BYTES, room), 4)
+            # DM2-e: a function shorter than the patch is hooked over the padding after it, and funchook
+            # (cmake/PatchFunchookSlots.cmake) takes only zero words there, never NOPs: its own category.
+            short = size < HOOK_PATCH_BYTES
             if room < HOOK_PATCH_BYTES:
-                problems.append(f"only {room} bytes before the next function: too little for the "
-                                f"{HOOK_PATCH_BYTES}-byte patch")
+                problems.append(("too short: " if short else "") + f"only {room} bytes before the next function: "
+                                f"too little for the {HOOK_PATCH_BYTES}-byte patch")
+            elif short and any(word_at(elf, a) != 0 for a in padding):
+                problems.append(f"too short: a {size}-byte function, and the {HOOK_PATCH_BYTES}-byte patch would "
+                                "reach bytes after it that are not zero padding")
             elif any(word_at(elf, a) not in (NOP, 0) for a in padding):
                 problems.append("the patch would overwrite bytes after the function that are not padding")
             elif branches_into(elf, address, size, address, address + HOOK_PATCH_BYTES):
                 problems.append("branches back into the patched instructions")
         live, dead = stored[address]["live"], stored[address]["dead"]
         reached = calls[address] + len(live) + formed[address] + (address in exported)
-        if not problems and reached == 0:
+        pc_only = name in pc_only_symbols()
+        if not problems and reached == 0 and not pc_only:
             problems.append("nothing calls it or takes its address: a hook there intercepts nothing"
                             + (f" ({len(dead)} stored address(es), none in a table anything uses)" if dead else ""))
         out[name] = {"address": address, "function": function, "size": size, "calls": calls[address],
                      "data_pointers": len(live), "dead_pointers": len(dead), "indirect_references": live[:4], "formed_in_code": formed[address],
-                     "exported": address in exported, "problems": problems}
+                     "exported": address in exported, "pc_only": pc_only,
+                     "short": bool(function is not None and size < HOOK_PATCH_BYTES), "problems": problems}
     return out

@@ -11,15 +11,23 @@
 #include "saves_window.hpp"
 #include "touch_controls_editor.hpp"
 #include "ui.hpp"
+#include "dusk/dev_mode.hpp"
+#include <aurora/shader_cache.h>
 
 #include "dusk/app_info.hpp"
 #include "dusk/audio/DuskAudioSystem.h"
 #include "dusk/audio/DuskDsp.hpp"
 #include "dusk/config.hpp"
+#include "dusk/deko3d_policy.hpp"
 #include "dusk/data.hpp"
 #include "dusk/dualscreen.h"
 #include "dusk/perf_profile_apply.hpp"
+#include "dusk/drs_stress.hpp"
 #include "dusk/dynres.hpp"
+#ifdef __SWITCH__
+#include "dusk/switch_net.h"
+#endif
+#include "dusk/frame_telemetry.hpp"
 #include "dusk/discord_presence.hpp"
 #include "dusk/hotkeys.h"
 #include "dusk/imgui/ImGuiEngine.hpp"
@@ -30,10 +38,17 @@
 #include "dusk/wii_controls.hpp"
 #ifdef __SWITCH__
 #include "dusk/benchmark.hpp"
+#include "dusk/director.hpp"
 #include "dusk/switch_jit.h"
 #endif
 #if ALEKS2_NATIVE_MOD_LOADER
+#include "dusk/main.h"
 #include "dusk/switch_native_loader.hpp"
+#ifdef __SWITCH__
+#include "dusk/self_update.hpp"
+#endif
+// platforms/switch/source/switch_startup.cpp (V1-rc4): start this NRO again when the program exits.
+extern "C" bool aleks2_relaunch_on_exit(void);
 #endif
 #if defined(__SWITCH__) && DUSK_HAS_FUNCHOOK
 #include "dusk/switch_code_arena.h"
@@ -108,11 +123,22 @@ void applyDualScreenSideEffects(bool enabled) {
         }
         if (minimal.getValue()) {
             minimal.setValue(false);
+            getSettings().game.dualScreenRestoreMinimalHud.setValue(true);
         }
-    } else if (!enabled && corner.getValue() == dusk::kFpsCornerCompanion) {
-        // Explicit main corner, NOT getDefaultValue(): the default itself may
-        // be Companion, which would leave this hand-back a no-op.
-        corner.setValue(0);
+    } else if (!enabled) {
+        if (corner.getValue() == dusk::kFpsCornerCompanion) {
+            // Explicit main corner, NOT getDefaultValue(): the default itself may
+            // be Companion, which would leave this hand-back a no-op.
+            corner.setValue(0);
+        }
+        // V1-rc1: hand Minimal HUD back if turning the second screen on took it away.
+        auto& restore = getSettings().game.dualScreenRestoreMinimalHud;
+        if (restore.getValue()) {
+            restore.setValue(false);
+            if (!minimal.getValue()) {
+                minimal.setValue(true);
+            }
+        }
     }
 }
 
@@ -231,6 +257,11 @@ bool try_parse_backend(std::string_view backend, AuroraBackend& outBackend) {
         outBackend = BACKEND_NULL;
         return true;
     }
+    // aleks2 (deko3d P1): the experimental deko3d renderer (Switch lab builds only)
+    if (backend == "deko3d") {
+        outBackend = BACKEND_DEKO3D;
+        return true;
+    }
 
     return false;
 }
@@ -246,7 +277,8 @@ std::string_view backend_name(AuroraBackend backend) {
     case BACKEND_METAL:
         return "Metal";
     case BACKEND_VULKAN:
-        return "Vulkan";
+        // aleks2 (deko3d rc12): on Switch, Vulkan is Dawn/NVK next to deko3d
+        return dusk::deko3d_policy::deko3d_default() ? "Vulkan — best mod compatibility" : "Vulkan";
     case BACKEND_OPENGL:
         return "OpenGL";
     case BACKEND_OPENGLES:
@@ -255,6 +287,8 @@ std::string_view backend_name(AuroraBackend backend) {
         return "WebGPU";
     case BACKEND_NULL:
         return "Null";
+    case BACKEND_DEKO3D:
+        return dusk::deko3d_policy::deko3d_default() ? "deko3d (recommended)" : "deko3d (Experimental)";
     }
 }
 
@@ -278,6 +312,8 @@ std::string_view backend_id(AuroraBackend backend) {
         return "webgpu";
     case BACKEND_NULL:
         return "null";
+    case BACKEND_DEKO3D:
+        return "deko3d";
     }
 }
 
@@ -741,9 +777,27 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                                 getSettings().backend.graphicsBackend.setValue(
                                     std::string{backend_id(backend)});
                                 config::save();
+                                dusk::deko3d_policy::on_backend_chosen(backend);
                             });
                     }
+#ifdef __SWITCH__
+                    // aleks2 (deko3d rc12): the restart the backend change (and deko3d's prompts) ask for
+                    pane.add_button({.text = "Restart now"}).on_pressed([] {
+                        mDoAud_seStartMenu(kSoundClick);
+                        if (aleks2_relaunch_on_exit()) {
+                            IsRunning = false;
+                        } else {
+                            dusk::ui::push_toast({.title = "Restart by hand",
+                                .content = "Quit Dusklight and open it again to apply the change.",
+                                .duration = std::chrono::seconds(6)});
+                        }
+                    });
+#endif
                     pane.add_rml("<br/>Changes require a restart.");
+                    // aleks2 (deko3d rc12)
+                    pane.add_rml("<br/>deko3d: the console's own graphics API. Mods that draw with the gfx "
+                                 "service need Vulkan: with such a mod enabled, Vulkan is used and a message says "
+                                 "why. If deko3d fails to start twice, Vulkan is used from then on.");
                 });
             leftPane.register_control(
                 leftPane.add_select_button({
@@ -805,7 +859,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             {
                 .key = "Enable VSync",
                 #ifdef __SWITCH__
-                .helpText = "Synchronizes the frame rate to multiples of 60hz.",
+                .helpText = "Waits for the display before showing each frame (60 Hz on the Switch), so frames never tear.",
                 #else
                 .helpText = "Synchronizes the frame rate to your monitor's refresh rate.",
                 #endif
@@ -927,7 +981,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
         config_int_select(leftPane, rightPane, getSettings().game.maxTextureAnisotropy,
             "Max Anisotropy",
-            "Caps anisotropic texture filtering. Lower values trade sharpness for performance.",
+            "Upper limit for anisotropic texture filtering. Lower values cost less GPU time; textures seen at an angle look softer.",
             1, 16, 1, {}, {}, "x");
         leftPane.add_section("Post-Processing");
         graphics_tuner_control(*this, leftPane, rightPane,
@@ -1050,6 +1104,49 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
     add_tab("Aleks", [this](Rml::Element* content) {
         auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
         auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+#ifdef __SWITCH__
+        // V1-rc8: the in-app updater (self_update.hpp). V1-rc9: first in the Aleks tab (it was in Interface, after
+        // the other Dusklight settings, where testers did not find it).
+        leftPane.add_section("Updates");
+        config_bool_select(leftPane, rightPane, getSettings().backend.checkForUpdates,
+            {
+                .key = "Check for Updates at Start",
+                .helpText = "Checks this port's GitHub releases for a new version when Dusklight starts, at most "
+                            "once a day, and says so if there is one. Nothing is downloaded until you choose to."
+                            "<br/><br/>No personal information is transmitted or collected.",
+            });
+        config_bool_select(leftPane, rightPane, dusk::self_update::include_betas(),
+            {
+                .key = "Include Beta Versions",
+                .helpText = "Also offer versions GitHub marks as pre-releases (betas and release candidates).",
+            });
+        leftPane.register_control(
+            leftPane.add_select_button({
+                .key = "Dusklight Update",
+                .getValue = [] { return Rml::String{dusk::self_update::status_value()}; },
+            }),
+            rightPane, [](Pane& pane) {
+                pane.add_button({.text = "Check now"}).on_pressed([] {
+                    mDoAud_seStartMenu(kSoundClick);
+                    dusk::self_update::check_now();
+                });
+                pane.add_button({.text = "Download and install"}).on_pressed([] {
+                    mDoAud_seStartMenu(kSoundClick);
+                    dusk::self_update::install();
+                });
+                pane.add_button({.text = "Restart now"}).on_pressed([] {
+                    mDoAud_seStartMenu(kSoundClick);
+                    dusk::self_update::restart_now();
+                });
+                pane.add_rml(Rml::String{
+                    "Looks for a newer version on this port's GitHub releases. One that ships its NRO is "
+                    "downloaded to the SD card, checked against the SHA-256 GitHub publishes, and installed when "
+                    "Dusklight closes: <b>save first</b>, then <b>Restart now</b>. The previous NRO stays next to it "
+                    "as <b>.nro.bak</b> until the new one has run for a minute; if the new one does not start, "
+                    "delete it and rename the .bak back. A version that needs more than the NRO is installed by "
+                    "hand from the release page. Your saves, mods and shader caches are not touched."});
+            });
+#endif
         // aleks2 (performance): the three bundles, then the dynamic
         // resolution knobs they set, exposed so a bundle can be adjusted.
         leftPane.add_section("Performance (Aleks)");
@@ -1080,12 +1177,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     "Dusk bloom and depth of field. Auto resolution: 900p docked, 720p handheld, "
                     "540p in Flip Grip."
                     "<br/><b>Balanced</b>: Fancy interpolation capped at 60 with predictive "
-                    "skipping; where the console cannot keep up it falls back to a clean 30. "
-                    "2x shadows, Classic depth of field. Auto resolution: 720p docked, 540p "
-                    "handheld."
+                    "skipping; where 60 is out of reach it keeps interpolating below it, and only "
+                    "falls back to 30 where that would look worse than 30. "
+                    "2x shadows, Classic depth of field. Auto resolution: 720p docked, 720p "
+                    "handheld with deko3d (540p with Vulkan), 540p in Flip Grip."
                     "<br/><b>Performance</b>: Fast interpolation capped at 60 with predictive "
                     "skipping, 1x shadows, Classic bloom, no depth of field or water refraction. "
                     "Auto resolution: 720p docked, 540p handheld."
+                    "<br/><br/>Every profile runs at the console's stock clocks; GPU Boost (below) is "
+                    "a separate choice."
                     "<br/><br/>These are goals, not guarantees: 60 is only reached where the "
                     "console keeps up. The render thread at stock clocks is the limit in towns, "
                     "caves and Castle Town; no profile changes that, a CPU overclock does. "
@@ -1094,6 +1194,19 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     "follows the dock without changing your settings.");
             });
 
+#ifdef __SWITCH__
+        // aleks2 (V1-rc16): src/dusk/gpu_boost.cpp. Opt-in, any profile; profiles never touch the clocks.
+        config_bool_select(leftPane, rightPane, getSettings().game.gpuBoost,
+            {
+                .key = "GPU Boost (handheld)",
+                .helpText = "In handheld mode, asks the console for its official 460 MHz GPU profile instead of "
+                            "the usual 307 MHz. This is not an overclock -- the system offers it -- but it uses "
+                            "more battery and the console runs warmer.<br/><br/>Not recommended for most players: "
+                            "the profiles are designed for stock clocks. Docked play is unaffected. If a clock "
+                            "tool such as sys-clk is setting the clocks, this steps aside.",
+            });
+#endif
+
         config_bool_select(leftPane, rightPane, getSettings().game.predictiveInterpolation,
             {
                 .key = "Predictive Interpolation",
@@ -1101,46 +1214,45 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                             "finish before the next game tick, so heavy places give a clean 30 "
                             "instead of 33/50 ms judder. Costs nothing where 60 already fits.",
             });
-        config_bool_select(leftPane, rightPane, getSettings().game.dynamicResolution,
-            {
-                .key = "Dynamic Resolution",
-                .helpText = "<b>Experimental, leave off.</b> Lowers the internal resolution one "
-                            "step at a time (720, 540, 480 rows) while the frame rate misses the "
-                            "target, and raises it back when there is headroom. On this console "
-                            "the render thread is usually the limit, so a step rarely buys frames, "
-                            "and repeated steps currently leak device memory (crash after ~7).",
-                .onChange = [](bool) { dusk::dynres::reset(); },
-            });
+        // aleks2 (V1-c1): one choice, Off or Auto. Auto moves only when the GPU is the limit
+        // (dynres.hpp); the target is 30 (perf-lab.ini drs_target_fps changes it for tests).
         leftPane.register_control(
             leftPane.add_select_button({
-                .key = "Target Framerate",
+                .key = "Dynamic Resolution",
                 .getValue =
                     [] {
-                        return Rml::String{
-                            getSettings().game.dynamicResolutionTarget.getValue() >= 60 ? "60" : "30"};
+                        return Rml::String{getSettings().game.dynamicResolution.getValue()
+                                               ? "Auto (only when the GPU is tight)"
+                                               : "Off"};
                     },
-                .isDisabled = [] { return !getSettings().game.dynamicResolution.getValue(); },
-                .isModified = [] { return false; },
+                .isModified = [] { return getSettings().game.dynamicResolution.getValue(); },
             }),
             rightPane, [](Pane& pane) {
-                for (const int target : {30, 60}) {
+                for (const bool on : {false, true}) {
                     pane.add_button({
-                            .text = target == 60 ? "60" : "30",
-                            .isSelected =
-                                [target] {
-                                    const int v = getSettings().game.dynamicResolutionTarget.getValue();
-                                    return (v >= 60) == (target == 60);
-                                },
+                            .text = on ? "Auto (only when the GPU is tight)" : "Off",
+                            .isSelected = [on] { return getSettings().game.dynamicResolution.getValue() == on; },
                         })
-                        .on_pressed([target] {
+                        .on_pressed([on] {
                             mDoAud_seStartMenu(kSoundItemChange);
-                            getSettings().game.dynamicResolutionTarget.setValue(target);
+                            getSettings().game.dynamicResolution.setValue(on);
                             dusk::dynres::reset();
                             config::save();
                         });
                 }
-                pane.add_rml("<br/>What dynamic resolution aims for. With VSync the panel only "
-                             "presents 60, 30, 20 or 15, so these are the two that mean anything.");
+                const auto st = dusk::dynres::status();
+                pane.add_rml(Rml::String{
+                    "<br/><b>Off</b> (default): the resolution you chose above, always."
+                    "<br/><br/><b>Auto</b>: lowers the internal resolution in a few fixed steps (85 % and 75 % "
+                    "of your resolution) only when frames are being missed <b>and the GPU is the reason</b>, "
+                    "measured every frame. Where the CPU or the render thread is the limit (towns, caves, "
+                    "Castle Town at stock clocks) it leaves the resolution alone, because fewer pixels would "
+                    "not buy frames there. It waits a few seconds before each step, never changes during "
+                    "loads or shader compiles, and climbs back when there is room. The aim is 30 FPS."
+                    "<br/><br/>Experimental: the step-change crash seen in earlier builds is what the "
+                    "<b>DRS stress test</b> in Diagnostics checks. Keep it Off unless you are testing."
+                    "<br/><br/>Now: " + dusk::ui::escape(st.state) + " (" + std::to_string(st.rows) + " of " +
+                    std::to_string(st.ceilingRows) + " rows)."});
             });
 
         // aleks2 (companion): the second screen composited on the panel.
@@ -1192,6 +1304,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                             // must not re-force the FPS corner or Minimal HUD.
                             if (!wasOn) {
                                 applyDualScreenSideEffects(true);
+                                dusk::deko3d_policy::on_dual_screen_enabled();  // aleks2 (deko3d rc12)
                             }
                             dusk::dualscreen::requestRedraw();
                             config::save();
@@ -1200,8 +1313,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 pane.add_rml(
                     "<br/>Shows the HUD, map and menus on a second screen. "
                     "Wii U Style moves the whole HUD there, leaving the game view clear. "
-                    "3DS Style keeps hearts, A/B/Z and the d-pad on the main screen and "
-                    "makes the second screen a touch control surface."
+                    "3DS Style keeps the hearts, the Vessel of Light and A/B on the main screen; X/Y/Z, "
+                    "Midna, the d-pad, rupees, keys and the magic meter move to the second screen, which "
+                    "becomes a touch control surface."
                     "<br/>Enabling moves the FPS counter to the companion screen and turns "
                     "off Minimal HUD.");
             });
@@ -1296,7 +1410,168 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         // mods and loaded ones. It lives behind a button rather than running at
         // startup because a page the kernel refuses to execute kills the
         // process, and a boot must never be able to do that.
-        leftPane.add_section("Diagnostics (Aleks)");
+        // V1-rc5: what a player needs about mods; the diagnostics further down only in developer mode
+        // (sdmc:/switch/dusklight/dev.txt, docs/investigaciones/v1-limpieza-release.md).
+        if (dusk::dev_mode())  // V1-rc8: developer mode only
+        config_int_select(leftPane, rightPane, getSettings().game.minimapRedrawDivisor, "Minimap Refresh",
+            "How often the field minimap is redrawn, in game frames. <b>1</b> is every frame, as the game does."
+            "<br/><br/>With the full HUD the minimap redraws its whole picture every frame, about 800 draws in "
+            "Hyrule Field and Castle Town: the main cost there. <b>2</b> halves it. Experimental: if the map "
+            "flickers or goes blank, set it back to 1. Minimal HUD hides the map and has no such cost.",
+            1, 3, 1, [] { return false; }, [](int) {}, " frames");
+
+        leftPane.add_section("Mods (Aleks)");
+#if ALEKS2_NATIVE_MOD_LOADER
+        // aleks2 (H37): native mods from the card (switch_native_loader.hpp). The Loader Mode is
+        // persisted and takes effect for mods loaded after the change -- at the next start, or on
+        // a mod's reload.
+        static constexpr std::array<dusk::switchelf::LoaderMode, 3> kLoaderModes{
+            dusk::switchelf::LoaderMode::Off, dusk::switchelf::LoaderMode::DryRun,
+            dusk::switchelf::LoaderMode::Execute};
+        leftPane.register_control(
+            leftPane.add_select_button({
+                // V1-rc5: for the player there is no mode (always Execute); the selector is a developer-mode
+                // diagnostic (dev.txt). The status below (crashes, quarantine, hook room) is for everyone.
+                .key = dusk::dev_mode() ? "Native Mods: Loader Mode" : "Native Mods",
+                .getValue =
+                    [] {
+                        return dusk::dev_mode()
+                                   ? Rml::String{dusk::switchelf::loader_mode_name(dusk::switchelf::loader_mode())}
+                                   : Rml::String{"Status"};
+                    },
+                .isModified =
+                    [] {
+                        return dusk::dev_mode() &&
+                               dusk::switchelf::loader_mode() != dusk::switchelf::LoaderMode::Execute;
+                    },
+            }),
+            rightPane, [](Pane& pane) {
+                if (!dusk::dev_mode()) {
+                    pane.add_rml(Rml::String{
+                        "Mods whose code comes from the card run as soon as they are installed and turned on. "
+                        "A mod that crashes the game while starting is turned off at the next start and says "
+                        "why; turn it off and on again to give it another try."});
+                } else {
+                for (const auto mode : kLoaderModes) {
+                    pane.add_button({
+                                  .text = Rml::String{dusk::switchelf::loader_mode_name(mode)},
+                                  .isSelected = [mode] { return dusk::switchelf::loader_mode() == mode; },
+                              })
+                        .on_pressed([mode] {
+                            mDoAud_seStartMenu(kSoundItemChange);
+                            dusk::switchelf::set_loader_mode(mode);
+                        });
+                }
+                // V1-rc4: the mode applies to mods loaded after the change; restart from here to apply it now.
+                pane.add_button({.text = "Restart now"}).on_pressed([] {
+                    mDoAud_seStartMenu(kSoundClick);
+                    if (aleks2_relaunch_on_exit()) {
+                        IsRunning = false;
+                    } else {
+                        dusk::ui::push_toast({.title = "Restart by hand",
+                            .content = "Quit Dusklight and open it again to apply the change.",
+                            .duration = std::chrono::seconds(6)});
+                    }
+                });
+                pane.add_rml(Rml::String{
+                    "How mods whose code comes from the card (not built into this NRO) are loaded."
+                    "<br/><br/><b>Off</b>: not at all. <b>Dry Run</b>: each library is checked "
+                    "against this build -- format, relocations, every symbol it needs -- and a report is "
+                    "written to sdmc:/switch/dusklight/mods/.reports/; no mod code runs. A diagnostic: native "
+                    "mods do not run in it. <b>Execute</b> (the default): the same checks, then the mod is "
+                    "loaded and runs. A Dry Run saved by an earlier test build is moved to Execute once."
+                    "<br/><br/>Takes effect at the next start: <b>Restart now</b> applies it. A mod that "
+                    "crashes the game while starting is disabled at the next boot and says why."});
+                }
+                const auto& start = dusk::switchelf::startup();
+                std::string status;
+                if (start.withoutMods) {
+                    status += "<br/><br/><b>This boot started without mods:</b> " + dusk::ui::escape(start.withoutModsReason);
+                }
+                if (start.crashed) {
+                    status += "<br/><br/><b>The previous boot crashed in " + dusk::ui::escape(start.crashed->modId) +
+                              "</b> (" + dusk::ui::escape(start.crashed->stage) + "); it stays disabled until you "
+                              "turn it off and on again.";
+                }
+                if (auto* bootGuard = dusk::switchelf::boot_guard()) {
+                    const auto quarantined = bootGuard->quarantine();
+                    if (!quarantined.empty()) {
+                        status += "<br/><br/>Disabled after a crash or a failure while playing:";
+                        for (const auto& id : quarantined) {
+                            status += " " + dusk::ui::escape(id);
+                        }
+                    }
+                }
+#if DUSK_HAS_FUNCHOOK
+                if (dusk::dev_mode()) {  // 1.0.0: loader internals, developer mode only
+                    char arenas[512];
+                    funchook_switch_describe(arenas, sizeof arenas);
+                    uint32_t hookUsed = 0, hookCapacity = 0;
+                    funchook_switch_usage(&hookUsed, nullptr, &hookCapacity);
+                    status += "<br/><br/><b>Hook room: " + std::to_string(hookUsed) + " of " +
+                              std::to_string(hookCapacity) + " used</b> (one per hooked function)";
+                    status += "<br/>Hooks: " + dusk::ui::escape(arenas);
+                }
+#endif
+                pane.add_rml(Rml::String{status});
+            });
+        leftPane.register_control(
+            leftPane.add_group_button({.text = "Next Start Without Mods"}).on_pressed([] {
+                mDoAud_seStartMenu(kSoundItemChange);
+                if (auto* bootGuard = dusk::switchelf::boot_guard()) {
+                    bootGuard->request_boot_without_mods();
+                }
+            }),
+            rightPane, [](Pane& pane) {
+                pane.clear();
+                pane.add_rml(Rml::String{
+                    "The next start loads no mods at all, once. Nothing is deleted: your mods, their "
+                    "settings and your saves stay as they are, and the start after that loads mods again. "
+                    "Use it when a mod keeps the game from starting.<br/><br/>Without this menu: create an "
+                    "empty file named <b>start_without_mods</b> in sdmc:/switch/dusklight/mods/.guard/."});
+            });
+#ifdef __SWITCH__
+        // aleks2 (DM3): a mod's local server (Item Tracker's page, an OBS overlay) listens on 127.0.0.1, which on
+        // a console nothing else can reach. Opt-in, off by default: such a listener is opened on the local
+        // network instead (src/dusk/switch_net.cpp, svc/net.cpp, loader/glibc_net.cpp).
+        leftPane.register_control(
+            leftPane.add_select_button({
+                .key = "Mods: Listen on the Local Network",
+                .getValue = [] { return Rml::String{dusk::switchnet::lan_listen_allowed() ? "On" : "Off"}; },
+                .isModified = [] { return dusk::switchnet::lan_listen_allowed(); },
+            }),
+            rightPane, [](Pane& pane) {
+                for (const bool on : {false, true}) {
+                    pane.add_button({
+                                  .text = on ? "On" : "Off",
+                                  .isSelected = [on] { return dusk::switchnet::lan_listen_allowed() == on; },
+                              })
+                        .on_pressed([on] {
+                            mDoAud_seStartMenu(kSoundItemChange);
+                            dusk::switchnet::set_lan_listen_allowed(on);
+                        });
+                }
+                dusk::switchnet::IpConfig ip;
+                std::string where = "this console's address (Settings > Internet on the console)";
+                if (dusk::switchnet::ip_config(ip)) {
+                    const auto* b = reinterpret_cast<const uint8_t*>(&ip.address);
+                    where = "<b>" + std::to_string(b[0]) + "." + std::to_string(b[1]) + "." + std::to_string(b[2]) +
+                            "." + std::to_string(b[3]) + "</b>";
+                }
+                pane.add_rml(Rml::String{
+                    "Some mods run a small server for a browser or OBS on the same computer (Item Tracker's page, "
+                    "overlays). On a console there is no browser next to the game, so by default those servers are "
+                    "useless here."
+                    "<br/><br/><b>Off</b> (default): mods can only listen on the console itself."
+                    "<br/><br/><b>On</b>: such a server is opened on your local network instead, so a PC or phone on "
+                    "the same Wi-Fi can open it at " + where + " and the port the mod shows. Anyone on that network "
+                    "can reach it too: turn it on at home, not on public Wi-Fi."
+                    "<br/><br/>Applies to servers a mod opens after the change (restart the mod or the game)."});
+            });
+#endif
+#endif
+        if (dusk::dev_mode()) {
+        leftPane.add_section("Diagnostics (Aleks, developer mode)");
         // The right pane is normally filled when the row is focused, so after
         // the test runs it would still be showing the answer from before it.
         // Same lambda, called again by hand.
@@ -1399,81 +1674,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                         stats.disabled_after_mismatch != 0 ? " <b>Reuse is disabled after a mismatch.</b>" : ""));
             });
 
-#if ALEKS2_NATIVE_MOD_LOADER
-        // aleks2 (H37): native mods from the card (switch_native_loader.hpp). The Loader Mode is
-        // persisted and takes effect for mods loaded after the change -- at the next start, or on
-        // a mod's reload.
-        static constexpr std::array<dusk::switchelf::LoaderMode, 3> kLoaderModes{
-            dusk::switchelf::LoaderMode::Off, dusk::switchelf::LoaderMode::DryRun,
-            dusk::switchelf::LoaderMode::Execute};
-        leftPane.register_control(
-            leftPane.add_select_button({
-                .key = "Native Mods: Loader Mode (H37)",
-                .getValue =
-                    [] { return Rml::String{dusk::switchelf::loader_mode_name(dusk::switchelf::loader_mode())}; },
-                .isModified = [] { return dusk::switchelf::loader_mode() != dusk::switchelf::LoaderMode::DryRun; },
-            }),
-            rightPane, [](Pane& pane) {
-                for (const auto mode : kLoaderModes) {
-                    pane.add_button({
-                                  .text = Rml::String{dusk::switchelf::loader_mode_name(mode)},
-                                  .isSelected = [mode] { return dusk::switchelf::loader_mode() == mode; },
-                              })
-                        .on_pressed([mode] {
-                            mDoAud_seStartMenu(kSoundItemChange);
-                            dusk::switchelf::set_loader_mode(mode);
-                        });
-                }
-                pane.add_rml(Rml::String{
-                    "How mods whose code comes from the card (not built into this NRO) are loaded."
-                    "<br/><br/><b>Off</b>: not at all. <b>Dry Run</b> (default): each library is checked "
-                    "against this build -- format, relocations, every symbol it needs -- and a report is "
-                    "written to sdmc:/switch/dusklight/mods/.reports/; no mod code runs. <b>Execute</b>: "
-                    "the same checks, then the mod is loaded and runs."
-                    "<br/><br/>Takes effect at the next start (or when a mod is reloaded). A mod that "
-                    "crashes the game while starting is disabled at the next boot and says why."});
-                const auto& start = dusk::switchelf::startup();
-                std::string status;
-                if (start.withoutMods) {
-                    status += "<br/><br/><b>This boot started without mods:</b> " + dusk::ui::escape(start.withoutModsReason);
-                }
-                if (start.crashed) {
-                    status += "<br/><br/><b>The previous boot crashed in " + dusk::ui::escape(start.crashed->modId) +
-                              "</b> (" + dusk::ui::escape(start.crashed->stage) + "); it stays disabled until you "
-                              "turn it off and on again.";
-                }
-                if (auto* bootGuard = dusk::switchelf::boot_guard()) {
-                    const auto quarantined = bootGuard->quarantine();
-                    if (!quarantined.empty()) {
-                        status += "<br/><br/>Disabled after a crash or a failure while playing:";
-                        for (const auto& id : quarantined) {
-                            status += " " + dusk::ui::escape(id);
-                        }
-                    }
-                }
-#if DUSK_HAS_FUNCHOOK
-                char arenas[320];
-                funchook_switch_describe(arenas, sizeof arenas);
-                status += "<br/><br/>Hooks: " + dusk::ui::escape(arenas);
-#endif
-                pane.add_rml(Rml::String{status});
-            });
-        leftPane.register_control(
-            leftPane.add_group_button({.text = "Next Start Without Mods"}).on_pressed([] {
-                mDoAud_seStartMenu(kSoundItemChange);
-                if (auto* bootGuard = dusk::switchelf::boot_guard()) {
-                    bootGuard->request_boot_without_mods();
-                }
-            }),
-            rightPane, [](Pane& pane) {
-                pane.clear();
-                pane.add_rml(Rml::String{
-                    "The next start loads no mods at all, once. Nothing is deleted: your mods, their "
-                    "settings and your saves stay as they are, and the start after that loads mods again. "
-                    "Use it when a mod keeps the game from starting.<br/><br/>Without this menu: create an "
-                    "empty file named <b>start_without_mods</b> in sdmc:/switch/dusklight/mods/.guard/."});
-            });
-#endif
 
         // aleks2 (H28): the short benchmark. The right pane is also where the
         // reason it cannot start right now is shown, so a greyed-out button is
@@ -1649,6 +1849,133 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     }
                 }),
             rightPane, describeTour);
+
+        // aleks2 (V1-rc12): Check Tour -- fixed spots, a screenshot and a heartbeat at each (director.hpp).
+        auto describeCheck = [](Pane& pane) {
+            pane.clear();
+            std::string why;
+            const bool ready = dusk::director::can_start_check(why);
+            pane.add_text(ready ? "Ready." : Rml::String{why});
+            pane.add_rml("<br/>" + dusk::ui::escape(dusk::director::check_description()) +
+                         "<br/><br/>Controls are locked; <b>press Start</b> to cancel. Nothing is written to your "
+                         "save, achievements are paused, and you are returned to where you were.");
+        };
+        leftPane.register_control(
+            leftPane.add_group_button({
+                         .text = "Run Check Tour",
+                         .isDisabled =
+                             [] {
+                                 std::string why;
+                                 return !dusk::director::can_start_check(why);
+                             },
+                     })
+                .on_pressed([] {
+                    std::string error;
+                    if (dusk::director::start_check(error)) {
+                        mDoAud_seStartMenu(kSoundPlay);
+                    } else {
+                        mDoAud_seStartMenu(kSoundWarning);
+                        push_toast({.title = "Check tour not started",
+                            .content = Rml::String{error},
+                            .duration = std::chrono::seconds(4)});
+                    }
+                }),
+            rightPane, describeCheck);
+
+        // aleks2 (trailer): every take of director.txt, one after the other (director.hpp). A dev tool: the entry
+        // exists only with developer mode and a director.txt on the card.
+        if (dusk::director::available()) {
+            auto describeReel = [](Pane& pane) {
+                pane.clear();
+                std::string why;
+                const bool ready = dusk::director::can_start_reel(why);
+                pane.add_text(ready ? "Ready." : Rml::String{why});
+                pane.add_rml("<br/>" + dusk::ui::escape(dusk::director::reel_description()) +
+                             "<br/><br/><b>Press Start</b> to stop. Nothing is written to your save, achievements are "
+                             "paused, and you are returned to where you were.");
+            };
+            leftPane.register_control(
+                leftPane.add_group_button({
+                             .text = "Play trailer takes",
+                             .isDisabled =
+                                 [] {
+                                     std::string why;
+                                     return !dusk::director::can_start_reel(why);
+                                 },
+                         })
+                    .on_pressed([] {
+                        std::string error;
+                        if (dusk::director::start_reel(error)) {
+                            mDoAud_seStartMenu(kSoundPlay);
+                        } else {
+                            mDoAud_seStartMenu(kSoundWarning);
+                            push_toast({.title = "Trailer takes not started",
+                                .content = Rml::String{error},
+                                .duration = std::chrono::seconds(4)});
+                        }
+                    }),
+                rightPane, describeReel);
+        }
+
+        // aleks2 (V1-c1): many resolution changes in a row, memory and render targets logged after
+        // each one (drs_stress.hpp). The same entry stops it.
+        auto describeDrsStress = [](Pane& pane) {
+            pane.clear();
+            std::string why;
+            const bool running = dusk::drs_stress::active();
+            const bool ready = running || dusk::drs_stress::can_start(why);
+            pane.add_text(running ? "Running. Choose it again to stop." : ready ? "Ready." : Rml::String{why});
+            const auto& lab = dusk::frame_telemetry::lab();
+            pane.add_rml(Rml::String{
+                "<br/>Changes the internal resolution " + std::to_string(lab.stressTransitions) + " times, one "
+                "change every " + std::to_string(lab.stressIntervalMs) + " ms, between your resolution and the "
+                "Dynamic Resolution steps, the way Auto would, and writes a line after every change: memory, "
+                "render targets created or reused, the worst frame. A crash still leaves every line up to it."
+                "<br/><br/>Play normally or stand still; do not dock or undock (that stops it). Your settings "
+                "are not changed and your resolution comes back at the end."
+                "<br/><br/>Files: <b>" + dusk::benchmark::report_directory() + "/drs-stress-*.csv</b> and "
+                ".json. Count and pace: perf-lab.ini (drs_stress_transitions, drs_stress_interval_ms, "
+                "drs_stress_pattern=ladder for 900/720/540)."});
+        };
+        leftPane.register_control(
+            leftPane.add_group_button({
+                         .text = "Run DRS Stress",
+                         .isDisabled =
+                             [] {
+                                 std::string why;
+                                 return !dusk::drs_stress::active() && !dusk::drs_stress::can_start(why);
+                             },
+                     })
+                .on_pressed([] {
+                    if (dusk::drs_stress::active()) {
+                        dusk::drs_stress::request_cancel("stopped from Diagnostics");
+                        mDoAud_seStartMenu(kSoundPlay);
+                        return;
+                    }
+                    std::string error;
+                    if (dusk::drs_stress::start(error)) {
+                        mDoAud_seStartMenu(kSoundPlay);
+                    } else {
+                        mDoAud_seStartMenu(kSoundWarning);
+                        push_toast({.title = "DRS stress not started",
+                            .content = Rml::String{error},
+                            .duration = std::chrono::seconds(4)});
+                    }
+                }),
+            rightPane, describeDrsStress);
+        // V1-rc5: normal starts warm only the current scene's shaders; this queues the whole list.
+        leftPane.register_control(leftPane.add_group_button({.text = "Warm All Shaders"}).on_pressed([] {
+            aurora_warm_all_shaders();
+            mDoAud_seStartMenu(kSoundPlay);
+            push_toast({.title = "Warming every shader",
+                .content = "The whole list is queued in the background.",
+                .duration = std::chrono::seconds(3)});
+        }),
+            rightPane, [](Pane& pane) {
+                pane.add_text("Queues every known shader in the background, as starts did before rc5. For "
+                              "comparing hitches against the per-scene warmup.");
+            });
+        }  // dusk::dev_mode()
     });
 #endif
 
@@ -1766,6 +2093,18 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Invert First Person Y Axis", getSettings().game.invertFirstPersonYAxis,
             "Invert vertical movement while aiming with items or first person camera.<br/><br/>Applies to the control stick only.");
 
+#ifdef __SWITCH__
+        // aleks2 (V1-rc16): src/dusk/hd_rumble.cpp.
+        leftPane.add_section("Rumble");
+        addOption("HD Rumble", getSettings().game.hdRumble,
+            "Uses the Switch controllers' HD Rumble: sharp hits, heavy thuds, rolling quakes and Epona's gallop "
+            "from side to side, instead of the original on/off motor.<br/><br/>Applies to handheld mode, Joy-Con "
+            "and the Pro Controller. A GameCube controller adapter keeps its classic rumble.");
+        config_int_select(leftPane, rightPane, getSettings().game.rumbleIntensity, "Rumble Intensity",
+            "How strong every vibration is, HD Rumble and the classic one alike. 0 % turns it off.", 0, 100, 10,
+            {}, {}, "%");
+#endif
+
         leftPane.add_section("Gyro");
         addOption("Gyro Aim", getSettings().game.enableGyroAim,
             "Enables gyro controls while in look mode, aiming a hawk, and aiming "
@@ -1796,10 +2135,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
 #ifdef __SWITCH__
         leftPane.add_section("Wii-style Motion");
-        addOption("Wii-style Motion Controls", getSettings().game.enableWiiMotion,
+        addOption("Wii-style Motion Controls (Experimental)", getSettings().game.enableWiiMotion,
             "Plays like the Wii version with Joy-Con: swing the right Joy-Con (the Wii Remote) to swing "
             "the sword, move the left Joy-Con (the Nunchuk) sideways for the spin attack and push it "
-            "forward to raise the shield for a shield bash. The direction of the swing picks the cut.<br/><br/>The "
+            "forward to raise the shield for a shield bash. With Swing Direction Animations on, a clear sideways or "
+            "downward swing picks the matching cut.<br/><br/>Still experimental: light or diagonal swings are often "
+            "not told apart and play the game's own cut, and the thrust is rarely recognised. The "
             "Nunchuk gestures need two detached Joy-Con; with one controller only the sword swing works. The buttons always work "
             "too. Aiming by motion is Gyro Aim above; there is no Wii pointer cursor in menus.");
         config_percent_select(leftPane, rightPane, getSettings().game.wiiMotionSensitivity,
@@ -2033,6 +2374,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         addOption("Minimal HUD", getSettings().game.minimalHUD,
             "Disables the elements of the main HUD of the game.<br/>Useful for a more immersive "
             "experience.");
+        addOption("Minimap", getSettings().game.showMinimap,
+            "Shows the map in the corner of the screen. Off hides only that map, which is the HUD element that "
+            "costs the most in large areas like Hyrule Field. The full map still opens as usual.");
         config_percent_select(leftPane, rightPane, getSettings().game.hudScale,
             "HUD Scale",
             "Scales the size of the gameplay HUD (hearts, buttons, mini-map, etc.). Does not affect dialog boxes or menus.",
@@ -2395,8 +2739,14 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_bool_select(leftPane, rightPane, getSettings().backend.checkForUpdates,
             {
                 .key = "Check for Dusklight Updates",
+#ifdef __SWITCH__
+                .helpText = "Checks this port's GitHub releases for a new version when Dusklight starts, at most "
+                            "once a day. Nothing is downloaded until you choose to.<br/><br/>"
+                            "No personal information is transmitted or collected.",
+#else
                 .helpText = "Checks GitHub releases for a new Dusklight version on startup.<br/><br/>"
                             "No personal information is transmitted or collected.",
+#endif
             });
 #if BOREALIS_HAS_DISCORD
         config_bool_select(leftPane, rightPane, getSettings().game.enableDiscordPresence,
@@ -2426,7 +2776,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_bool_select(leftPane, rightPane, getSettings().backend.showProfilerOverlay,
             {
                 .key = "Show Profiler Overlay",
-                .helpText = "Display a CPU profiler overlay. Only for developers!"
+                .helpText = "Shows a CPU timing overlay. A diagnostic for development."
             });
 #endif
         config_bool_select(leftPane, rightPane, getSettings().game.showInputViewer,
@@ -2484,7 +2834,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             });
         add_speedrun_disabled_option(leftPane, rightPane, getSettings().game.recordingMode,
             "Recording Mode",
-            "Disables the game HUD and all background music.<br/><br/>Useful for recording footage.");
+            "Disables the game HUD, all background music and the FPS counter.<br/><br/>Useful for recording footage.");
     });
 
     add_tab("Tools", [this](Rml::Element* content) {

@@ -284,6 +284,7 @@ struct UserSettings {
         // Preferences
         ConfigVar<bool> enableMirrorMode;
         ConfigVar<bool> minimalHUD;
+        ConfigVar<bool> showMinimap;  // aleks2 (V1-rc10): the corner map alone, without the rest of the HUD
         ConfigVar<float> hudScale;
         ConfigVar<bool> pauseOnFocusLost;
         ConfigVar<bool> enableLinkDollRotation;
@@ -325,6 +326,15 @@ struct UserSettings {
         ConfigVar<float> wiiGyroThresholdRad;         // 1.0 .. 12.0, default 3.0
         ConfigVar<float> wiiDirectionDominance;       // 1.1 .. 3.0, default 1.5
         ConfigVar<float> wiiMinYawRad;                // 0.05 .. 1.5, default 0.25
+        // V1-rc7 (wii_gesture_detector.hpp): gyro's weight in opening a window, cooldown after one, the wind-up
+        // filter, the most a thrust may turn, and the sensor axis a thrust runs along (-1 any).
+        ConfigVar<float> wiiGyroWeight;               // 0 .. 1, default 0.5
+        ConfigVar<float> wiiCooldownS;                // 0.05 .. 0.5, default 0.12
+        ConfigVar<bool> wiiWindupFilter;              // default on
+        ConfigVar<float> wiiWindupMaxG;               // V1-rc9: 1 .. 8, default 4.0 (a wind-up is weaker)
+        ConfigVar<float> wiiWindupMaxGyroRad;         // V1-rc9: 2 .. 40, default 12
+        ConfigVar<float> wiiThrustMaxGyroRad;         // 0.5 .. 12, default 4.0 (V1-rc8)
+        ConfigVar<int> wiiThrustAxis;                 // -1 .. 2, default -1
         ConfigVar<int> wiiAxisLateralLeft, wiiAxisForwardLeft, wiiForwardSignLeft;     // the left Joy-Con as Nunchuk
         ConfigVar<int> wiiAxisLateralRight, wiiAxisForwardRight, wiiForwardSignRight;  // the right Joy-Con as Nunchuk
         ConfigVar<float> gyroSensitivityX;
@@ -416,12 +426,22 @@ struct UserSettings {
         // screen, companion summoned), 1 = Flip Grip (portrait, stacked).
         // There is deliberately no horizontal dual mode.
         ConfigVar<int> dualScreenLayout;
+        // V1-rc1: turning the second screen on clears Minimal HUD; this remembers that it was on,
+        // so turning the second screen off gives it back (it used to stay off: the full HUD kept
+        // drawing on the main screen, ~430 -> 1300 draws a frame).
+        ConfigVar<bool> dualScreenRestoreMinimalHud;
         // Switch only: redraw the companion every Nth frame (1 = every frame).
         // The dashboard is a status surface, not animation: at 30 fps a
         // divisor of 3 still updates it 10x a second while cutting the GX
         // draw work to a third. Interaction bypasses it via
         // dualscreen::requestRedraw().
         ConfigVar<int> dualScreenRedrawDivisor;
+        // aleks2 (V1-rc6): how often the field minimap is rendered, in game frames (1: every frame, as the game
+        // does). It re-renders its whole texture each time: ~800 GX draws a frame in Hyrule Field and Castle Town
+        // with the full HUD. 1 by default until a console run shows the map keeps its picture between renders.
+        ConfigVar<int> minimapRedrawDivisor;
+        // aleks2 (V1-rc7): the most a stage's loading screen waits, in ms, for that stage's shaders (0: never waits).
+        ConfigVar<int> shaderSceneWaitMs;
         // Switch only: the companion's render resolution, as pixels on its
         // longest side. 720 is the panel's own size (no downscale); 640 is
         // the default. The aspect is always preserved.
@@ -456,6 +476,14 @@ struct UserSettings {
         // profile the user chose, so a hand-edited knob (the row then reads Custom) does not
         // move the docked resolution. See resolution_policy.hpp. Appended last: mod ABI.
         ConfigVar<int> autoResolutionPolicy;
+        // aleks2 (V1-rc16): HD Rumble on the Switch's own controllers (src/dusk/hd_rumble.cpp); off falls back to the
+        // classic on/off rumble. Appended last: mod ABI.
+        ConfigVar<bool> hdRumble;
+        // aleks2 (V1-rc16): 0-100 %, every vibration (HD and classic) on the Switch's own controllers.
+        ConfigVar<int> rumbleIntensity;
+        // aleks2 (V1-rc16): handheld only, opt-in, any preset: the system's official 460 MHz GPU configuration
+        // (src/dusk/gpu_boost.cpp). Presets never touch the clocks. Appended last: mod ABI.
+        ConfigVar<bool> gpuBoost;
     } game;
 
     struct {

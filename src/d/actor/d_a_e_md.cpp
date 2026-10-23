@@ -308,7 +308,7 @@ void daE_MD_c::Action() {
     }
 }
 
-int daE_MD_c::Execute() {
+DUSK_NOINLINE int daE_MD_c::Execute() {
     mInvulnerabilityTimer--;
     if (mInvulnerabilityTimer <= 0) {
         mInvulnerabilityTimer = 0;

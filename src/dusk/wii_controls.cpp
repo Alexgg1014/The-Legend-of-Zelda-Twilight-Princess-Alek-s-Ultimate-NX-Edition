@@ -10,6 +10,10 @@
 #include "dusk/settings.h"
 #include "dusk/ui/ui.hpp"
 #include "dusk/wii_recenter_combo.hpp"
+#include "dusk/wii_sample_log.hpp"
+#ifdef __SWITCH__
+#include "dusk/frame_telemetry.hpp"  // V1-rc12: perf-lab wii_record
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -58,6 +62,47 @@ bool s_timingLogged[3] = {};
 std::uint64_t s_lastDropped[3] = {};
 double s_lastDropLog = -10.0;
 
+// V1-rc12: perf-lab wii_record -- every raw sample, with HID's attitude, to cache/logs/wii-samples-<n>.csv for
+// kRecordSeconds (wii_sample_log.hpp), so a console session can be replayed on the host.
+constexpr double kRecordSeconds = 180.0;
+std::FILE* s_record = nullptr;
+double s_recordStart = -1.0;
+bool s_recordDone = false;
+
+bool recording() {
+#ifdef __SWITCH__
+    if (s_recordDone || !frame_telemetry::lab().wiiRecord) {
+        return false;
+    }
+    if (s_record == nullptr) {
+        char path[96];
+        std::snprintf(path, sizeof path, "sdmc:/switch/dusklight/cache/logs/wii-samples-%lld.csv",
+            static_cast<long long>(std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()));
+        s_record = std::fopen(path, "w");
+        if (s_record == nullptr) {
+            s_recordDone = true;
+            DuskLog.warn("wii motion: cannot write {}", path);
+            return false;
+        }
+        std::setvbuf(s_record, nullptr, _IOFBF, 64 * 1024);
+        std::fprintf(s_record, "# dusklight wii motion samples: side,t,ax,ay,az,gx,gy,gz,flags,d0..d8 (wii_sample_log.hpp)\n");
+        s_recordStart = s_now;
+        DuskLog.info("wii motion: recording raw samples to {} for {:.0f} s", path, kRecordSeconds);
+    }
+    if (s_now - s_recordStart > kRecordSeconds) {
+        std::fclose(s_record);
+        s_record = nullptr;
+        s_recordDone = true;
+        DuskLog.info("wii motion: sample recording finished");
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 BlockContext block_context() {
     BlockContext ctx;
     ctx.ui_visible = ui::any_document_visible();
@@ -98,6 +143,21 @@ std::vector<Sample> read_samples(aurora::device::SensorSide side, float dt) {
         s.gyro = {raw[i].gyro[0], raw[i].gyro[1], raw[i].gyro[2]};
         s.gap = (raw[i].flags & aurora::device::kMotionGapBefore) != 0;
         out.push_back(s);
+    }
+    if (n > 0 && recording()) {
+        for (int i = 0; i < n; ++i) {
+            LoggedSample l;
+            l.side = idx;
+            l.t = out[static_cast<size_t>(i)].t;
+            l.accel = {raw[i].accel[0], raw[i].accel[1], raw[i].accel[2]};
+            l.gyro = {raw[i].gyro[0], raw[i].gyro[1], raw[i].gyro[2]};
+            l.flags = raw[i].flags;
+            for (int k = 0; k < 9; ++k) {
+                l.dir[static_cast<size_t>(k)] = raw[i].dir[k];
+            }
+            const std::string line = format_sample_line(l);
+            std::fwrite(line.data(), 1, line.size(), s_record);
+        }
     }
     // What the console really sends for delta_time, once, and any samples lost, rarely.
     aurora::device::MotionStats st;
@@ -145,6 +205,13 @@ RawTuning read_raw_tuning() {
     r.gyroThresholdRad = g.wiiGyroThresholdRad.getValue();
     r.dominance = g.wiiDirectionDominance.getValue();
     r.minYawRad = g.wiiMinYawRad.getValue();
+    r.gyroWeight = g.wiiGyroWeight.getValue();
+    r.cooldownS = g.wiiCooldownS.getValue();
+    r.windupFilter = g.wiiWindupFilter.getValue();
+    r.windupMaxG = g.wiiWindupMaxG.getValue();
+    r.windupMaxGyroRad = g.wiiWindupMaxGyroRad.getValue();
+    r.thrustMaxGyroRad = g.wiiThrustMaxGyroRad.getValue();
+    r.thrustAxis = g.wiiThrustAxis.getValue();
     r.lateralAxis[0] = g.wiiAxisLateralLeft.getValue();
     r.forwardAxis[0] = g.wiiAxisForwardLeft.getValue();
     r.forwardSign[0] = g.wiiForwardSignLeft.getValue();
@@ -156,7 +223,10 @@ RawTuning read_raw_tuning() {
 
 bool same_raw(const RawTuning& a, const RawTuning& b) {
     if (!(a.accelThresholdG == b.accelThresholdG && a.gyroThresholdRad == b.gyroThresholdRad &&
-            a.dominance == b.dominance && a.minYawRad == b.minYawRad)) {
+            a.dominance == b.dominance && a.minYawRad == b.minYawRad && a.gyroWeight == b.gyroWeight &&
+            a.cooldownS == b.cooldownS && a.windupFilter == b.windupFilter && a.windupMaxG == b.windupMaxG &&
+            a.windupMaxGyroRad == b.windupMaxGyroRad &&
+            a.thrustMaxGyroRad == b.thrustMaxGyroRad && a.thrustAxis == b.thrustAxis)) {
         return false;
     }
     for (int i = 0; i < 2; ++i) {
@@ -187,6 +257,10 @@ void refresh_tuning() {
         s_tuning.axes[1].lateralOverride, s_tuning.axes[1].forwardOverride, s_tuning.axes[1].forwardSign,
         g.wiiMotionSwordHand.getValue() == WiiSwordHand::RIGHT ? "right" : "left", g.wiiMotionSwingCuts.getValue() ? "on" : "off",
         g.wiiMotionSwapSides.getValue() ? "on" : "off", g.enableMirrorMode.getValue() ? "on" : "off");
+    DuskLog.info("wii motion tuning (rc7): gyro weight {:.2f}, cooldown {:.2f} s, wind-up filter {}, thrust max gyro "
+                 "{:.2f} rad/s, thrust axis {}",
+        s_tuning.gyroWeight, s_tuning.cooldownS, s_tuning.windupFilter ? "on" : "off", s_tuning.thrustMaxGyroRad,
+        s_tuning.thrustAxis);
     if (!notes.empty()) {
         DuskLog.warn("wii motion tuning: {}(axes -1 = the built-in table)", notes);
     }
@@ -218,12 +292,14 @@ void log_report(const Report& r, const GestureEngine& engine) {
     if (r.kind == Report::Kind::Sword) {
         if (r.accepted) {
             DuskLog.info("wii sword {}: {} Ev={:.3f} Eh={:.3f} yaw={:.2f} yawPeak={:.2f} aPeak={:.2f}g wPeak={:.2f} act={:.0f}ms "
-                         "gravityAxis={} gyroHand={}",
+                         "firstVert={:.2f} gravityAxis={} gyroHand={}",
                 side_name(r.side), gesture_name(static_cast<SwordGesture>(r.verdict)), f.energyVertical, f.energyHorizontal,
-                f.yaw, f.yawPeak, f.accelPeakG, f.gyroPeakRad, f.activeTime * 1000.0, f.gravityAxis, hand);
+                f.yaw, f.yawPeak, f.accelPeakG, f.gyroPeakRad, f.activeTime * 1000.0, f.firstVert, f.gravityAxis, hand);
         } else {
-            DuskLog.info("wii sword {} rejected ({}): aPeak={:.2f}g wPeak={:.2f} act={:.0f}ms", side_name(r.side),
-                reject_name(r.reason), f.accelPeakG, f.gyroPeakRad, f.activeTime * 1000.0);
+            DuskLog.info("wii sword {} rejected ({}): Ev={:.3f} Eh={:.3f} yaw={:.2f} aPeak={:.2f}g wPeak={:.2f} act={:.0f}ms "
+                         "firstVert={:.2f}",
+                side_name(r.side), reject_name(r.reason), f.energyVertical, f.energyHorizontal, f.yaw, f.accelPeakG,
+                f.gyroPeakRad, f.activeTime * 1000.0, f.firstVert);
         }
     } else {
         const char* what = r.accepted ? (r.verdict == static_cast<int>(NunchukGesture::Spin) ? "spin" : "shield bash")

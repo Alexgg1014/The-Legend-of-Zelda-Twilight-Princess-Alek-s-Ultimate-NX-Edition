@@ -1524,7 +1524,7 @@ static void dummy0() {
     ((dStage_stageDt_c*)dComIfGp_getStage())->getRoom();
 }
 
-dStage_objectNameInf* dStage_searchName(char const* objName) {
+DUSK_NOINLINE dStage_objectNameInf* dStage_searchName(char const* objName) {  // aleks2 (rc17): a catalog hook target (dawnlight), inlined by the PGO build
 #if TARGET_PC
     dStage_objectNameInf* info =
         dusk::mods::svc::actor_impl::get_stageinfo_from_full_name(objName);
@@ -2973,7 +2973,7 @@ int dStage_changeSceneExitId(cBgS_PolyInfo& param_0, f32 speed, u32 mode, s8 roo
     return dStage_changeScene(exit_id, speed, mode, roomNo, angle, -1);
 }
 
-int dStage_changeScene(int i_exitId, f32 speed, u32 mode, s8 room_no, s16 angle, int param_5) {
+DUSK_NOINLINE int dStage_changeScene(int i_exitId, f32 speed, u32 mode, s8 room_no, s16 angle, int param_5) {
     stage_scls_info_dummy_class* scls;
 
     if (room_no == -1) {

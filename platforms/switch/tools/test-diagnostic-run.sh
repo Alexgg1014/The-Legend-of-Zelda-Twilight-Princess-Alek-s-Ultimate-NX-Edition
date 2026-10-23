@@ -9,7 +9,7 @@ cxx="${CXX:-g++}"
 out="${TMPDIR:-/tmp}/dusk-diagnostic-run-test"
 mkdir -p "$out"
 cd "$out"
-srcs=("$root/src/dusk/shader_prep.cpp" "$root/src/dusk/benchmark_report.cpp" "$root/src/dusk/perf_tour.cpp"
+srcs=("$root/src/dusk/shader_prep.cpp" "$root/src/dusk/benchmark_report.cpp" "$root/src/dusk/perf_tour.cpp" "$root/src/dusk/perf_core.cpp" "$root/src/dusk/perf_report.cpp"
       "$root/src/dusk/fifo_report.cpp" "$here/diagnostic_run_test.cpp")
 # H35: the tour report includes Aurora's C structs (aurora/tuning.h, header only).
 flags=(-std=c++20 -Wall -Wextra -Wno-missing-field-initializers -O1 -I"$root/src" -I"$root/extern/aurora/include")

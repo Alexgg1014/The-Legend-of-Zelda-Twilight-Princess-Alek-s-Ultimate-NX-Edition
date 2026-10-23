@@ -75,6 +75,9 @@ namespace manifest {
 bool has_inline_sites(const void*, const char**) {
     return false;
 }
+const char* name_at(const void*) {  // V1-rc16 (hook statistics' labels)
+    return nullptr;
+}
 ResolveStatus resolve(const char* name, void** outAddr, HookSymbolFlags* outFlags) {
     if (g_ambiguous.contains(name)) {
         return ResolveStatus::Ambiguous;
@@ -420,9 +423,39 @@ void member_resolution() {
 
 }  // namespace
 
+extern bool g_duskHookFast;  // src/dusk/mods/svc/hook.cpp (V1-rc16)
+
+// V1-rc16: the dispatch's slot cache (game thread, hook_fast). A target looked up before it had any callback is cached
+// as a miss; adding one must be seen at once. And hook_fast off runs exactly the same callbacks.
+void slot_cache() {
+    FakeMod mod("dev.test.cache", {"dComIfGp_setNextStage"});
+    const auto& h = hooks_service();
+    int skip = -1;
+    CHECK(h.dispatch_pre(nullptr, addr(g_setNextStage), nullptr, nullptr, &skip) == MOD_OK && skip == 0);  // miss
+    auto o = options(0, HOOK_REPLACE_CONFLICT);
+    o.userdata = const_cast<char*>("cache");
+    CHECK(h.add_pre(mod.ctx(), addr(g_setNextStage), pre_record, &o) == MOD_OK);
+    CHECK(h.add_post(mod.ctx(), addr(g_setNextStage), post_record, &o) == MOD_OK);
+    for (const bool fast : {true, false, true}) {
+        g_duskHookFast = fast;
+        mod.calls.clear();
+        h.dispatch_pre(nullptr, addr(g_setNextStage), nullptr, nullptr, &skip);
+        h.dispatch_post(nullptr, addr(g_setNextStage), nullptr, nullptr);
+        CHECK((mod.calls == std::vector<std::string>{"pre cache", "post cache"}));
+    }
+    svc::g_hookModule.modDetached(mod.mod);
+    mod.calls.clear();
+    h.dispatch_pre(nullptr, addr(g_setNextStage), nullptr, nullptr, &skip);  // the slot is gone: nothing runs
+    h.dispatch_post(nullptr, addr(g_setNextStage), nullptr, nullptr);
+    CHECK(mod.calls.empty());
+    std::printf("slot cache   a cached miss sees a new callback; hook_fast off runs the same ones; a removed slot is not reached\n");
+}
+
 int main() {
     g_symbols["dMenu_Ring_c::_create"] = addr(g_menuRingCreate);
     g_symbols["dComIfGp_setNextStage"] = addr(g_setNextStage);
+    svc::cpu_profile_set_thread();  // V1-rc16: dispatch as the game thread does, through the slot cache
+    slot_cache();
     composition();
     replace_conflicts(true);
     replace_conflicts(false);

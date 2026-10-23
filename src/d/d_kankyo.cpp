@@ -1526,7 +1526,7 @@ dScnKy_env_light_c::dScnKy_env_light_c() {
     dKy_clear_game_init();
 }
 
-void dScnKy_env_light_c::setDaytime() {
+DUSK_NOINLINE void dScnKy_env_light_c::setDaytime() {  // aleks2 (rc17): a catalog hook target (time_sync_neo), inlined by the PGO build
     mDate = dComIfGs_getDate();
     daytime = dComIfGs_getTime();
 

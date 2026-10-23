@@ -32,6 +32,7 @@
 #include "d/d_item_data.h"
 #include "d/d_meter2_info.h"
 #include "d/d_pane_class.h"
+#include "dusk/settings.h"
 
 namespace dusk::ui {
 namespace {
@@ -660,9 +661,64 @@ void composite_picture_layer(
         layerSurface.get(), nullptr, &icon, &destinationRect, SDL_SCALEMODE_LINEAR);
 }
 
-std::optional<CachedIcon> render_j2d_pane_icon(J2DPane* pane) {
-    std::vector<PictureLayer> layers;
-    collect_picture_layers(pane, layers);
+// aleks2 (V1-rc12): what the Midna icon is made of. The console profile (Hyrule Field) had the decode, recolour and
+// scaled blit of every layer running every frame -- ~1.5 ms of the game thread -- for an icon that rarely changes.
+struct IconLayerKey {
+    const void* picture = nullptr;
+    const void* image = nullptr;
+    LayerColors colors{};
+    RectF rect;
+    uint8_t alpha = 0;
+};
+
+bool same_color(const JUtility::TColor& a, const JUtility::TColor& b) noexcept {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+bool same_layer(const IconLayerKey& a, const IconLayerKey& b) noexcept {
+    if (a.picture != b.picture || a.image != b.image || a.alpha != b.alpha || a.rect.left != b.rect.left ||
+        a.rect.top != b.rect.top || a.rect.right != b.rect.right || a.rect.bottom != b.rect.bottom ||
+        !same_color(a.colors.black, b.colors.black) || !same_color(a.colors.white, b.colors.white))
+    {
+        return false;
+    }
+    for (size_t i = 0; i < a.colors.corner.size(); ++i) {
+        if (!same_color(a.colors.corner[i], b.colors.corner[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<IconLayerKey> icon_key(const std::vector<PictureLayer>& layers) {
+    std::vector<IconLayerKey> key;
+    key.reserve(layers.size());
+    for (const auto& layer : layers) {
+        auto* texture = layer.picture != nullptr ? layer.picture->getTexture(0) : nullptr;
+        key.push_back({
+            .picture = layer.picture,
+            .image = texture != nullptr ? static_cast<const void*>(texture->getTexInfo()) : nullptr,
+            .colors = layer.picture != nullptr ? layer_colors(*layer.picture, layer.alpha) : LayerColors{},
+            .rect = layer.rect,
+            .alpha = layer.alpha,
+        });
+    }
+    return key;
+}
+
+bool same_key(const std::vector<IconLayerKey>& a, const std::vector<IconLayerKey>& b) noexcept {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (!same_layer(a[i], b[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::optional<CachedIcon> render_j2d_pane_icon(const std::vector<PictureLayer>& layers) {
     if (layers.empty()) {
         return std::nullopt;
     }
@@ -764,7 +820,8 @@ void unregister_icon_texture_provider() noexcept {
 
 void update_midna_icon_texture(J2DPane* pane) noexcept {
     auto& state = midna_icon_state();
-    if (pane == nullptr || !pane->isVisible()) {
+    // V1-rc12: the touch controls' Z button is the only thing that shows this icon; without them nothing is built.
+    if (pane == nullptr || !pane->isVisible() || !getSettings().game.enableTouchControls) {
         if (state.valid) {
             state.valid = false;
             state.icon = {};
@@ -773,7 +830,19 @@ void update_midna_icon_texture(J2DPane* pane) noexcept {
         return;
     }
 
-    auto icon = render_j2d_pane_icon(pane);
+    // V1-rc12: rebuilt only when what it is made of changes (or once a second, for anything the key cannot see).
+    static std::vector<IconLayerKey> s_lastKey;
+    static unsigned s_framesSinceBuild = 0;
+    std::vector<PictureLayer> layers;
+    collect_picture_layers(pane, layers);
+    auto key = icon_key(layers);
+    if (state.valid && ++s_framesSinceBuild < 60 && same_key(key, s_lastKey)) {
+        return;
+    }
+    s_framesSinceBuild = 0;
+    s_lastKey = std::move(key);
+
+    auto icon = render_j2d_pane_icon(layers);
     if (!icon) {
         if (state.valid) {
             state.valid = false;

@@ -28,7 +28,7 @@ void COutFontSet_c::initialize() {
     mType = 0x47;
 }
 
-void COutFontSet_c::drawFont(J2DTextBox* i_textbox, u8 i_type, f32 i_posX, f32 i_posY, f32 i_sizeX,
+DUSK_NOINLINE void COutFontSet_c::drawFont(J2DTextBox* i_textbox, u8 i_type, f32 i_posX, f32 i_posY, f32 i_sizeX,
                              f32 i_sizeY, u32 i_color, u8 i_alpha) {
     mpTextBoxPtr = i_textbox;
     mPosX = i_posX;
@@ -743,6 +743,10 @@ void COutFont_c::setBlendAnime(J2DPicture* i_pic, DUSK_IF_ELSE(f32, s16) param_1
 }
 
 const char* COutFont_c::getBtiName(int i_nameIdx) {
+    return btiName(i_nameIdx);
+}
+
+const char* COutFont_c::btiName(int i_nameIdx) {
     static const char* mpIconName[] = {
         "font_00.bti",
         "font_01.bti",

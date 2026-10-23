@@ -1029,6 +1029,10 @@ f32 drawDpadGlyph(dMeter2Draw_c* md, f32 x1, f32 bottomY) {
 // within it, and publishes the touch rect. False when the button should not
 // be on screen at all. Both layouts place the box differently.
 bool drawTransformPlate(f32 bx, f32 by, f32 bw, f32 bh) {
+    // V1, from igawa6's fork (ds-3.0.3, 39b266c, CC0): cleared up front so a hidden button can't keep last
+    // frame's hit rect.
+    s_transformBtnRect[0] = s_transformBtnRect[1] = 0.0f;
+    s_transformBtnRect[2] = s_transformBtnRect[3] = 0.0f;
     const bool menuOpen = anyMenuOpen();
     daAlink_c* alink = daAlink_getAlinkActorClass();
     if (menuOpen || alink == NULL || !dComIfGs_isEventBit(dSv_event_flag_c::M_077)) {

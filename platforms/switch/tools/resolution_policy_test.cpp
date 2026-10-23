@@ -25,6 +25,14 @@ static void test_policy_tables() {
     CHECK(policy_rows(kPolicyQuality, Mode::Docked) == 900);
     CHECK(policy_rows(kPolicyQuality, Mode::Handheld) == 720);
     CHECK(policy_rows(kPolicyQuality, Mode::Flip) == 540);
+    // post-rc12: Balanced handheld is 720 rows with deko3d only; Flip, docked and Performance unchanged.
+    CHECK(policy_rows(kPolicyBalanced, Mode::Handheld, true) == 720);
+    CHECK(policy_rows(kPolicyBalanced, Mode::Handheld, false) == 540);
+    CHECK(policy_rows(kPolicyBalanced, Mode::Flip, true) == 540);
+    CHECK(policy_rows(kPolicyBalanced, Mode::Docked, true) == 720);
+    CHECK(policy_rows(kPolicyPerformance, Mode::Handheld, true) == 540);
+    CHECK(resolve(0, kPolicyBalanced, Mode::Handheld, true).rows == 720);
+    CHECK(resolve(0, kPolicyBalanced, Mode::Handheld).rows == 540);
     for (const int p : {kPolicyBalanced, kPolicyPerformance}) {
         CHECK(policy_rows(p, Mode::Docked) == 720);
         CHECK(policy_rows(p, Mode::Handheld) == 540);

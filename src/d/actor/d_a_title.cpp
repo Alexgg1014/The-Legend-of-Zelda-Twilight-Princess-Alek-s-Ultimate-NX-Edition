@@ -379,7 +379,7 @@ void daTitle_c::nextScene_proc() {
     }
 }
 
-void daTitle_c::fastLogoDispInit() {
+DUSK_NOINLINE void daTitle_c::fastLogoDispInit() {
     mBck.setFrame(mBck.getEndFrame() - 1.0f);
     mBpk.setFrame(mBpk.getEndFrame() - 1.0f);
     mBrk.setFrame(mBrk.getEndFrame() - 1.0f);

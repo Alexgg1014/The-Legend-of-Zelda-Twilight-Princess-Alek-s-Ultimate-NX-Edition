@@ -210,7 +210,7 @@ void JFWDisplay::preGX() {
     }
 }
 
-void JFWDisplay::endGX() {
+DUSK_NOINLINE void JFWDisplay::endGX() {  // aleks2 (rc17): a catalog hook target (gz), inlined by the PGO build
     s32 bufferNum = JUTXfb::getManager()->getBufferNum();
     u16 width = JUTVideo::getManager()->getFbWidth();
     u16 height = JUTVideo::getManager()->getEfbHeight();

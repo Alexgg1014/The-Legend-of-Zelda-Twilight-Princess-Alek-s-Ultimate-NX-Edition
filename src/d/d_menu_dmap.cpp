@@ -1532,7 +1532,7 @@ void dMenu_Dmap_c::screenInit() {
     field_0x98->hide();
 }
 
-void dMenu_Dmap_c::getPlayerIconPos(s8 i_floorNo, f32 param_2) {
+DUSK_NOINLINE void dMenu_Dmap_c::getPlayerIconPos(s8 i_floorNo, f32 param_2) {
     if (i_floorNo == field_0x172) {
         f32 pos_x;
         f32 pos_y;

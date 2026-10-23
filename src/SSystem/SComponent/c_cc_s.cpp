@@ -133,7 +133,7 @@ void cCcS::ClrAtHitInf() {
     }
 }
 
-bool cCcS::ChkNoHitAtTg(cCcD_Obj* pat_obj, cCcD_Obj* ptg_obj) {
+DUSK_NOINLINE bool cCcS::ChkNoHitAtTg(cCcD_Obj* pat_obj, cCcD_Obj* ptg_obj) {  // aleks2 (rc17): a catalog hook target (dawnlight), inlined by the PGO build
     fopAc_ac_c* pat_ac = pat_obj->GetAc();
     fopAc_ac_c* ptg_ac = ptg_obj->GetAc();
     if ((pat_ac != NULL && ptg_ac != NULL && pat_ac == ptg_ac) ||
