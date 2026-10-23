@@ -117,6 +117,16 @@ Taken on a Switch with version 1.0.
     <td align="center">Online co-op, Switch and PC</td>
     <td align="center">Twilit Essentials: Boss Rush</td>
   </tr>
+  <tr>
+    <td><img src="docs/images/v1/09-flip-grip-wii-u.png" width="160" alt="Flip Grip: the game on top, map and items on the touch screen below"></td>
+    <td><img src="docs/images/v1/10-mod-catalog.png" width="280" alt="The in-game mod catalog"></td>
+    <td><img src="docs/images/v1/11-boot-menu.png" width="280" alt="Dusklight's main menu on Switch"></td>
+  </tr>
+  <tr>
+    <td align="center">Flip Grip (optional)</td>
+    <td align="center">The in-game mod catalog</td>
+    <td align="center">Main menu</td>
+  </tr>
 </table>
 
 The HD textures are Storm's Dusklight HD pack, downloaded separately; mods are their authors' work.
