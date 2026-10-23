@@ -84,82 +84,42 @@ See [Mods](docs/user/mods.md) for what has been tested on the console and what i
 
 ## Screenshots
 
-Taken on a Switch during the public beta; menus may differ slightly in 1.0.
-
-### Playing
+Taken on a Switch with version 1.0.
 
 <table>
   <tr>
-    <td><img src="docs/images/switch-beta/game-hyrule-field.jpg" width="280" alt="Hyrule Field"></td>
-    <td><img src="docs/images/switch-beta/game-field-combat.jpg" width="280" alt="Combat"></td>
-    <td><img src="docs/images/switch-beta/game-castle-town.jpg" width="280" alt="Castle Town"></td>
+    <td><img src="docs/images/v1/01-hyrule-field-epona.jpg" width="280" alt="Epona rears up on the bridge into Hyrule Field at golden hour"></td>
+    <td><img src="docs/images/v1/02-castle-town.jpg" width="280" alt="Castle Town's central square, full of people"></td>
+    <td><img src="docs/images/v1/12-hyrule-castle-sunset.jpg" width="280" alt="Link on the castle walls at sunset"></td>
   </tr>
   <tr>
-    <td align="center">Hyrule Field</td>
-    <td align="center">Combat</td>
+    <td align="center">Hyrule Field at golden hour</td>
     <td align="center">Castle Town</td>
+    <td align="center">Hyrule Castle at sunset</td>
   </tr>
   <tr>
-    <td><img src="docs/images/switch-beta/game-epona-night.jpg" width="280" alt="On Epona at night"></td>
-    <td><img src="docs/images/switch-beta/game-ordon-spring.jpg" width="280" alt="A spring"></td>
-    <td><img src="docs/images/switch-beta/game-castle.jpg" width="280" alt="Hyrule Castle"></td>
+    <td><img src="docs/images/v1/03-hd-textures-before.jpg" width="280" alt="Lake Hylia's rope bridge with the original textures"></td>
+    <td><img src="docs/images/v1/04-hd-textures-after.jpg" width="280" alt="The same spot with Storm's Dusklight HD texture pack"></td>
+    <td><img src="docs/images/v1/06-linkle-mod.jpg" width="280" alt="Playing as Linkle in Ordon Woods"></td>
   </tr>
   <tr>
-    <td align="center">On Epona at night</td>
-    <td align="center">A spring</td>
-    <td align="center">Hyrule Castle</td>
-  </tr>
-</table>
-
-### Menus and options
-
-<table>
-  <tr>
-    <td><img src="docs/images/switch-beta/menu-main.jpg" width="280" alt="Main menu, version 1.0.0-beta.1"></td>
-    <td><img src="docs/images/switch-beta/menu-disc-picker.jpg" width="280" alt="Choosing a disc image"></td>
-    <td><img src="docs/images/switch-beta/menu-performance.jpg" width="280" alt="Performance presets"></td>
+    <td align="center">Original textures…</td>
+    <td align="center">…and with Storm's Dusklight HD pack</td>
+    <td align="center">Linkle Mod</td>
   </tr>
   <tr>
-    <td align="center">Main menu, version 1.0.0-beta.1</td>
-    <td align="center">Choosing a disc image</td>
-    <td align="center">Performance presets</td>
+    <td><img src="docs/images/v1/05-dawnlight-hyrule-survivors.png" width="280" alt="Dawnlight's Hyrule Survivors mode"></td>
+    <td><img src="docs/images/v1/07-online-coop-switch-pc.png" width="280" alt="Crests of Courage online co-op between a Switch and a PC"></td>
+    <td><img src="docs/images/v1/08-twilit-essentials-boss-rush.png" width="280" alt="Twilit Essentials' Boss Rush"></td>
   </tr>
   <tr>
-    <td><img src="docs/images/switch-beta/menu-wii-motion.jpg" width="280" alt="Optional Wii-style motion controls"></td>
-    <td><img src="docs/images/switch-beta/menu-randomizer-selector.jpg" width="280" alt="Play / Randomizer selector"></td>
-    <td><img src="docs/images/switch-beta/mods-browser.jpg" width="280" alt="In-game mod browser"></td>
-  </tr>
-  <tr>
-    <td align="center">Optional Wii-style motion controls</td>
-    <td align="center">Play / Randomizer selector</td>
-    <td align="center">In-game mod browser</td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/switch-beta/mods-installed.jpg" width="280" alt="Installed mods"></td>
-    <td><img src="docs/images/switch-beta/mods-boss-rush.jpg" width="280" alt="Twilit Essentials: Boss Rush"></td>
-  </tr>
-  <tr>
-    <td align="center">Installed mods</td>
+    <td align="center">Dawnlight: Hyrule Survivors</td>
+    <td align="center">Online co-op, Switch and PC</td>
     <td align="center">Twilit Essentials: Boss Rush</td>
   </tr>
 </table>
 
-### Flip Grip (extra)
-
-With a Flip Grip the console is held upright: the game on top, a touch companion screen below.
-
-<table>
-  <tr>
-    <td><img src="docs/images/switch-beta/flipgrip-items.jpg" width="200" alt="Items"></td>
-    <td><img src="docs/images/switch-beta/flipgrip-dungeon-map.jpg" width="200" alt="Dungeon map, by floor"></td>
-    <td><img src="docs/images/switch-beta/flipgrip-guide.jpg" width="200" alt="Guide reader"></td>
-  </tr>
-  <tr>
-    <td align="center">Items</td>
-    <td align="center">Dungeon map, by floor</td>
-    <td align="center">Guide reader</td>
-  </tr>
-</table>
+The HD textures are Storm's Dusklight HD pack, downloaded separately; mods are their authors' work.
 
 ## Install
 
