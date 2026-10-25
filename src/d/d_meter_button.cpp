@@ -58,7 +58,7 @@ dMeterButton_c::~dMeterButton_c() {
     _delete();
 }
 
-int dMeterButton_c::_create() {
+DUSK_NOINLINE int dMeterButton_c::_create() {
     OS_REPORT("dMeterButton_c::_create\n");
     screenInitButton();
     screenInitText();

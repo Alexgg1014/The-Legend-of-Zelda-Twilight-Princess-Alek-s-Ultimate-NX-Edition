@@ -3,6 +3,7 @@
 #endif
 
 #include "manifest.hpp"
+#include "abi_tags.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -512,7 +513,24 @@ ResolveStatus resolve(const char* name, void** outAddr, HookSymbolFlags* outFlag
         }
         return ResolveStatus::Ok;
     }
-    return ResolveStatus::NotFound;
+    // aleks2 (1.0.2): a name that differs only in its [abi:...] tags (abi_tags.hpp).
+    const int64_t index = abi_tags::find_ignoring_tags(name, s_state.entryCount,
+        [](uint32_t i) {
+            const Entry& entry = s_state.entries[i];
+            return entry.nameOff < s_state.stringsLen ? s_state.strings + entry.nameOff : nullptr;
+        },
+        [](uint32_t i) { return s_state.entries[i].rva; });
+    if (index == abi_tags::kNone) {
+        return ResolveStatus::NotFound;
+    }
+    if (index == abi_tags::kAmbiguous || (s_state.entries[index].flags & kFlagDupName) != 0) {
+        return ResolveStatus::Ambiguous;
+    }
+    *outAddr = reinterpret_cast<void*>(s_state.imageBase + s_state.entries[index].rva);
+    if (outFlags != nullptr) {
+        *outFlags = s_state.entries[index].flags;
+    }
+    return ResolveStatus::Ok;
 }
 
 bool has_inline_sites(const void* addr, const char** outName) {

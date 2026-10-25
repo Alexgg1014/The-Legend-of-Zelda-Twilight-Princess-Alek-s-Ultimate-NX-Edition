@@ -96,7 +96,7 @@ dMenu_Fishing_c::~dMenu_Fishing_c() {
     }
 }
 
-void dMenu_Fishing_c::_create() {
+DUSK_NOINLINE void dMenu_Fishing_c::_create() {
     mpString = JKR_NEW dMsgString_c();
     screenSetBase();
     screenSetDoIcon();
@@ -115,7 +115,7 @@ void dMenu_Fishing_c::_move() {
     mDoExt_setCurrentHeap(heap);
 }
 
-void dMenu_Fishing_c::_draw() {
+DUSK_NOINLINE void dMenu_Fishing_c::_draw() {
     if (mpArchive) {
         J2DGrafContext* grafPort = dComIfGp_getCurrentGrafPort();
         mpBlackTex->setAlpha(0xff);

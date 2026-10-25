@@ -51,7 +51,7 @@ import sys
 
 BASE = "v2.0.2"               # upstream tag the earlier fork started from (--base)
 FORK = "nx/main"              # the earlier fork's branch (--fork)
-UPSTREAM_REF = "v2.0.3"       # what "upstream" means for the main repository
+UPSTREAM_REF = "v2.0.3"       # what "upstream" means for the main repository (also src/dusk/mods/upstream_version.hpp)
 AUTHOR = ""                   # substring of the commit author name (--author), lower case
 
 # Lines too common to mean anything.

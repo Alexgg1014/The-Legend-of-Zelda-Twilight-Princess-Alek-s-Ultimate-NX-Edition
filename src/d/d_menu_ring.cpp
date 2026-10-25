@@ -882,7 +882,7 @@ bool dMenu_Ring_c::isClose() {
     return closed;
 }
 
-u8 dMenu_Ring_c::getStickInfo(STControl* i_stick) {
+DUSK_NOINLINE u8 dMenu_Ring_c::getStickInfo(STControl* i_stick) {
     field_0x6c2 = 0xff;
     if (i_stick->getValueStick() >= 0.75f) {
         s16 stick_angle = i_stick->getAngleStick();
@@ -1003,7 +1003,7 @@ s16 dMenu_Ring_c::calcStickAngle(STControl* i_stick, u8 param_1) {
     return directionTrig;
 }
 
-void dMenu_Ring_c::setRotate() {
+DUSK_NOINLINE void dMenu_Ring_c::setRotate() {
     clacEllipsePlotAverage(mItemsTotal, g_ringHIO.mItemRingPosX + FB_WIDTH_BASE / 2,
                            g_ringHIO.mItemRingPosY + FB_HEIGHT_BASE / 2);
     for (int i = 0; i < mItemsTotal; i++) {
@@ -2175,7 +2175,7 @@ DUSK_NOINLINE bool dMenu_Ring_c::isMixItemOff() {  // aleks2 (rc17): a catalog h
     return 0;
 }
 
-void dMenu_Ring_c::setMixMessage() {
+DUSK_NOINLINE void dMenu_Ring_c::setMixMessage() {
     if (mpTextParent[4] != NULL) {
         if (isMixItemOff()) {
             for (int i = 0; i < 5; i++) {

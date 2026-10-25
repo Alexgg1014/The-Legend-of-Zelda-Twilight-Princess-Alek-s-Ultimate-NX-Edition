@@ -3111,7 +3111,7 @@ void dMenu_Collect3D_c::setupItem3D(Mtx param_0) {
 
 #pragma push
 #pragma optimization_level 2
-void dMenu_Collect3D_c::toItem3Dpos(f32 param_0, f32 param_1, f32 param_2, cXyz* param_3) {
+DUSK_NOINLINE void dMenu_Collect3D_c::toItem3Dpos(f32 param_0, f32 param_1, f32 param_2, cXyz* param_3) {
     Mtx adStack_98;
     Mtx auStack_c8;
 #if TARGET_PC

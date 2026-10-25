@@ -31,7 +31,7 @@ JUTResFont::~JUTResFont() {
     }
 }
 
-void JUTResFont::deleteMemBlocks_ResFont() {
+DUSK_NOINLINE void JUTResFont::deleteMemBlocks_ResFont() {
     JKR_DELETE_ARRAY(mMemBlocks);
 }
 

@@ -84,7 +84,7 @@ def collect_targets(args) -> int:
         for hook in meta["files"][0]["hooks"]:
             if hook["kind"] != "name":
                 continue
-            entry = manifest.get(hook["name"])
+            entry = check_symbol_manifest.lookup(manifest, hook["name"])
             names = by_addr.get(entry[1], []) if entry else []
             if not names:
                 unresolved.append(f"{pkg.stem}: {hook['name']}")

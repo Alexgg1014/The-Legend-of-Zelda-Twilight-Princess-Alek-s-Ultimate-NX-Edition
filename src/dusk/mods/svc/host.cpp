@@ -6,10 +6,10 @@
 #include "dusk/mods/loader/loader.hpp"
 #include "dusk/mods/log_buffer.hpp"
 #include "dusk/mods/manifest.hpp"
+#include "dusk/mods/upstream_version.hpp"
 #include "dusk/utilities.hpp"
 
 #include <borealis/io.hpp>
-#include <borealis/version.h>
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -180,7 +180,7 @@ void host_mod_detached(LoadedMod& mod) {
 
 constinit HostService s_hostService{
     .header = SERVICE_HEADER(HostService, HOST_SERVICE_MAJOR, HOST_SERVICE_MINOR),
-    .version = BOREALIS_APP_VERSION,
+    .version = DUSK_UPSTREAM_VERSION,
     .build_id = nullptr,
     .build_id_len = 0,
     .get_service = host_get_service,

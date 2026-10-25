@@ -31,6 +31,7 @@ the NRO also carries, marks those mods incompatible with this build.
 import argparse
 import json
 import pathlib
+import re
 import struct
 import sys
 
@@ -89,6 +90,33 @@ def read_symdb(data: bytes) -> tuple:
             raise CheckError("symbol manifest has a name outside its string table")
         names[strings[name_off:end].decode("utf-8", "replace")] = (flags, rva)
     return build_id, names
+
+
+ABI_TAG = re.compile(r"\[abi:[^\]]*\]")
+
+
+def lookup(manifest: dict, name: str):
+    """The manifest entry (flags, rva) a by-name hook resolves to, as manifest::resolve finds it, or None.
+
+    1.0.2: an exact name first; else the names compared with every [abi:...] tag removed from both sides
+    (src/dusk/mods/abi_tags.hpp). Matches at two or more addresses come back flagged FLAG_DUP_NAME: ambiguous."""
+    entry = manifest.get(name)
+    if entry is not None:
+        return entry
+    key = ABI_TAG.sub("", name)
+    tagged = key != name
+    found = None
+    for candidate, value in manifest.items():
+        if "[abi:" in candidate:
+            match = ABI_TAG.sub("", candidate) == key
+        else:
+            match = tagged and candidate == key
+        if not match:
+            continue
+        if found is not None and found[1] != value[1]:
+            return (FLAG_DUP_NAME, found[1])
+        found = value
+    return found
 
 
 def read_required(path: pathlib.Path) -> list:
@@ -162,7 +190,7 @@ def check_requirements(elf, symtab, relocs, exports, runtime_names, manifest, re
                 m["imports"]["missing"].append(f"{name} ({group})")
         else:
             m["hooks"]["required"] += 1
-            entry = manifest.get(name)
+            entry = lookup(manifest, name)
             if entry is None:
                 m["hooks"]["missing"].append(name)
             elif entry[0] & FLAG_DUP_NAME:

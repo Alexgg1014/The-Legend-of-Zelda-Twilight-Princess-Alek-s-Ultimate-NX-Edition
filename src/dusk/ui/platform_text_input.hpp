@@ -4,11 +4,16 @@
 //
 // PlatformTextInput is the seam. The default backend (platform_text_input.cpp) reports is_native() == false
 // and BaseStringButton keeps its RmlUi editor, so desktop and Android behave as before. The Switch backend
-// (platforms/switch/source/switch_text_input.cpp) opens the system software keyboard and blocks until it
-// closes. Nothing here depends on RmlUi or libnx: host tests drive NativeTextEditSession with a fake backend.
+// (platforms/switch/source/switch_text_input.cpp) opens the system software keyboard. Nothing here depends on
+// RmlUi or libnx: host tests drive NativeTextEditSession with a fake backend.
+//
+// 1.0.2: a backend can run the keyboard without blocking the caller (begin/poll). The Switch one does: the game
+// thread kept no frames running while swkbd was up, so a mod's network on that thread (Crests of Courage's UDP)
+// timed out and the host dropped the player who was typing.
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -27,6 +32,7 @@ struct TextInputRequest {
 };
 
 enum class TextInputStatus { Accepted, Cancelled, Error };
+enum class TextInputStart { Started, Busy, Unsupported };
 
 struct TextInputResult {
     TextInputStatus status = TextInputStatus::Cancelled;
@@ -40,6 +46,13 @@ public:
     virtual bool is_native() const = 0;
     // Blocks until the keyboard closes. Never called when is_native() is false.
     virtual TextInputResult show(const TextInputRequest& request) = 0;
+    // Opens the keyboard without blocking. Started: poll() gives the result once it closes. Busy: a keyboard of an
+    // edit that went away (abandon()) is still open, so none is opened now. Unsupported: use show().
+    virtual TextInputStart begin(const TextInputRequest&) { return TextInputStart::Unsupported; }
+    // The result of the keyboard begin() opened, once it closed; nullopt while it is open.
+    virtual std::optional<TextInputResult> poll() { return TextInputResult{TextInputStatus::Error, {}}; }
+    // The edit begin() opened the keyboard for is gone: its result, when it comes, is dropped.
+    virtual void abandon() {}
 };
 
 // The backend of this platform; replace it with a fake in tests (nullptr restores the default).
@@ -81,13 +94,24 @@ inline std::string sanitize_numeric_input(const std::string& text) {
     return out;
 }
 
-enum class NativeEditOutcome { NotRun, Applied, Cancelled, Failed };
+enum class NativeEditOutcome { NotRun, Running, Applied, Cancelled, Failed };
 
 // One native edit of one field: request() marks it wanted (ignored while one is pending or running), and
 // pump() -- called from the owner's per-frame update -- opens the keyboard exactly once for it, applies an
-// accepted value once, keeps the old value on cancel or error, and restores the UI focus afterwards.
+// accepted value once, keeps the old value on cancel or error, and restores the UI focus afterwards. With a
+// backend that can begin() the keyboard, pump() returns Running while it is open and finishes the edit on the
+// first frame after it closed; the field stays busy until then.
 class NativeTextEditSession {
 public:
+    NativeTextEditSession() = default;
+    NativeTextEditSession(const NativeTextEditSession&) = delete;
+    NativeTextEditSession& operator=(const NativeTextEditSession&) = delete;
+    ~NativeTextEditSession() {
+        if (mOpenOn != nullptr) {
+            mOpenOn->abandon();
+        }
+    }
+
     bool request() {
         if (mPending || mRunning) {
             return false;
@@ -99,12 +123,36 @@ public:
 
     NativeEditOutcome pump(PlatformTextInput& backend, const TextInputRequest& request,
         const std::function<void(std::string)>& apply, const std::function<void()>& restoreFocus) {
+        if (mOpenOn != nullptr) {
+            std::optional<TextInputResult> result = mOpenOn->poll();
+            if (!result) {
+                return NativeEditOutcome::Running;
+            }
+            mOpenOn = nullptr;
+            // The request the keyboard was opened with: the field's own value may have moved since.
+            return finish(*result, mOpenRequest, apply, restoreFocus);
+        }
         if (!mPending) {
             return NativeEditOutcome::NotRun;
         }
         mPending = false;
         mRunning = true;
-        const TextInputResult result = backend.show(request);
+        switch (backend.begin(request)) {
+        case TextInputStart::Started:
+            mOpenOn = &backend;
+            mOpenRequest = request;
+            return NativeEditOutcome::Running;
+        case TextInputStart::Busy:
+            return finish({TextInputStatus::Cancelled, {}}, request, apply, restoreFocus);
+        case TextInputStart::Unsupported:
+            break;
+        }
+        return finish(backend.show(request), request, apply, restoreFocus);
+    }
+
+private:
+    NativeEditOutcome finish(const TextInputResult& result, const TextInputRequest& request,
+        const std::function<void(std::string)>& apply, const std::function<void()>& restoreFocus) {
         NativeEditOutcome outcome = NativeEditOutcome::Cancelled;
         if (result.status == TextInputStatus::Accepted) {
             std::string text = request.numeric ? sanitize_numeric_input(result.text) : result.text;
@@ -122,9 +170,10 @@ public:
         return outcome;
     }
 
-private:
     bool mPending = false;
     bool mRunning = false;
+    PlatformTextInput* mOpenOn = nullptr;  // the backend whose keyboard is open for this edit
+    TextInputRequest mOpenRequest;
 };
 
 }  // namespace dusk::ui

@@ -815,7 +815,7 @@ int fitPrefix(f32 size, f32 maxW, const char* text) {
     return n;
 }
 
-void drawTextEllipsized(f32 x, f32 y, f32 size, f32 maxW, u32 rgba, const char* text) {
+DUSK_NOINLINE void drawTextEllipsized(f32 x, f32 y, f32 size, f32 maxW, u32 rgba, const char* text) {
     if (text == NULL || text[0] == 0) {
         return;
     }

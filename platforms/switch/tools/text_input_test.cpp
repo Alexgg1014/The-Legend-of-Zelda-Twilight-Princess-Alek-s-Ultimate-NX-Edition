@@ -31,9 +31,30 @@ struct Fake final : PlatformTextInput {
     }
 };
 
-struct Harness {
+// 1.0.2: a keyboard that stays open over several frames (the Switch one runs on its own thread).
+struct AsyncFake final : PlatformTextInput {
+    std::optional<TextInputResult> next;  // nullopt: still open
+    TextInputStart start = TextInputStart::Started;
+    int begins = 0, shows = 0, abandons = 0;
+    TextInputRequest last;
+    bool is_native() const override { return true; }
+    TextInputResult show(const TextInputRequest&) override {
+        ++shows;
+        return {TextInputStatus::Error, {}};
+    }
+    TextInputStart begin(const TextInputRequest& r) override {
+        ++begins;
+        last = r;
+        return start;
+    }
+    std::optional<TextInputResult> poll() override { return next; }
+    void abandon() override { ++abandons; }
+};
+
+template <class Backend>
+struct BasicHarness {
     NativeTextEditSession session;
-    Fake backend;
+    Backend backend;
     std::vector<std::string> applied;
     int focusRestores = 0;
     NativeEditOutcome pump(const TextInputRequest& req) {
@@ -42,6 +63,8 @@ struct Harness {
             [this] { ++focusRestores; });
     }
 };
+using Harness = BasicHarness<Fake>;
+using AsyncHarness = BasicHarness<AsyncFake>;
 
 }  // namespace
 
@@ -116,6 +139,63 @@ int main() {
         h.pump(req);
         CHECK(h.applied.size() == 1 && h.applied[0] == "-12.5");
     }
+    {  // async: Running while open (the game keeps its frames), applied once on the first frame after it closed
+        AsyncHarness h;
+        TextInputRequest req;
+        req.initialText = "Old";
+        req.maxLength = 4;
+        CHECK(h.session.request());
+        CHECK(h.pump(req) == NativeEditOutcome::Running);
+        CHECK(h.backend.begins == 1 && h.backend.shows == 0 && h.backend.last.initialText == "Old");
+        TextInputRequest later;  // the field moved on meanwhile: the edit still uses the request it opened with
+        later.maxLength = 100;
+        for (int frame = 0; frame < 5; ++frame) {
+            CHECK(h.pump(later) == NativeEditOutcome::Running);
+            CHECK(h.session.busy() && !h.session.request());
+        }
+        CHECK(h.applied.empty() && h.focusRestores == 0);
+        h.backend.next = TextInputResult{TextInputStatus::Accepted, "Midna!"};
+        CHECK(h.pump(later) == NativeEditOutcome::Applied);
+        CHECK(h.applied.size() == 1 && h.applied[0] == "Midn");
+        CHECK(h.focusRestores == 1 && !h.session.busy());
+        CHECK(h.pump(later) == NativeEditOutcome::NotRun && h.backend.begins == 1);
+    }
+    {  // async cancel and error leave the field as it was
+        for (const auto status : {TextInputStatus::Cancelled, TextInputStatus::Error}) {
+            AsyncHarness h;
+            h.session.request();
+            CHECK(h.pump({}) == NativeEditOutcome::Running);
+            h.backend.next = TextInputResult{status, "ignored"};
+            h.pump({});
+            CHECK(h.applied.empty() && h.focusRestores == 1 && !h.session.busy());
+        }
+    }
+    {  // a keyboard still open for an edit that went away: no second one, the new edit is a cancel
+        AsyncHarness h;
+        h.backend.start = TextInputStart::Busy;
+        h.session.request();
+        CHECK(h.pump({}) == NativeEditOutcome::Cancelled);
+        CHECK(h.backend.shows == 0 && h.applied.empty() && h.focusRestores == 1 && !h.session.busy());
+    }
+    {  // a backend that cannot start one asynchronously falls back to show()
+        AsyncHarness h;
+        h.backend.start = TextInputStart::Unsupported;
+        h.session.request();
+        CHECK(h.pump({}) == NativeEditOutcome::Failed);
+        CHECK(h.backend.shows == 1 && h.focusRestores == 1 && !h.session.busy());
+    }
+    {  // the field goes away with the keyboard open: the backend drops that result
+        AsyncFake backend;
+        {
+            NativeTextEditSession session;
+            session.request();
+            session.pump(backend, {}, nullptr, nullptr);
+        }
+        CHECK(backend.abandons == 1);
+        AsyncFake idle;
+        { NativeTextEditSession session; }
+        CHECK(idle.abandons == 0);
+    }
     {  // the default backend leaves the RmlUi editor alone; a fake can be swapped in and out
         CHECK(!platform_text_input().is_native());
         Fake fake;
@@ -125,7 +205,7 @@ int main() {
         CHECK(!platform_text_input().is_native());
     }
     if (failures == 0) {
-        std::puts("text input: accept, cancel, error, length limit, single call, focus restore: ok");
+        std::puts("text input: accept, cancel, error, length limit, single call, focus restore, async: ok");
     }
     return failures == 0 ? 0 : 1;
 }
