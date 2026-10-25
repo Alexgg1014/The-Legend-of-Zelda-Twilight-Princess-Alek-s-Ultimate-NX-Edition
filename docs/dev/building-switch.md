@@ -87,6 +87,14 @@ function's body does. Two release-gate checks cover that:
     mod update that hooks a new file-local function (Dawnlight 5.3.0: `d_a_e_sf.cpp#action`) finds
     it without a new build. About +0.6 % code; functions with several callers can still be inlined,
     which the hook-inline check catches.
+  - `-fno-inline-small-functions`, actor sources (`src/d/actor`) only: the small-function inliner
+    still folded short file-local functions into their caller (Dawnlight 5.3.1:
+    `d_a_e_wb.cpp#e_wb_f_wait`). Actors hold most `file#function` hooks. Measured on a quarter of
+    the actor files without PGO: a third more file-local functions kept, 11 % less code.
+- `platforms/switch/tools/check_mod_abi_families.py`: the whole-family export lists are in the
+  image's `.dynsym`. `mod_abi_libstdcxx_fs.txt` (all of libstdc++'s `std::filesystem`) is one, so a
+  mod from outside the catalog finds any of those functions. `std::filesystem::equivalent` is bound
+  to a loader shim that compares paths: Horizon has no inode numbers.
 
 ## Run
 

@@ -10,6 +10,11 @@
 #include "dusk/mods/queue.hpp"
 #include "dusk/mods/svc/registry.hpp"
 #include "dusk/mods/updates.hpp"
+#include "dusk/logging.h"
+#ifdef __SWITCH__
+#include "dusk/switch_net.h"
+#endif
+#include <ctime>
 #include "fmt/format.h"
 #include "format.hpp"
 #include "icon_button.hpp"
@@ -1352,6 +1357,24 @@ void ModBrowser::finish_fetch(mods::catalog::FetchResult result) {
     } else {
         mState = State::Error;
         mError = result.error.empty() ? "The catalog request failed." : std::move(result.error);
+#ifdef __SWITCH__
+        // 1.0.1: "SSL peer certificate or SSH remote key was not OK" (CURLE_PEER_FAILED_VERIFICATION) is almost
+        // always the console's clock: the site's certificate is renewed every ~90 days, and Horizon's ssl service
+        // rejects one whose start date is still in the console's future. Say so, and log what the next report needs.
+        if (mError.find("certificate") != std::string::npos) {
+            const std::time_t now = std::time(nullptr);
+            char date[32] = "?";
+            if (const std::tm* utc = std::gmtime(&now)) {
+                std::strftime(date, sizeof date, "%Y-%m-%d %H:%M UTC", utc);
+            }
+            DuskLog.warn("Mod catalog: secure connection to twilitrealm.dev failed ({}); console clock {}; {}", mError,
+                date, dusk::switchnet::system_release());
+            mError = fmt::format("Secure connection failed: the server's certificate was not accepted. The console's "
+                                 "date and time are probably wrong (it reads {}). Set them in System Settings > "
+                                 "System > Date and Time, then press Retry.",
+                date);
+        }
+#endif
     }
     if (mFocusTarget == FocusTarget::Default) {
         mFocusTarget = FocusTarget::Search;

@@ -1199,7 +1199,7 @@ void renderingPlusDoorAndCursor_c::drawIconSingle(Vec const& param_0, f32 param_
     GXEnd();
 }
 
-void renderingPlusDoorAndCursor_c::drawCursor(Vec const& param_0, s16 param_1, int param_2,
+DUSK_NOINLINE void renderingPlusDoorAndCursor_c::drawCursor(Vec const& param_0, s16 param_1, int param_2,
                                               f32 param_3) {
     static Vec const l_offset[3] = {
         {0.0f, 0.0f, 400.0f},

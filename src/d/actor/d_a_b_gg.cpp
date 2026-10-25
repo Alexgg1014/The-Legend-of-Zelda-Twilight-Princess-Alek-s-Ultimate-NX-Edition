@@ -4210,7 +4210,7 @@ int daB_GG_c::Delete() {
     return 1;
 }
 
-void daB_GG_c::setBaseMtx() {
+DUSK_NOINLINE void daB_GG_c::setBaseMtx() {
     mDoMtx_stack_c::transS(current.pos);
     mDoMtx_stack_c::ZXYrotM(shape_angle);
     mDoMtx_stack_c::scaleM(l_HIO.base_size, l_HIO.base_size, l_HIO.base_size);

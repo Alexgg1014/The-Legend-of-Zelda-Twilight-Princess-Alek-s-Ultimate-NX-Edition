@@ -206,9 +206,12 @@ UserSettings g_userSettings = {
         // Fork-added settings, in the same order as settings.h: C++20 wants
         // designated initializers in declaration order, and the declarations
         // all sit at the end of the struct so mod ABI stays upstream's.
-        // aleks2 (companion): companion on by default -- it is this fork's
-        // headline setup. Flip Grip + Functional HUD were Aleks' defaults too.
-        .dualScreen {"game.dualScreen", true},
+        // aleks2 (1.0.1): companion OFF by default, the normal single-screen HUD; the player opts in
+        // (Screen Layout). With it on out of the box, the 3DS-style HUD moved rupees and X/Y/Z to a
+        // second screen nobody had opened (BloodFalled, GBAtemp). Only a value the player set is saved
+        // (config.cpp save(): the Value layer), so untouched installs follow this default and a choice
+        // made in the menu stays.
+        .dualScreen {"game.dualScreen", false},
         .dualScreenHudMode {"game.dualScreenHudMode", kDualHudFunctional},
         .dualScreenLayout {"game.dualScreenLayout", kDualLayoutNormal},
         .dualScreenRestoreMinimalHud {"game.dualScreenRestoreMinimalHud", false},

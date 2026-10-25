@@ -40,6 +40,13 @@ If the game reports a shader cache as damaged or malformed:
 - Motion controls are optional. If you turned on the Wii-style sword swings by accident, turn them off in
   **Settings → Input → Wii-style Motion**.
 
+## The mod browser says "Secure connection failed" or "SSL peer certificate ... was not OK"
+
+The console's date and time are almost certainly wrong. The catalog's certificate is renewed every few months, and
+the console rejects one that, by its clock, has not started yet. Set the date and time in **System Settings → System
+→ Date and Time** (or turn on "Synchronise Clock via Internet"), then press **Retry**. Updates from inside the game
+need the same.
+
 ## Reporting a bug
 
 Open an issue on this repository and attach:

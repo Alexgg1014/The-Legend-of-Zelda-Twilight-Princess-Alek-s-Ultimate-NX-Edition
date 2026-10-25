@@ -405,7 +405,7 @@ void daTitle_c::fastLogoDisp() {
     keyWaitInit();
 }
 
-int daTitle_c::getDemoPrm() {
+DUSK_NOINLINE int daTitle_c::getDemoPrm() {
     dDemo_actor_c* demoActor = dDemo_c::getActor(demoActorID);
     dDemo_prm_c* prm;
     if (demoActor != NULL && demoActor->checkEnable(1) && (prm = demoActor->getPrm())) {
@@ -417,7 +417,7 @@ int daTitle_c::getDemoPrm() {
     return -1;
 }
 
-int daTitle_c::Draw() {
+DUSK_NOINLINE int daTitle_c::Draw() {
 #if TARGET_PC
     if (field_0x600 != NULL && dusk::game_clock::is_presentation_frame()) {
         if (!fopOvlpM_IsPeek() && !mDoRst::isReset()) {

@@ -2726,10 +2726,18 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         config_bool_select(leftPane, rightPane, getSettings().backend.skipPreLaunchUI,
             {
                 .key = "Skip Dusklight Main Menu",
+#ifdef __SWITCH__
+                .helpText =
+                    "When starting Dusklight, skip the main menu and boot straight into the "
+                    "game if a disc image is available, in the game mode you chose last (Play or "
+                    "Randomizer).<br/><br/>The menu still shows when the disc image cannot be used "
+                    "or that game mode is no longer available.",
+#else
                 .helpText =
                     "When starting Dusklight, skip the main menu and boot straight into the "
                     "game if a disc image is available.<br/><br/>Note: If any mods register game "
                     "modes, this option will be ignored.",
+#endif
             });
         config_bool_select(leftPane, rightPane, getSettings().backend.showPipelineCompilation,
             {

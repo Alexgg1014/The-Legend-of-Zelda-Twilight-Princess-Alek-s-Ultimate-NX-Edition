@@ -982,7 +982,7 @@ static void e_wb_pl_ride(e_wb_class* i_this) {
     }
 }
 
-static void e_wb_f_wait(e_wb_class* i_this) {
+static DUSK_NOINLINE void e_wb_f_wait(e_wb_class* i_this) {
     fopAc_ac_c* actor = (fopAc_ac_c*)i_this;
     s16 target_angle = fopAcM_searchPlayerAngleY(actor);
 

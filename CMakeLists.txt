@@ -537,7 +537,7 @@ if (DUSK_PLATFORM_SWITCH)
     # need the aurora/webgpu and borealis headers the game TUs already have.
     target_sources(dusk_internal PRIVATE src/dusk/dev_mode.cpp src/dusk/switch_touch.cpp src/dusk/switch_jit.cpp src/dusk/switch_log.cpp src/dusk/dynres.cpp src/dusk/session_log.cpp src/dusk/switch_net.cpp src/dusk/switch_mod_libc.cpp src/dusk/switch_mod_libstdcxx.cpp
             src/dusk/benchmark.cpp src/dusk/benchmark_report.cpp
-            src/dusk/shader_prep.cpp src/dusk/fifo_report.cpp src/dusk/perf_tour.cpp src/dusk/director.cpp src/dusk/sampler.cpp src/dusk/texrep_report.cpp src/dusk/hd_rumble.cpp src/dusk/gpu_boost.cpp src/dusk/pgo_dump.cpp
+            src/dusk/shader_prep.cpp src/dusk/fifo_report.cpp src/dusk/perf_tour.cpp src/dusk/director.cpp src/dusk/sampler.cpp src/dusk/texrep_report.cpp src/dusk/hd_rumble.cpp src/dusk/gpu_boost.cpp src/dusk/suspend_clock.cpp src/dusk/pgo_dump.cpp
             src/dusk/shader_warmup.cpp src/dusk/shader_warmup_runtime.cpp
             src/dusk/perf_core.cpp src/dusk/perf_report.cpp src/dusk/frame_telemetry.cpp src/dusk/drs_stress.cpp
             src/dusk/self_update.cpp src/dusk/self_update_core.cpp
@@ -995,6 +995,23 @@ install_bundled_mods()
 
 if (DUSK_PLATFORM_SWITCH)
     add_subdirectory(platforms/switch)
+endif ()
+
+# aleks2 (1.0.1): mods hook the actors' file-local functions by "file#function" (95 of the catalog's 114 such hooks on
+# 2026-10-22 are in src/d/actor), and a mod update can name a new one at any time. -fno-inline-functions-called-once
+# (1.0.0) did not keep them all: GCC's small-function inliner still folded small ones into their caller (Dawnlight
+# 5.3.1: d_a_e_wb.cpp#e_wb_f_wait). Measured on every 4th actor file, without PGO: 1667 file-local functions kept
+# instead of 1254, .text 11 % smaller. -fno-inline-functions too: with PGO the hot-call inliner still took members a
+# mod names (Dawnlight 5.3.3: daB_GG_c::setBaseMtx, daTitle_c::Draw); without PGO it changed nothing measurable.
+# Functions declared inline are still inlined. Checked by the gate
+# (platforms/switch/tools/test-no-ipa-ra.sh).
+if (DUSK_PLATFORM_SWITCH)
+    get_target_property(_aleks2_actor_sources dusklight SOURCES)
+    list(FILTER _aleks2_actor_sources INCLUDE REGEX "src/d/actor/[^/]+\\.cpp$")
+    set_property(SOURCE ${_aleks2_actor_sources} TARGET_DIRECTORY dusklight APPEND PROPERTY
+        COMPILE_OPTIONS "-fno-inline-small-functions;-fno-inline-functions")
+    list(LENGTH _aleks2_actor_sources _aleks2_actor_count)
+    message(STATUS "aleks2: -fno-inline-small-functions -fno-inline-functions on ${_aleks2_actor_count} actor sources")
 endif ()
 
 # aleks2 (V1-PGO): profile-guided optimisation of the game, JSystem and Aurora (Switch). OFF builds as before.

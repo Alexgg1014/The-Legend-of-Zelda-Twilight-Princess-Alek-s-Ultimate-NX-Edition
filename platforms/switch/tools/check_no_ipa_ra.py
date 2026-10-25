@@ -8,7 +8,12 @@
 - -fno-inline-functions-called-once (1.0.0). A function with a single caller stays out of line, so a mod update
   that hooks a new file-local function finds it without a new build (Dawnlight 5.3.0: d_a_e_sf.cpp#action).
 
-Any function can become a hook target after a catalog update, so the whole build gets both (CMakeLists.txt), and
+- -fno-inline-small-functions (1.0.1), actor sources only (src/d/actor). The small-function inliner still folded
+  short file-local functions into their caller (Dawnlight 5.3.1: d_a_e_wb.cpp#e_wb_f_wait); actors hold most of the
+  "file#function" hooks.
+
+Any function can become a hook target after a catalog update, so the whole build gets the first two and the actors
+the third (CMakeLists.txt), and
 this checks it. It is the same family as the hook-inline gate (test-hook-inline-elf.sh).
 
 rc22: read from build.ninja, every C/C++ compile edge. compile_commands.json lists only part of the build (the
@@ -22,8 +27,15 @@ import sys
 
 EDGE = re.compile(r"^build (?P<out>.+?\.(?:o|obj)): (?P<rule>\S*(?:C|CXX)_COMPILER\S*) (?P<src>\S+)")
 SOURCE = (".c", ".cc", ".cpp", ".cxx")
-# the -fno-<name> flags every unit must end up with
-REQUIRED = ("ipa-ra", "inline-functions-called-once")
+# the -fno-<name> flags a unit must end up with, and which units (a regex on the source path; None = every unit)
+REQUIRED = (
+    ("ipa-ra", None),
+    ("inline-functions-called-once", None),
+    # 1.0.1: the actors' file-local functions, which mods hook by "file#function", stay out of line
+    ("inline-small-functions", re.compile(r"[/\\]src[/\\]d[/\\]actor[/\\][^/\\]+\.cpp$")),
+    # 1.0.1: and with PGO the hot-call inliner (Dawnlight 5.3.3: daB_GG_c::setBaseMtx, daTitle_c::Draw)
+    ("inline-functions", re.compile(r"[/\\]src[/\\]d[/\\]actor[/\\][^/\\]+\.cpp$")),
+)
 
 
 def turned_off(text, name):
@@ -45,8 +57,8 @@ def main():
     except OSError as e:
         print(f"hook flags: cannot read {path}: {e}")
         return 2
-    units = 0
-    missing = {name: [] for name in REQUIRED}
+    units = {name: 0 for name, _ in REQUIRED}
+    missing = {name: [] for name, _ in REQUIRED}
     i = 0
     while i < len(lines):
         m = EDGE.match(lines[i])
@@ -61,16 +73,23 @@ def main():
             variables.append(lines[i].strip())
             i += 1
         flags = " ".join(v.split("=", 1)[1] for v in variables if v.startswith(("FLAGS =", "DEFINES =")))
-        units += 1
-        for name in REQUIRED:
+        for name, scope in REQUIRED:
+            if scope is not None and not scope.search(src):
+                continue
+            units[name] += 1
             if not turned_off(flags, name):
                 missing[name].append(src)
-    if units == 0:
+    if units[REQUIRED[0][0]] == 0:
         print(f"hook flags: no C/C++ compile edges in {path}")
         return 2
     bad = False
-    for name in REQUIRED:
-        print(f"-fno-{name}: {units - len(missing[name])}/{units} C/C++ units (build.ninja)")
+    for name, scope in REQUIRED:
+        what = "C/C++ units" if scope is None else "actor units"
+        if scope is not None and units[name] == 0:
+            print(f"-fno-{name}: no actor units found in build.ninja")
+            bad = True
+            continue
+        print(f"-fno-{name}: {units[name] - len(missing[name])}/{units[name]} {what} (build.ninja)")
         groups = {}
         for src in missing[name]:
             key = "/".join(src.replace("\\", "/").split("/")[:-1])

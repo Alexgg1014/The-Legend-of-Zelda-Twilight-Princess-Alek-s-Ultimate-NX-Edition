@@ -57,8 +57,11 @@ set(_aleks2_hook_roots_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_hook_roots.txt")
 # V1-rc1: whole families rather than names one at a time (tools/gen-mod-abi-wholesale.py).
 set(_aleks2_wgpu_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_abi_wgpu.txt")
 set(_aleks2_libm_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_abi_libm.txt")
+# 1.0.1: the whole std::filesystem (tools/gen-mod-abi-filesystem.py): a mod from outside the catalog asked for two
+# functions no catalog mod used (Twilight HD HUD: equivalent, read_symlink).
+set(_aleks2_fs_file "${CMAKE_CURRENT_SOURCE_DIR}/mod_abi_libstdcxx_fs.txt")
 foreach (_pinned IN ITEMS "${_aleks2_pinned_file}" "${_aleks2_hook_roots_file}" "${_aleks2_wgpu_file}"
-         "${_aleks2_libm_file}")
+         "${_aleks2_libm_file}" "${_aleks2_fs_file}")
     if (EXISTS "${_pinned}")
         file(STRINGS "${_pinned}" _aleks2_pinned_lines)
         foreach (_line IN LISTS _aleks2_pinned_lines)

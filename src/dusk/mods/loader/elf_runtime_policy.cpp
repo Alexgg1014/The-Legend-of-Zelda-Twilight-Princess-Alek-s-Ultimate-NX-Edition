@@ -13,6 +13,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
+#include <filesystem>
+#include <system_error>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -164,6 +167,60 @@ int aleks2_shim_closedir(DIR* dir) {
 
 }  // extern "C"
 
+// 1.0.1: std::filesystem::equivalent. libstdc++ compares st_dev and st_ino, and Horizon's stat leaves both 0 (libnx
+// fs_dev.c clears the struct and sets st_ino = 0), so every two files that exist would be "the same file". A mod
+// asking whether two paths name one file (Twilight HD HUD, GitHub issue #4) gets a comparison of the two absolute,
+// normalised paths instead, case-insensitively as the SD card's FAT is. Same contract otherwise: an error when
+// neither exists, false when only one does.
+namespace aleks2_fs_shim {
+namespace fs = std::filesystem;
+
+std::string key_of(const fs::path& p, std::error_code& ec) {
+    std::string s = fs::absolute(p, ec).lexically_normal().generic_string();
+    while (s.size() > 1 && s.back() == '/') {
+        s.pop_back();
+    }
+    for (auto& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+}
+
+bool equivalent_ec(const fs::path& a, const fs::path& b, std::error_code& ec) noexcept {
+    try {
+        ec.clear();
+        std::error_code ea, eb;
+        const bool hasA = fs::exists(a, ea);
+        const bool hasB = fs::exists(b, eb);
+        if (!hasA && !hasB) {
+            ec = ea ? ea : (eb ? eb : std::make_error_code(std::errc::no_such_file_or_directory));
+            return false;
+        }
+        if (!hasA || !hasB) {
+            return false;
+        }
+        const std::string ka = key_of(a, ec);
+        if (ec) {
+            return false;
+        }
+        const std::string kb = key_of(b, ec);
+        return !ec && ka == kb;
+    } catch (...) {
+        ec = std::make_error_code(std::errc::not_enough_memory);
+        return false;
+    }
+}
+
+bool equivalent(const fs::path& a, const fs::path& b) {
+    std::error_code ec;
+    const bool same = equivalent_ec(a, b, ec);
+    if (ec) {
+        throw fs::filesystem_error("cannot check file equivalence", a, b, ec);
+    }
+    return same;
+}
+}  // namespace aleks2_fs_shim
+
 namespace dusk::mods::elf {
 namespace {
 
@@ -249,6 +306,11 @@ std::vector<Shim> shims() {
         {"__assert_fail", addr(&aleks2_shim_assert_fail), "glibc assert: logged, then a crash report"},
         {"__assert_func", addr(&aleks2_shim_assert_func), "newlib assert: logged, then a crash report"},
         // DM1-c: Linux-built modules only; a switch-arm64 one gets the game's own (newlib layout).
+        // 1.0.1: Horizon has no inode numbers, so libstdc++'s answer would be "the same file" for any two.
+        {"_ZNSt10filesystem10equivalentERKNS_7__cxx114pathES3_RSt10error_code",
+            addr(&aleks2_fs_shim::equivalent_ec), "std::filesystem::equivalent by normalised path (no inodes on Horizon)"},
+        {"_ZNSt10filesystem10equivalentERKNS_7__cxx114pathES3_", addr(&aleks2_fs_shim::equivalent),
+            "std::filesystem::equivalent by normalised path (no inodes on Horizon)"},
         {"readdir", addr(&aleks2_shim_readdir), "readdir with glibc's struct dirent layout", true},
         {"closedir", addr(&aleks2_shim_closedir), "closedir, releasing the glibc-layout entry", true},
     };

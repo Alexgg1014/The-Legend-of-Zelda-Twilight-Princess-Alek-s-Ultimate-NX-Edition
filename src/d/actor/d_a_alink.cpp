@@ -9375,7 +9375,9 @@ BOOL daAlink_c::itemButtonCheck(u8 i_btnFlag) {
 // shifted. See the comment on daAlink_ITEM_BTN.
 u16 daAlink_c::itemButtonFlag(int index) {
 #if TARGET_PC
-    static const u16 flags[ITEM_BTN_COUNT] = {BTN_X, BTN_Y, BTN_S1, BTN_S2};
+    // 1.0.1: index 2 is also upstream's (1 << 2) == BTN_Z, which Z-slot mods rely on (Twilit Essentials keeps its
+    // Z item in select item 2: with BTN_S1 alone the item worked once, then waited for the companion's button).
+    static const u16 flags[ITEM_BTN_COUNT] = {BTN_X, BTN_Y, BTN_Z | BTN_S1, BTN_S2};
     return index >= 0 && index < ITEM_BTN_COUNT ? flags[index] : 0;
 #else
     return static_cast<u16>(1 << index);

@@ -51,6 +51,18 @@ See [Mods](mods.md).
 Your GameCube or Wii save is in `sdmc:/switch/dusklight/`. For keeping one save in sync between PC and Switch, see
 [Cross-save](cross-save.md).
 
+**Can I put the NRO somewhere else, for example for a forwarder?**
+Yes. You can keep `dusklight.nro` in `sdmc:/switch/dusklight/` or any folder and point a forwarder at it. The game
+keeps its data in `sdmc:/switch/dusklight/` wherever the NRO is, and the in-game updater replaces the NRO it was
+started from. If you update by extracting the ZIP instead, it puts a copy in `switch/dusklight-aleks/`: move it again
+or delete the old one.
+
+**What is the `cache` folder? Can I delete it?**
+`sdmc:/switch/dusklight/cache/` holds what the game builds once and reuses: compiled shaders (`dksh_local.bin` for
+deko3d, `pipeline_cache.db` for Vulkan), and the logs (`cache/logs/`). Deleting it is safe: the game rebuilds it, but
+the first visit to each area is slower until it has. The unpacked code of your mods is kept separately, in
+`mods/.libcache/`; deleting that is safe too, and only makes the next start slower.
+
 **Where do I report a bug?**
 Open an issue on this repository. Attach the newest log from `sdmc:/switch/dusklight/cache/logs/`. If the game
 crashed, also attach the newest file from `sdmc:/atmosphere/crash_reports/`. See

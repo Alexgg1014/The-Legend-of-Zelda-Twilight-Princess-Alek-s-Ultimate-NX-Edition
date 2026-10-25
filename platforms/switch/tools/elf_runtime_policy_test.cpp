@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -143,6 +145,28 @@ int main(int argc, char** argv) {
         }
         CHECK(files == 1);
         CHECK(d == nullptr || closedirShim(d) == 0);
+        CHECK(std::system(("rm -rf '" + dir + "'").c_str()) == 0);
+    }
+
+    {
+        // 1.0.1: std::filesystem::equivalent goes to the path-comparing shim (Horizon has no inode numbers), for
+        // both package ABIs and both overloads.
+        namespace fs = std::filesystem;
+        const char* ecName = "_ZNSt10filesystem10equivalentERKNS_7__cxx114pathES3_RSt10error_code";
+        const auto l = linux_({ecName, "GLIBCXX_3.4.26", true, false}, why);
+        const auto s = switch_({ecName, "", true, false}, why);
+        const auto t = linux_({"_ZNSt10filesystem10equivalentERKNS_7__cxx114pathES3_", "GLIBCXX_3.4.26", true, false}, why);
+        CHECK(l && l->source == Source::Shim && s && s->source == Source::Shim && t && t->source == Source::Shim);
+        using EquivalentEc = bool (*)(const fs::path&, const fs::path&, std::error_code&);
+        auto* equivalent = reinterpret_cast<EquivalentEc>(static_cast<uintptr_t>(l->address));
+        const std::string dir = std::string(argc > 2 ? argv[2] : "/tmp") + "/fs-equivalent";
+        CHECK(std::system(("rm -rf '" + dir + "' && mkdir -p '" + dir + "/sub' && : > '" + dir + "/a.txt' && : > '" + dir +
+                           "/b.txt'").c_str()) == 0);
+        std::error_code ec;
+        CHECK(equivalent(dir + "/a.txt", dir + "/sub/../a.txt", ec) && !ec);  // one file, two spellings
+        CHECK(!equivalent(dir + "/a.txt", dir + "/b.txt", ec) && !ec);          // two files: not inode 0 == inode 0
+        CHECK(!equivalent(dir + "/a.txt", dir + "/missing.txt", ec) && !ec);    // only one exists: false
+        CHECK(!equivalent(dir + "/x.txt", dir + "/y.txt", ec) && ec);           // neither: an error
         CHECK(std::system(("rm -rf '" + dir + "'").c_str()) == 0);
     }
 

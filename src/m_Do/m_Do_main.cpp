@@ -51,6 +51,7 @@
 #include "dusk/frame_telemetry.hpp"
 #include "dusk/hd_rumble.hpp"
 #include "dusk/gpu_boost.hpp"
+#include "dusk/suspend_clock.hpp"
 #include "dusk/pgo_dump.hpp"
 #include "dusk/guide/fetch.hpp"
 #include "dusk/guide/store.hpp"
@@ -331,6 +332,7 @@ void main01(void) {
         dusk::frame_telemetry::tick();
         dusk::hd_rumble::tick();  // aleks2 (V1-rc16)
         dusk::gpu_boost::tick();  // aleks2 (V1-rc16)
+        dusk::suspend_clock::tick();  // aleks2 (1.0.1): sleep does not count as play time
         dusk::pgo_dump::tick();   // aleks2 (V1-PGO): nothing unless ALEKS2_PGO=GENERATE
         dusk::dynres::update();
         dusk::drs_stress::tick();
@@ -1177,9 +1179,16 @@ int game_main(int argc, char* argv[]) {
             forcePreLaunchUI = true;
         }
         if (forcePreLaunchUI && skipPreLaunchUI) {
+#ifdef __SWITCH__
+            // aleks2 (1.0.1): show the menu for this boot only. A disc moved or swapped once used to turn the player's
+            // "Skip Dusklight Main Menu" off for good, and nothing said so.
+            DuskLog.warn("Prelaunch UI was disabled with no usable DVD image, showing it for this boot");
+            skipPreLaunchUI = false;
+#else
             DuskLog.warn("Prelaunch UI was disabled with no usable DVD image, enabling prelaunch UI");
             dusk::getSettings().backend.skipPreLaunchUI.setValue(false);
             saveConfigBeforePrelaunch = true;
+#endif
         }
         if (saveConfigBeforePrelaunch) {
             dusk::config::save();
@@ -1268,7 +1277,29 @@ int game_main(int argc, char* argv[]) {
     }
 
     if (skipPreLaunchUI == true) {
+#ifdef __SWITCH__
+        // aleks2 (1.0.1): Randomizer is built in, so there are always two game modes, and the menu below would show
+        // on every boot: "Skip Dusklight Main Menu" never worked (josete2k, GBAtemp). With the option on, start the
+        // game mode the player chose last, as Play would; the menu still shows if that mode is gone or refuses.
+        bool skipIntoLastMode = false;
+        if (dusk::gamemode::getGameModeManager().getRegisteredGameModes().size() > 1 &&
+            dusk::getSettings().backend.skipPreLaunchUI.getValue())
+        {
+            auto& gameModes = dusk::gamemode::getGameModeManager();
+            gameModes.setGameModeToPrevious();
+            const auto* gameMode = gameModes.getCurrentGameMode();
+            skipIntoLastMode = gameMode != nullptr && gameMode->invokeOnPlayFunction();
+            DuskLog.info("Skip Dusklight Main Menu: game mode '{}' {}", gameMode != nullptr ? gameMode->getId() : "?",
+                skipIntoLastMode ? "started" : "did not start; showing the menu");
+            if (!skipIntoLastMode) {
+                gameModes.setCurrentGameMode(dusk::gamemode::kVanillaGameModeId);
+            }
+        }
+        if (!skipIntoLastMode && dusk::gamemode::getGameModeManager().getRegisteredGameModes().size() > 1 &&
+            dusk::getSettings().backend.skipPreLaunchUI.getValue()) {
+#else
         if (dusk::gamemode::getGameModeManager().getRegisteredGameModes().size() > 1 && dusk::getSettings().backend.skipPreLaunchUI.getValue()) {
+#endif
             // Force pre-launch if we have registered gamemodes that we need to choose from
             dusk::ui::push_document(std::make_unique<dusk::ui::Prelaunch>(), true);
         } else {
