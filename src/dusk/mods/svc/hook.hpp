@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+struct ModContext;
+
 namespace dusk::mods {
 struct LoadedMod;
 }
@@ -12,6 +14,11 @@ struct LoadedMod;
 namespace dusk::mods::svc {
 
 void hook_resolve_mod_records(LoadedMod& mod);
+// aleks2 (1.0.3): takes the companion setting for companion_hidden.hpp, once, and logs it. The loader passes it when
+// the first mod is activated; later calls change nothing.
+void companion_hidden_snapshot(bool companionOn);
+// True when `symbol` must be reported as not found to a mod's lookup (and the mod is told why, once).
+bool companion_hidden_blocks(::ModContext* context, const char* symbol);
 
 // aleks2 (loader-only lab mode): what a mod holds in the hook system, for its summary line.
 struct HookCounts {

@@ -4168,19 +4168,19 @@ public:
     /* 0x02F5C */ LIGHT_INFLUENCE mMagneBootsPlight;
     /* 0x02F7C */ u8 field_0x2f7c[16];
     /* 0x02F8C */ u8 field_0x2f8c;
-#if TARGET_PC
-    // These stay u8 at their upstream offsets. Widening them in place for the
-    // four-item-button bit space shifted every member after 0x2F8D, and while
-    // this port compiles everything from source, third-party native mods do
-    // not: they are built against upstream's headers and bake in absolute
-    // offsets, so they end up reading the wrong field and abort. The wide
-    // values live at the end of the class instead; see mItemTrigger there.
-    /* 0x02F8D */ u8 field_0x2f8d;
-    /* 0x02F8E */ u8 field_0x2f8e;
-#else
+    // aleks2 (1.0.3): upstream's bytes are the item buttons again, on every platform. Mods built against upstream
+    // read and write them right here: doTrigger()/doButton()/talkTrigger() are inline in upstream's header, and
+    // Twilit Essentials' Z button, quick access and Zora swim, and Twilight HD's third item set and clear bits in
+    // them to inject or swallow presses. The port used to keep the masks in u16 copies at the end of the class and
+    // leave these two bytes (and mUseButtonFlags at 0x2FAE) unused, so every such read saw 0 and every write was
+    // lost: on the console, mods' custom inputs did nothing. Bits 0-7 (X Y Z B A L R and the companion's slot I)
+    // live here; slot II (BTN_S2, bit 8) is the only one kept apart, in mItemTriggerHi/mItemButtonHi at the end of
+    // the class, read together through itemTriggerBits()/itemButtonBits(). abi_parity.py --player measures these
+    // members against upstream's, so a rename or a move fails the release gate.
+    // (Comment sized so that no line below moves: PGO matches functions by source line.)
+    // ------------------------------------------------------------------------------------------------------------
     /* 0x02F8D */ u8 mItemTrigger;
     /* 0x02F8E */ u8 mItemButton;
-#endif
     /* 0x02F8F */ u8 field_0x2f8f;
     /* 0x02F90 */ u8 field_0x2f90;
     /* 0x02F91 */ u8 field_0x2f91;
@@ -4212,11 +4212,11 @@ public:
     /* 0x02FAB */ u8 field_0x2fab;
     /* 0x02FAC */ u8 mExitDirection;
     /* 0x02FAD */ u8 mPeepExitID;
-#if TARGET_PC
-    /* 0x02FAE */ u8 field_0x2fae;  // upstream mUseButtonFlags; see end of class
-#else
+    // aleks2 (1.0.3): upstream's u8 again (see mItemTrigger above). The game marks here which buttons an item polled
+    // this frame, so the HUD can grey out the others; Twilight HD reads it for its Z prompt. Bit 8 (the companion's
+    // slot II) is kept in mUseButtonFlagsHi at the end of the class; useButtonBits() reads both.
+    // (Sized so that no line below moves: PGO.)
     /* 0x02FAE */ u8 mUseButtonFlags;
-#endif
     /* 0x02FAF */ u8 field_0x2faf;
     /* 0x02FB0 */ u8 field_0x2fb0;
     /* 0x02FB1 */ u8 mWolfLockNum;
@@ -4623,19 +4623,19 @@ public:
 
     bool mIsRollstab = false;
 
-    // Four item buttons (X, Y and the companion's slots I/II) push BTN_R out
-    // to 1 << 8, so these masks need 16 bits. They are appended here rather
-    // than widened in place: every member above keeps the offset upstream
-    // gives it, which is what separately-compiled native mods address.
-    // Appending only changes sizeof(daAlink_c), which no mod depends on.
-    u16 mItemTrigger = 0;
-    u16 mItemButton = 0;
-    u16 mUseButtonFlags = 0;
-    // Last frame's copy of the above. Upstream keeps it in the u8 at 0x2FAF,
-    // which cannot hold BTN_S2 (0x100): the slot II bit fell off on the way in,
-    // so the HUD stopped showing its button as used and the release edge never
-    // arrived. Widened here rather than at 0x2FAF, which keeps its offset.
-    u16 mPrevUseButtonFlags = 0;
+    // aleks2 (1.0.3): the companion's slot II (BTN_S2 = 1 << 8) does not fit upstream's u8 masks (mItemTrigger,
+    // mItemButton, mUseButtonFlags), so its bit is kept here, shifted down by 8. Appending only changes
+    // sizeof(daAlink_c), which no mod depends on. The 16-bit views and their helpers are at the end of d_a_alink.cpp.
+    u8 mItemTriggerHi = 0, mItemButtonHi = 0, mUseButtonFlagsHi = 0, mItemButtonHiKept = 0;
+    u16 mPrevUseButtonFlags = 0;  // last frame's mUseButtonFlags, all 16 bits (0x2FAF keeps the low byte)
+    u16 itemTriggerBits() const;
+    u16 itemButtonBits() const;
+    u16 useButtonBits() const;
+    void addItemTrigger(u16 i_flags);
+    void addItemButton(u16 i_flags);
+    void addUseButton(u16 i_flags);
+    int checkItemSetButtonWide(int i_itemNo);  // X 0, Y 1, slot I 2, slot II 3, ITEM_BTN_COUNT for none
+    // (13 lines, as before 1.0.3: nothing below this class moves, PGO)
 #endif
 };  // Size: 0x385C
 

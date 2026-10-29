@@ -14,6 +14,11 @@ What it measures, with the build's own compiler and flags (read from build.ninja
     include/ subdirectories (default d,m_Do,f_op,f_pc,f_ap). Two mods crashed in the map classes (dMeterMap_c from
     Twilight Compass, dMenu_Fmap_c from Twilit Essentials), which a global's type does not reach: dMeter2_c, the
     menus and the actors are only ever reached through pointers.
+  - 1.0.3, --player HEADER:CLASS,...: offsetof the annotated members of the player classes (default daPy_py_c and
+    daAlink_c), taken from BOTH headers, and an upstream member this tree does not have is an error, not a note.
+    Mods use Link the most, through upstream's inline accessors (doTrigger() reads mItemTrigger at 0x2F8D); the port
+    had renamed those bytes and kept the masks elsewhere, so every such read saw 0 -- and --wide never looked at the
+    actor headers. sizeof is not compared: members appended at the end are allowed.
 It compiles that probe twice -- this tree's include/ first, then an upstream checkout's include/ first -- and
 prints every difference. Exit 1 when there is one.
 
@@ -142,6 +147,19 @@ def write_probe(path: pathlib.Path, facts, headers=None):
         f.write("};\n")
 
 
+def player_classes(ours: pathlib.Path, upstream: pathlib.Path, spec: str):
+    """offsetof facts for --player: the annotated members in this tree's header and in upstream's."""
+    facts = []
+    for item in filter(None, spec.split(",")):
+        rel, cls = item.split(":")
+        for side in (ours, upstream):
+            lines = (side / rel).read_text(encoding="utf-8", errors="replace").splitlines()
+            facts += [f for f in class_members(lines, cls) if f not in facts]
+        if rel not in HEADERS:
+            HEADERS.append(rel)
+    return facts
+
+
 def ninja_flags(build: pathlib.Path, tu: str):
     lines = (build / "build.ninja").read_text(encoding="utf-8", errors="replace").splitlines()
     i = next(k for k, l in enumerate(lines) if l.startswith("build ") and tu.replace("/", "/") in l and l.split(":")[0].endswith(".obj"))
@@ -217,12 +235,17 @@ def main():
                     help="the include/ to measure as this side (default: this tree's)")
     ap.add_argument("--wide", default="d,m_Do,f_op,f_pc,f_ap",
                     help="include/ subdirectories whose classes are all measured ('' for none)")
+    ap.add_argument("--player", default="d/actor/d_a_player.h:daPy_py_c,d/actor/d_a_alink.h:daAlink_c",
+                    help="HEADER:CLASS,... measured member by member from both sides ('' for none)")
     a = ap.parse_args()
     a.work.mkdir(parents=True, exist_ok=True)
     facts = members(a.ours_include / "d/d_com_inf_game.h") + globals_(a.ours_include)
     if a.wide:
         known = set(facts)
         facts += [f for f in wide_classes(a.ours_include, a.wide.split(",")) if f not in known]
+    player_facts = player_classes(a.ours_include, a.upstream / "include", a.player)
+    player_set = set(player_facts)
+    facts += [f for f in player_facts if f not in set(facts)]
     args = ninja_flags(a.build, a.tu)
     ours, dropped_ours = compile_probe(a.cxx, a.objdump, args, a.ours_include, a.work / "ours.cpp",
                                        a.work / "ours.o", facts)
@@ -233,6 +256,10 @@ def main():
         if f in ours and f in theirs and ours[f] != theirs[f]:
             diffs.append(f"{f[0]}({f[1]}, {f[2]}): here {ours[f]:#x}, upstream {theirs[f]:#x}")
     only = sorted({f[2] for f in dropped_ours} ^ {f[2] for f in dropped_up})
+    # A player-class member upstream has and this tree lacks: a mod reads or writes bytes nothing here uses.
+    missing = sorted(f"{f[1]}::{f[2]}" for f in dropped_ours if f in player_set and f in theirs)
+    for m in missing:
+        diffs.append(f"{m}: upstream's member is missing here")
     print(f"{len(facts)} facts, {len(set(ours) & set(theirs))} measured on both sides")
     for d in diffs:
         print("DIFF", d)

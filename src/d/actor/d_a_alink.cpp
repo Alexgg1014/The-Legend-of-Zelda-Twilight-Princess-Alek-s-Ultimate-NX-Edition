@@ -9351,13 +9351,13 @@ BOOL daAlink_c::checkDebugMoveInput() {
 #endif
 
 BOOL daAlink_c::itemTriggerCheckWide(u16 i_btnFlag) {
-    mUseButtonFlags |= i_btnFlag;
-    return mItemTrigger & i_btnFlag;
+    addUseButton(i_btnFlag);
+    return itemTriggerBits() & i_btnFlag;
 }
 
 BOOL daAlink_c::itemButtonCheckWide(u16 i_btnFlag) {
-    mUseButtonFlags |= i_btnFlag;
-    return mItemButton & i_btnFlag;
+    addUseButton(i_btnFlag);
+    return itemButtonBits() & i_btnFlag;
 }
 
 // aleks2: upstream's entry points, so a mod compiled against upstream still
@@ -9375,9 +9375,9 @@ BOOL daAlink_c::itemButtonCheck(u8 i_btnFlag) {
 // shifted. See the comment on daAlink_ITEM_BTN.
 u16 daAlink_c::itemButtonFlag(int index) {
 #if TARGET_PC
-    // 1.0.1: index 2 is also upstream's (1 << 2) == BTN_Z, which Z-slot mods rely on (Twilit Essentials keeps its
-    // Z item in select item 2: with BTN_S1 alone the item worked once, then waited for the companion's button).
-    static const u16 flags[ITEM_BTN_COUNT] = {BTN_X, BTN_Y, BTN_Z | BTN_S1, BTN_S2};
+    // 1.0.3: the "which button fires which select item" loops see the companion's slots as S1/S2 only; the
+    // selected item 2 also answers to upstream's BTN_Z (selectItemButtonFlag). See the notes at the end of the file.
+    static const u16 flags[ITEM_BTN_COUNT] = {BTN_X, BTN_Y, BTN_S1, BTN_S2};
     return index >= 0 && index < ITEM_BTN_COUNT ? flags[index] : 0;
 #else
     return static_cast<u16>(1 << index);
@@ -9385,7 +9385,7 @@ u16 daAlink_c::itemButtonFlag(int index) {
 }
 
 u16 daAlink_c::selectItemButtonFlag() const {
-    return itemButtonFlag(mSelectItemId);
+    return mSelectItemId == 2 ? static_cast<u16>(BTN_Z | BTN_S1) : itemButtonFlag(mSelectItemId);
 }
 
 BOOL daAlink_c::itemButton() {
@@ -9428,9 +9428,9 @@ BOOL daAlink_c::itemActionTrigger() {
 
 void daAlink_c::setStickData() {
     BOOL var_r31 = false;
-    field_0x2f8f = mItemButton;
-    mItemTrigger = 0;
-    mItemButton = 0;
+    field_0x2f8f = mItemButton; mItemButtonHiKept = mItemButtonHi;
+    mItemTrigger = 0; mItemTriggerHi = 0;
+    mItemButton = 0; mItemButtonHi = 0;
     mHeavySpeedMultiplier = 1.0f;
 
     if (checkEventRun()
@@ -9461,7 +9461,7 @@ void daAlink_c::setStickData() {
             } else {
                 mStickValue = 0.0f;
             }
-            mItemButton = field_0x2f8f;
+            mItemButton = field_0x2f8f; mItemButtonHi = mItemButtonHiKept;
         } else {
             mStickValue = 0.0f;
         }
@@ -9579,16 +9579,16 @@ void daAlink_c::setStickData() {
             const u16 slotTrig = dusk::companion::slotTriggerBits();
             const u16 slotHold = dusk::companion::slotHoldBits();
             if (slotTrig & 1) {
-                mItemTrigger |= (daAlink_ITEM_BTN)BTN_S1;
+                addItemTrigger(BTN_S1);
             }
             if (slotTrig & 2) {
-                mItemTrigger |= (daAlink_ITEM_BTN)BTN_S2;
+                addItemTrigger(BTN_S2);
             }
             if (slotHold & 1) {
-                mItemButton |= (daAlink_ITEM_BTN)BTN_S1;
+                addItemButton(BTN_S1);
             }
             if (slotHold & 2) {
-                mItemButton |= (daAlink_ITEM_BTN)BTN_S2;
+                addItemButton(BTN_S2);
             }
         }
 #endif
@@ -12275,7 +12275,7 @@ BOOL daAlink_c::checkItemChangeFromButton() {
                        mEquipItem != 0x102 && (!checkCanoeRide() || !checkFisingRodLure()))
             {
                 if (!checkEventRun() || strcmp(dComIfGp_getEventManager().getRunEventName(), "ANGER") != 0) {
-                    if (strcmp(dComIfGp_getEventManager().getRunEventName(), "ANGER2") != 0 && checkItemSetButton(mEquipItem) == ITEM_BTN_COUNT) {
+                    if (strcmp(dComIfGp_getEventManager().getRunEventName(), "ANGER2") != 0 && checkItemSetButtonWide(mEquipItem) == ITEM_BTN_COUNT) {
                         allUnequip(1);
                     }
                 }
@@ -14495,15 +14495,15 @@ int daAlink_c::checkSetItemTrigger(int i_itemNo) {
     return 0;
 }
 
-// Returns ITEM_BTN_COUNT when the item is bound to no button.
+// 1.0.3: upstream's contract (X 0, Y 1, 2 = none); see the notes at the end of the file.
 int daAlink_c::checkItemSetButton(int i_itemNo) {
-    for (u8 i = 0; i < ITEM_BTN_COUNT; i++) {
+    for (u8 i = 0; i < 2; i++) {
         if (checkGroupItem(i_itemNo, dComIfGp_getSelectItem(i))) {
             return i;
         }
     }
 
-    return ITEM_BTN_COUNT;
+    return 2;
 }
 
 bool daAlink_c::checkField() {
@@ -14704,7 +14704,7 @@ int daAlink_c::checkNewItemChange(u8 i_selItemIdx) {
             }
 
             if (checkOilBottleItem(sel_item) &&
-                checkItemSetButton(dItemNo_KANTERA_e) != ITEM_BTN_COUNT)
+                checkItemSetButtonWide(dItemNo_KANTERA_e) != ITEM_BTN_COUNT)
             {
                 return ITEM_PROC_KANDELAAR_POUR;
             }
@@ -14750,10 +14750,10 @@ int daAlink_c::checkNewItemChange(u8 i_selItemIdx) {
                     return ITEM_PROC_SPINNER_READY;
                 } else if (checkDungeonWarpItem(sel_item)) {
                     return ITEM_PROC_DUNGEON_WARP_READY;
-                } else if (checkItemSetButton(0x108) != ITEM_BTN_COUNT &&
+                } else if (checkItemSetButtonWide(0x108) != ITEM_BTN_COUNT &&
                            (sel_item == dItemNo_WORM_e || sel_item == dItemNo_BEE_CHILD_e))
                 {
-                    int itemNo = dComIfGp_getSelectItem(checkItemSetButton(0x108));
+                    int itemNo = dComIfGp_getSelectItem(checkItemSetButtonWide(0x108));
                     if (itemNo == dItemNo_WORM_ROD_e || itemNo == dItemNo_JEWEL_WORM_ROD_e) {
                         if (sel_item == dItemNo_BEE_CHILD_e) {
                             return ITEM_PROC_BOTTLE_DRINK;
@@ -14775,7 +14775,7 @@ int daAlink_c::checkNewItemChange(u8 i_selItemIdx) {
                 } else if (sel_item == dItemNo_HORSE_FLUTE_e) {
                     return ITEM_PROC_GRASS_WHISTLE;
                 } else if (checkOilBottleItem(sel_item) &&
-                           checkItemSetButton(0x48) != ITEM_BTN_COUNT)
+                           checkItemSetButtonWide(0x48) != ITEM_BTN_COUNT)
                 {
                     return ITEM_PROC_KANDELAAR_POUR;
                 } else if (sel_item == dItemNo_HAWK_EYE_e) {
@@ -18003,7 +18003,7 @@ int daAlink_c::execute() {
 
     if (checkNoResetFlg2(FLG2_UNK_1) != FALSE &&
         mEquipItem != dItemNo_KANTERA_e &&
-        checkItemSetButton(dItemNo_KANTERA_e) == ITEM_BTN_COUNT) {
+        checkItemSetButtonWide(dItemNo_KANTERA_e) == ITEM_BTN_COUNT) {
         offKandelaarModel();
     }
 
@@ -18097,7 +18097,7 @@ int daAlink_c::execute() {
         deleteEquipItem(FALSE, FALSE);
     }
 
-    mUseButtonFlags = 0;
+    mUseButtonFlags = 0; mUseButtonFlagsHi = 0;
 
     setDoStatus(BUTTON_STATUS_NONE);
     setRStatus(BUTTON_STATUS_NONE);
@@ -18380,8 +18380,8 @@ int daAlink_c::execute() {
 #endif
     {
         if (isTrigDebugMoveInput) {
-            mItemButton = 0;
-            mItemTrigger = 0;
+            mItemButton = 0; mItemButtonHi = 0;
+            mItemTrigger = 0; mItemTriggerHi = 0;
         }
 
         allAnimePlay();
@@ -18391,7 +18391,7 @@ int daAlink_c::execute() {
         }
 
         if (checkEquipHeavyBoots()) {
-            int itemButton = checkItemSetButton(dItemNo_HVY_BOOTS_e);
+            int itemButton = checkItemSetButtonWide(dItemNo_HVY_BOOTS_e);
             if (itemButton == ITEM_BTN_COUNT || checkNotHeavyBootsStage()) {
                 if (!dComIfGp_checkPlayerStatus1(0, 0x10000) || !checkHookshotRoofLv7Boss()) {
                     setHeavyBoots(0);
@@ -18918,11 +18918,11 @@ int daAlink_c::execute() {
                 // the retail (i + 1) % 2 pair form).
                 for (u8 i = 0; i < ITEM_BTN_COUNT; i++) {
                     if (dComIfGp_getSelectItem(i) == dItemNo_EMPTY_BOTTLE_e &&
-                        (mUseButtonFlags & itemButtonFlag(i)))
+                        (useButtonBits() & itemButtonFlag(i)))
                     {
                         for (u8 j = 0; j < ITEM_BTN_COUNT; j++) {
                             if (j != i && dComIfGp_getSelectItem(j) == dItemNo_EMPTY_BOTTLE_e) {
-                                mUseButtonFlags |= itemButtonFlag(j);
+                                addUseButton(itemButtonFlag(j));
                             }
                         }
                     }
@@ -18931,7 +18931,7 @@ int daAlink_c::execute() {
 
             for (int i = 0; i < ITEM_BTN_COUNT; i++) {
                 const u16 flag = itemButtonFlag(i);
-                if (!(mUseButtonFlags & flag) && !(mPrevUseButtonFlags & flag)) {
+                if (!(useButtonBits() & flag) && !(mPrevUseButtonFlags & flag)) {
                     dMeter2Info_offUseButton(dMeter2Info_useButtonBitForItemBtn(i));
                 }
             }
@@ -18953,8 +18953,8 @@ int daAlink_c::execute() {
             // aleks2: the wide copy is the one that is read; the byte at
             // 0x2FAF keeps being written so its offset and meaning stay
             // upstream's for anything reading the struct from outside.
-            mPrevUseButtonFlags = mUseButtonFlags;
-            field_0x2faf = static_cast<u8>(mUseButtonFlags);
+            mPrevUseButtonFlags = useButtonBits();
+            field_0x2faf = mUseButtonFlags;
 
             for (int i = 0; i < 4; i++) {
                 cXyz tmp(current.pos.x + 500.0f, current.pos.y + 500.0f, current.pos.z + 500.0f);
@@ -20102,3 +20102,64 @@ DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_ALINK = {
     /* Group        */ fopAc_PLAYER_e,
     /* Cull Type    */ fopAc_CULLBOX_0_e,
 };
+
+// aleks2 (1.0.3), here at the end so no line above moves (PGO): Link's item buttons as mods built against upstream see
+// them.
+//  - checkItemSetButton keeps upstream's contract: X (0), Y (1), or 2 for "on no button". Mods compare with 2 and hook
+//    it (Twilit Essentials, Twilight HD, Dawnlight); returning 4 for none made them read every unassigned item as
+//    assigned, and Twilit Essentials then refused to put the lantern away. The port's own callers use
+//    checkItemSetButtonWide below, which adds the companion's slots.
+//  - itemButtonFlag (the loops that fire a select item's button: upstream's run over X and Y only) answers S1/S2 for
+//    the companion's slots and nothing else. In 1.0.1 index 2 also answered to BTN_Z, so Z used whatever a mod keeps
+//    in select item 2 (Twilight HD's third item, Twilit Essentials' Z item), which upstream never does.
+//    selectItemButtonFlag keeps upstream's itemButton()/itemTrigger() test, 1 << mSelectItemId, for the selected
+//    item 2 (BTN_Z), plus the companion's slot I on the same select item: Twilit Essentials' Z item (GitHub #3).
+//  - The masks themselves are upstream's u8s again (see mItemTrigger in d_a_alink.h).
+#include "dusk/dualscreen.h"
+
+#if TARGET_PC
+u16 daAlink_c::itemTriggerBits() const {
+    return mItemTrigger | static_cast<u16>(mItemTriggerHi << 8);
+}
+
+u16 daAlink_c::itemButtonBits() const {
+    return mItemButton | static_cast<u16>(mItemButtonHi << 8);
+}
+
+u16 daAlink_c::useButtonBits() const {
+    return mUseButtonFlags | static_cast<u16>(mUseButtonFlagsHi << 8);
+}
+
+void daAlink_c::addItemTrigger(u16 i_flags) {
+    mItemTrigger |= static_cast<u8>(i_flags);
+    mItemTriggerHi |= static_cast<u8>(i_flags >> 8);
+}
+
+void daAlink_c::addItemButton(u16 i_flags) {
+    mItemButton |= static_cast<u8>(i_flags);
+    mItemButtonHi |= static_cast<u8>(i_flags >> 8);
+}
+
+void daAlink_c::addUseButton(u16 i_flags) {
+    mUseButtonFlags |= static_cast<u8>(i_flags);
+    mUseButtonFlagsHi |= static_cast<u8>(i_flags >> 8);
+}
+
+// X (0), Y (1), the companion's slot I (2) or II (3), or ITEM_BTN_COUNT for none. X and Y come from
+// checkItemSetButton itself, so a mod's hook on it still decides them; the slots count only while the companion
+// shows them: with it off, select items 2 and 3 belong to mods, as upstream.
+int daAlink_c::checkItemSetButtonWide(int i_itemNo) {
+    const int button = checkItemSetButton(i_itemNo);
+    if (button == 0 || button == 1) {
+        return button;
+    }
+    if (dusk::dualscreen::hudOnCompanion()) {
+        for (u8 i = 2; i < ITEM_BTN_COUNT; i++) {
+            if (checkGroupItem(i_itemNo, dComIfGp_getSelectItem(i))) {
+                return i;
+            }
+        }
+    }
+    return ITEM_BTN_COUNT;
+}
+#endif

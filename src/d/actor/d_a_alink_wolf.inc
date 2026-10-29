@@ -117,8 +117,8 @@ void daAlink_c::changeCommon() {
     mWolfEyeUpTimer = 0;
     resetCombo(TRUE);
 
-    mItemTrigger = 0;
-    mItemButton = 0;
+    mItemTrigger = 0; mItemTriggerHi = 0;
+    mItemButton = 0; mItemButtonHi = 0;
     field_0x2ba4 = 0.0f;
     field_0x33a0 = 0.0f;
     field_0x2fcc = 0;

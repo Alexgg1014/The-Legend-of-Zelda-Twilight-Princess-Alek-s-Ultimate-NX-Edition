@@ -22,6 +22,7 @@
 #include "dusk/mods/svc/hook.hpp"
 #include "dusk/mods/svc/hook_conflicts.hpp"
 #include "dusk/mods/svc/registry.hpp"
+#include "dusk/settings.h"
 #include "dusk/mods/updates.hpp"
 #include "dusk/ui/mod_texture_provider.hpp"
 #include "dusk/ui/mods_window.hpp"
@@ -253,6 +254,8 @@ LoadedMod* ModLoader::try_load_mod(const fs::path& modPath, bool fromDir, uint32
 }
 
 bool ModLoader::activate_mod(LoadedMod& mod) {
+    // aleks2 (1.0.3): the first activation fixes it for the session (svc/companion_hidden.hpp).
+    svc::companion_hidden_snapshot(getSettings().game.dualScreen.getValue());
     log::write(mod.metadata.id, LOG_LEVEL_INFO, "activating mod");
     mod.active = true;
 

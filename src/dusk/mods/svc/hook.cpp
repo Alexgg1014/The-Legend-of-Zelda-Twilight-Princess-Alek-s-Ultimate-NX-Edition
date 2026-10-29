@@ -1352,9 +1352,13 @@ void hook_remove_mod(LoadedMod&) {}
 #endif  // DUSK_CODE_MODS
 
 // By-name resolution reads the symbol manifest, which is independent of the hook engine.
-ModResult hook_resolve(ModContext*, const char* symbol, void** outAddr, HookSymbolFlags* outFlags) {
+ModResult hook_resolve(ModContext* context, const char* symbol, void** outAddr, HookSymbolFlags* outFlags) {
     if (symbol == nullptr || outAddr == nullptr) {
         return MOD_INVALID_ARGUMENT;
+    }
+    if (companion_hidden_blocks(context, symbol)) {  // aleks2 (1.0.3): companion_hidden.hpp says why
+        *outAddr = nullptr;
+        return MOD_UNAVAILABLE;
     }
     switch (manifest::resolve(symbol, outAddr, outFlags)) {
     case manifest::ResolveStatus::Ok:
@@ -1550,5 +1554,59 @@ constinit const ServiceModule g_hookModule{
     .service = &s_hookService,
     .modDetached = hook_remove_mod,
 };
+
+}  // namespace dusk::mods::svc
+
+// aleks2 (1.0.3), here at the end so no line above moves (PGO): the companion's slot queries, hidden from mods'
+// by-name lookups while the companion was off at startup. companion_hidden.hpp says why.
+#include "companion_hidden.hpp"
+
+#include <algorithm>
+#include <atomic>
+#include <iterator>
+#include <mutex>
+#include <string>
+#include <vector>
+
+namespace dusk::mods::svc {
+namespace {
+std::atomic<bool> s_companionOnAtStartup{true};
+}  // namespace
+
+void companion_hidden_snapshot(bool companionOn) {
+    static std::once_flag s_once;
+    std::call_once(s_once, [companionOn] {
+        const bool on = companionOn;
+        s_companionOnAtStartup.store(on, std::memory_order_release);
+        if (on) {
+            DuskLog.info("Mods: the companion screen is on at startup; its slot queries are offered to mods");
+        } else {
+            DuskLog.info("Mods: the companion screen is off at startup; its {} slot queries are not offered to mods' "
+                         "lookups (Twilight HD and Dawnlight keep their own third item slot; turning the companion "
+                         "on takes a restart for them)",
+                std::size(companion_hidden::kNames) / 2);
+        }
+    });
+}
+
+bool companion_hidden_blocks(ModContext* context, const char* symbol) {
+    // Before the first activation (host tests; nothing in the game looks a name up earlier) nothing is hidden.
+    if (!companion_hidden::hide(s_companionOnAtStartup.load(std::memory_order_acquire), symbol)) {
+        return false;
+    }
+    if (const auto* mod = mod_from_context(context)) {
+        static std::mutex s_noteMutex;
+        static std::vector<std::string> s_noted;
+        std::lock_guard lock(s_noteMutex);
+        std::string key = mod->metadata.id + '|' + symbol;
+        if (std::ranges::find(s_noted, key) == s_noted.end()) {
+            s_noted.push_back(std::move(key));
+            log::write(mod->metadata.id, LOG_LEVEL_INFO,
+                "'{}' is not offered: the companion screen was off at startup (the mod keeps its own controls)",
+                symbol);
+        }
+    }
+    return true;
+}
 
 }  // namespace dusk::mods::svc
