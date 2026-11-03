@@ -108,6 +108,7 @@ was identical to the original's.
 | centollOS ([SwitchWaker](https://github.com/centollOS/SwitchWaker): Pulpparty, depende3000 and the SwitchWaker contributors) | The base of the deko3d renderer (Aurora's `lib/deko`), and the trigger-axis buttons | MIT; `lib/deko/mpl` from SwitchWakerHD is MPL-2.0 |
 | PalindromicBreadLoaf | Pioneered deko3d on the Switch with a Wii emulator: the deko3d work we learned from | Credit; no code |
 | ChanseyIsTheBest | Ideas from `renut_nx` (deko3d staging and present) and from `sa2-nx` / `banjo-nx` (frame pacing, hook early-outs, GPU timestamps, the PGO workflow) | Written permission, 19 and 20 October 2026. No sa2-nx code is included |
+| Kawaii ([KartPadNX](https://github.com/KawaiiBunga/KartPadNX)) | The idea of calling newlib's allocator directly instead of through `memalign` (`platforms/switch/source/switch_libc_fast.cpp`) | Written permission, 31 October 2026. The code here is our own |
 
 Each place that uses an idea or code from someone else says so in a comment that names the source. The full list of
 libraries and their license texts is in [third-party-notices.md](third-party-notices.md). The permissions are

@@ -338,7 +338,7 @@ void dGameover_c::deleteWait_init() {}
 
 void dGameover_c::deleteWait_proc() {}
 
-int dGameover_c::_draw() {
+DUSK_NOINLINE int dGameover_c::_draw() {
     IF_DUSK_BLOCK(dusk::game_clock::is_sim_frame() && (mIsDemoSave && mProc >= PROC_DISP_WAIT))
     if (dgo_capture_c != NULL && dComIfGp_isPauseFlag()) {
         dComIfGd_set2DOpa(dgo_capture_c);

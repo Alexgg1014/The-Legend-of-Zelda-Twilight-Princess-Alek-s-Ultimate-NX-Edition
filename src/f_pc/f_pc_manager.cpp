@@ -85,6 +85,7 @@ void fpcM_Management(fpcM_ManagementFunc i_preExecuteFn, fpcM_ManagementFunc i_p
             cAPIGph_Painter();
             }
             IF_DUSK_BLOCK_END
+            IF_DUSK(fapGm_RunDeferredModTick());  // aleks2 (v1.1): mods' tick after last frame's lists are painted
 
             if (!dPa_control_c::isStatus(1)) {
                 fpcDt_Handler();

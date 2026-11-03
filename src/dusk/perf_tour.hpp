@@ -41,7 +41,10 @@ using Outcome = shader_prep::Outcome;
 /// (src/dusk/map_loader_definitions.h); docs/history/switch-h35-fifo-plan.md gives the evidence.
 /// V1-rc9: with a matrix set (set_plan), one entry per measurement of the matrix instead.
 std::span<const Zone> zones();
-std::span<const Zone> base_zones();  ///< the four zones, whatever the plan
+std::span<const Zone> base_zones();  ///< the four zones (ten with set_extended), whatever the plan
+/// v1.1-perf-lab: perf-lab.ini tour_zones = extended -- the four zones, then six more kinds of place. Set before
+/// set_plan; base_zones() and zones() follow it.
+void set_extended(bool extended);
 
 /// V1-rc9: perf-lab.ini tour_matrix = "key:v1,v2; key:v1,v2" -- one toggle per axis, its values in order, the first
 /// being the baseline. Malformed axes are left out and named in `notes`.

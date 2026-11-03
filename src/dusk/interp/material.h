@@ -68,6 +68,7 @@ public:
     void capture(J3DMaterial* material);
     void apply();
     void restore();
+    void reset();  // v1.1-perf-lab-3: empty, keeping its storage (material.cpp's recording pool)
 
 private:
     void capture(J3DAnmBase* resource);

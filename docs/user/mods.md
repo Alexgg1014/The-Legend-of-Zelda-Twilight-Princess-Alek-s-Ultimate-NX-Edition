@@ -67,10 +67,12 @@ blocked.
   the game. With many large mods installed, one may refuse to load, and the game says so.
 - **Mods cost frame rate.** Mods that hook many game functions run code every frame. The session log names the
   costly ones.
+- Code mods start and stop right away from the Dusklight main menu, before you press Play. In game, a change asks for
+  a restart and applies when you go back to the main menu.
 - A mod that crashes the game while starting is turned off at the next start. To start with no mods at all, create
   an empty file named `start_without_mods` in `sdmc:/switch/dusklight/mods/.guard/`.
 
-Some mods draw visual effects that need Graphics Backend = Vulkan: see [Mod effects that need Vulkan](mods-deko3d-effects.md).
+Some mods draw their own visual effects, and some of those effects are heavy on Switch: see [Mod graphics effects on deko3d](mods-deko3d-effects.md).
 
 Mods are their authors' work. If a mod misbehaves only on Switch, report it here. If it also misbehaves on PC, report
 it to its author.

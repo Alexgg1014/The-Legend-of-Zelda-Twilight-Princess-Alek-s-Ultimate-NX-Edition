@@ -114,7 +114,7 @@ void JAISound::stop(u32 fadeTime) {
     }
 }
 
-void JAISound::stop() {
+DUSK_NOINLINE void JAISound::stop() {
     stop_JAISound_();
     releaseHandle();
 }

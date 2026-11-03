@@ -9,7 +9,7 @@
 
 #include <cmath>
 #include <optional>
-#include <unordered_map>
+#include <absl/container/flat_hash_map.h>
 
 namespace dusk::interp::particle {
 namespace {
@@ -50,8 +50,10 @@ struct History {
     uint64_t tick, epoch;
 };
 
-std::unordered_map<const JPABaseParticle*, History<ParticleState>> s_particles;
-std::unordered_map<const JPABaseEmitter*, History<EmitterState>> s_emitters;
+// v1.1-perf-lab-3: flat maps (no node allocation per particle and tick). Nothing keeps a reference into one map
+// across an insertion into that same map.
+absl::flat_hash_map<const JPABaseParticle*, History<ParticleState>> s_particles;
+absl::flat_hash_map<const JPABaseEmitter*, History<EmitterState>> s_emitters;
 
 // Infuriatingly, some particles are recreated every frame rather than having a real
 // lifespan, so it's necessary to track their relationship to be able to do interpolation
@@ -79,9 +81,9 @@ struct ChildBirth {
     uint64_t generation, tick, epoch;
 };
 
-std::unordered_map<const JPABaseParticle*, ReplacementTrack> s_childTracks;
-std::unordered_map<const JPABaseParticle*, ChildBirth> s_childBirths;
-std::unordered_map<const JPABaseEmitter*, ReplacementTrack> s_singleFrameParticles;
+absl::flat_hash_map<const JPABaseParticle*, ReplacementTrack> s_childTracks;
+absl::flat_hash_map<const JPABaseParticle*, ChildBirth> s_childBirths;
+absl::flat_hash_map<const JPABaseEmitter*, ReplacementTrack> s_singleFrameParticles;
 uint64_t s_childGeneration = 0;
 
 template <typename Map, typename Key, typename State>
@@ -124,15 +126,10 @@ u16 blend_angle(u16 a, u16 b, float t) {
 
 template <typename Map>
 void prune_map(Map& map) {
-    for (auto it = map.begin(); it != map.end();) {
-        if (it->second.epoch != game_clock::g_frameTiming.presentationEpoch ||
-            it->second.tick + 1 < sim_tick_seq())
-        {
-            it = map.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    absl::erase_if(map, [](const auto& entry) {
+        return entry.second.epoch != game_clock::g_frameTiming.presentationEpoch ||
+               entry.second.tick + 1 < sim_tick_seq();
+    });
 }
 }  // namespace
 

@@ -22,6 +22,25 @@ constexpr std::array kZones{
     Zone{"F_SP121", 0, 0, -1, "Hyrule Field", "heavy-field"},
 };
 
+// v1.1-perf-lab: perf-lab.ini tour_zones = extended, for the Balanced 60 work (docs/investigaciones/
+// mega-optimizacion-balanceado-60.md): the four above first, so their numbers stay comparable with earlier tours, then
+// the Shader Tour's other kinds of place (shader_prep.cpp, the same warp-table entries already used on the console).
+// Castle Town is "heavy" too, so a matrix measures its values there as well.
+constexpr std::array kExtendedZones{
+    kZones[0],
+    kZones[1],
+    kZones[2],
+    kZones[3],
+    Zone{"F_SP116", 0, 0, -1, "Castle Town", "heavy-town"},
+    Zone{"F_SP108", 0, 0, -1, "South Faron Woods", "medium-forest"},
+    Zone{"F_SP109", 0, 0, -1, "Kakariko Village", "medium-village"},
+    Zone{"F_SP113", 1, 0, -1, "Zora's Domain", "medium-water"},
+    Zone{"F_SP115", 0, 0, -1, "Lake Hylia", "medium-water"},
+    Zone{"D_MN05", 0, 0, -1, "Forest Temple", "light-dungeon"},
+};
+
+bool g_extended = false;
+
 const char* status_name(ZoneStatus status) {
     return shader_prep::zone_status_name(status);
 }
@@ -201,11 +220,18 @@ std::span<const Zone> zones() {
     if (!g_planZones.empty()) {
         return g_planZones;
     }
-    return kZones;
+    return base_zones();
 }
 
 std::span<const Zone> base_zones() {
+    if (g_extended) {
+        return kExtendedZones;
+    }
     return kZones;
+}
+
+void set_extended(bool extended) {
+    g_extended = extended;
 }
 
 std::vector<MatrixAxis> parse_matrix(std::string_view spec, std::string& notes) {
@@ -290,7 +316,7 @@ void set_plan(std::vector<PlanStep> plan, std::string spec) {
         g_plan.clear();
     }
     for (const auto& s : g_plan) {
-        g_planZones.push_back(kZones[s.zone]);
+        g_planZones.push_back(base_zones()[s.zone]);
     }
 }
 

@@ -4,7 +4,7 @@
   <h1>Dusklight — Alek's Ultimate NX Edition</h1>
 
   <p><b>A free, unofficial Nintendo Switch port of <a href="https://github.com/TwilitRealm/dusklight">Dusklight</a></b><br>
-  by <a href="https://github.com/Alexgg1014">Alexgg1014</a> · version <code>1.0.0</code></p>
+  by <a href="https://github.com/Alexgg1014">Alexgg1014</a> · version <code>1.1.0</code></p>
 
   <p>
     <a href="https://github.com/Alexgg1014/The-Legend-of-Zelda-Twilight-Princess-Alek-s-Ultimate-NX-Edition/releases/latest"><b>Download</b></a>
@@ -207,6 +207,8 @@ this is meant to be sent upstream.
 - **PalindromicBreadLoaf**, for pioneering deko3d on the Switch with a Wii emulator: the deko3d work we learned from.
 - **ChanseyIsTheBest**: ideas from Renut (`renut_nx`) for the deko3d renderer, and ideas from `sa2-nx` and
   `banjo-nx` for frame pacing, profiling and the profile-guided build, used with permission.
+- **Kawaii**: the idea of calling newlib's allocator directly, from
+  [KartPadNX](https://github.com/KawaiiBunga/KartPadNX), used with permission.
 - **igawa6**: the [Dusklight Dual-Screen fork](https://github.com/igawa6/dusklight) (CC0). The companion screen
   comes from it.
 - **HayatoG**: the original Switch layer, `switch-nvk` and the SQLite VFS fix, used with permission.

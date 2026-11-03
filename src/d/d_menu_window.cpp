@@ -1647,7 +1647,7 @@ DUSK_NOINLINE int dMw_c::_execute() {  // aleks2 (rc17): a catalog hook target (
     return 1;
 }
 
-int dMw_c::_draw() {
+DUSK_NOINLINE int dMw_c::_draw() {
     if (mpCapture != NULL && mpCapture->checkDraw() && mpCapture->getAlpha() != 0) {
         if (mpCapture->getTopFlag() != 0) {
             dComIfGd_set2DOpaTop(mpCapture);

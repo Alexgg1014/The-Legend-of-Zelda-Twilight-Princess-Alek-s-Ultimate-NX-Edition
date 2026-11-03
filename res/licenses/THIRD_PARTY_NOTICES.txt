@@ -2788,3 +2788,9 @@ syncing the shader cache to the card as it grows. From futari-nx: writing the lo
 thread instead of flushing every line. From nfsmw-nx: asking the system for its official handheld
 configuration with the GPU at 460.8 MHz -- the "GPU Boost (handheld)" setting, off by default
 (src/dusk/gpu_boost.cpp). Each place says so in its comments. Thanks to Chansey and to these projects.
+
+------------------------------------------------------------------------------
+KartPadNX (Kawaii)
+Idea used with the author's permission (2026-10-31); the code here is our own. malloc goes straight to
+newlib's _malloc_r instead of devkitPro's memalign(32) for every request over 31 bytes (malloc_direct, on by
+default; platforms/switch/source/switch_libc_fast.cpp says so in its comments). Thanks to Kawaii.

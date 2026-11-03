@@ -22,6 +22,7 @@
 #include "dusk/mods/svc/hook.hpp"
 #include "dusk/mods/svc/hook_conflicts.hpp"
 #include "dusk/mods/svc/registry.hpp"
+#include "dusk/mods/svc/save.hpp"  // v1.1: save_slot_active
 #include "dusk/settings.h"
 #include "dusk/mods/updates.hpp"
 #include "dusk/ui/mod_texture_provider.hpp"
@@ -99,6 +100,10 @@ bool journal_replace(const fs::path& from, const fs::path& to, std::string& erro
     return borealis::io::atomic_replace(from, to, error);
 }
 #endif
+
+// v1.1: what a toggle in game waits for; the pre-launch menu applies exactly these (apply_toggles_waiting).
+constexpr const char* kEnabledAfterRestart = "enabled; its code starts in the main menu or after a restart";
+constexpr const char* kDisabledAfterRestart = "disabled; its code stops in the main menu or after a restart";
 
 }  // namespace
 }  // namespace dusk::mods
@@ -747,15 +752,47 @@ void ModLoader::clear_restart(std::string_view id) {
     }
 }
 
+bool ModLoader::live_code_window() {
+    // aleks2 (v1.1): the pre-launch menu with no save loaded -- the rule save snapshots use (save_snapshot.cpp).
+    // No object of a save exists yet, and requests run on the game thread between two frames.
+    return ui::is_prelaunch_open() && !svc::save_slot_active();
+}
+
 bool ModLoader::code_change_needs_restart(const LoadedMod& mod) const {
 #if ALEKS2_NATIVE_MOD_LOADER
-    // aleks2 (DM1-b): once the boot is over, code is neither started nor stopped until the next start --
-    // nothing is unloaded on Switch, and hooks are not proven to come off cleanly.
-    return m_startupComplete && (mod.native != nullptr || mod.nativeStatus != NativeModStatus::None);
+    // aleks2 (DM1-b): once the boot is over, code is neither started nor stopped until the next start, except in
+    // the pre-launch menu (v1.1). Stopping removes the mod's hooks and keeps its image mapped; starting it again
+    // maps a fresh one, as upstream's dlopen does.
+    return m_startupComplete && (mod.native != nullptr || mod.nativeStatus != NativeModStatus::None) &&
+           !live_code_window();
 #else
     (void)mod;
     return false;
 #endif
+}
+
+void ModLoader::apply_toggles_waiting() {
+    // v1.1: toggles made in game that wait for a restart are applied on reaching the pre-launch menu. Anything
+    // else that waits (an installed update, an undone one, a retry after a crash) still needs the restart.
+    const auto waiting = m_restartRequired;
+    for (const auto& [id, reason] : waiting) {
+        if (reason != kEnabledAfterRestart && reason != kDisabledAfterRestart) {
+            continue;
+        }
+        auto* mod = find_mod(id);
+        if (mod == nullptr || mod->loadFailed || !staged_version(id).empty()) {
+            continue;
+        }
+        clear_restart(id);
+        const bool wanted = mod->cvarIsEnabled->getValue();
+        if (wanted != (mod->active || mod->enabledApplied)) {
+            Log.info("{}: {} in the pre-launch menu", id, wanted ? "starting" : "stopping");
+            m_pendingRequests.push_back(LifecycleRequest{
+                .modId = id,
+                .action = wanted ? LifecycleAction::Enable : LifecycleAction::Disable,
+            });
+        }
+    }
 }
 
 void ModLoader::settle_update_journal() {
@@ -1073,8 +1110,7 @@ void ModLoader::on_enabled_changed(LoadedMod& mod) {
         if (wanted == (mod.active || mod.enabledApplied)) {
             clear_restart(mod.metadata.id);
         } else {
-            require_restart(mod.metadata.id,
-                wanted ? "enabled; its code starts after a restart" : "disabled; its code stops after a restart");
+            require_restart(mod.metadata.id, wanted ? kEnabledAfterRestart : kDisabledAfterRestart);
         }
         return;
     }
@@ -1729,6 +1765,17 @@ void ModLoader::apply_pending_requests() {
         if (request.action == LifecycleAction::Disable && !mod->enabledApplied && !mod->active) {
             continue;
         }
+#if ALEKS2_NATIVE_MOD_LOADER
+        // v1.1: toggled in the pre-launch menu, but the game started before this tick: back to the restart.
+        const bool liveToggle = request.action != LifecycleAction::Reactivate && m_startupComplete &&
+                                (mod->native != nullptr || mod->nativeStatus != NativeModStatus::None);
+        if (liveToggle && code_change_needs_restart(*mod)) {
+            require_restart(mod->metadata.id,
+                request.action == LifecycleAction::Enable ? kEnabledAfterRestart : kDisabledAfterRestart);
+            complete_operation(request.operation);
+            continue;
+        }
+#endif
 
         if (request.action == LifecycleAction::Reactivate && code_change_needs_restart(*mod)) {
 #if ALEKS2_NATIVE_MOD_LOADER
@@ -1752,6 +1799,16 @@ void ModLoader::apply_pending_requests() {
             }
         }
         apply_lifecycle_change(*mod, false);
+#if ALEKS2_NATIVE_MOD_LOADER
+        if (liveToggle) {
+            // v1.1: say it, since in game the same switch waits for a restart.
+            const bool started = mod->active;
+            Log.info("{}: code {} without a restart{}", mod->metadata.id, started ? "started" : "stopped",
+                mod->loadFailed ? fmt::format(" (failed: {})", mod->failureReason) : std::string{});
+            ui::push_toast({.title = started ? "Mod started" : (mod->loadFailed ? "Mod failed" : "Mod stopped"),
+                .content = mod->metadata.name, .duration = std::chrono::seconds{2}});
+        }
+#endif
 
         if (request.action == LifecycleAction::Reactivate) {
             std::string error;
@@ -1791,6 +1848,11 @@ void ModLoader::tick() {
         }
     }
     svc::modules_frame_begin();
+#if ALEKS2_NATIVE_MOD_LOADER
+    if (!m_restartRequired.empty() && m_startupComplete && live_code_window()) {
+        apply_toggles_waiting();
+    }
+#endif
     apply_pending_requests();
 #if ALEKS2_NATIVE_MOD_LOADER
     // aleks2 (H37): ten seconds of frames after the mods started, the boot is over: a crash

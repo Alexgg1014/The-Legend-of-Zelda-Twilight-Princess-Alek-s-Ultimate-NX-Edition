@@ -446,7 +446,10 @@ void describe_settings(JsonWriter& j) {
     j.boolean("lock_aspect_ratio_saved", s.video.lockAspectRatio.getValue());
     j.boolean("aspect_lock_effective", dualscreen::effectiveAspectLock());
     // V1-rc16: presets never touch the clocks: the opt-in GPU boost, whether it is in force, and the clocks read back.
-    j.boolean("gpu_boost", s.game.gpuBoost.getValue());
+    j.boolean("gpu_boost", s.game.gpuBoostLevel.getValue() != GpuBoostLevel::Off);
+    j.str("gpu_boost_level", s.game.gpuBoostLevel.getValue() == GpuBoostLevel::Mhz384   ? "384"
+                             : s.game.gpuBoostLevel.getValue() == GpuBoostLevel::Mhz460 ? "460.8"
+                                                                                       : "off");
     j.boolean("gpu_boost_active", gpu_boost::active());
     {
         unsigned cpu = 0, gpu = 0, emc = 0;
@@ -1585,10 +1588,33 @@ void tour_arrive(unsigned queued) {
     set_phase(Phase::TourPipelineWait);
 }
 
+// v1.1-perf-lab: a save from before the Faron twilight is cleared hangs on the warp to Hyrule Field (Boldiatti, two
+// consoles: 17 draws a frame for an hour, and no later warp is taken). Only the places that loaded from such a save
+// are kept for it; the rest are skipped and the report says why.
+bool tour_zone_reachable(const perf_tour::Zone& zone, std::string& why) {
+    static constexpr const char* kEarlyStages[] = {"F_SP122", "F_SP103", "R_SP01"};
+    for (const char* stage : kEarlyStages) {
+        if (std::strcmp(zone.stage, stage) == 0) {
+            return true;
+        }
+    }
+    if (dComIfGs_isDarkClearLV(0)) {
+        return true;
+    }
+    why = "needs a save past the Faron twilight";
+    return false;
+}
+
 void begin_tour_zone() {
     auto& r = g_run;
     const auto& zone = perf_tour::zones()[r.tourIndex];
     auto& z = tour_zone();
+    if (std::string why; !tour_zone_reachable(zone, why)) {
+        Log.info("performance tour {}/{}: {} skipped: {}", r.tourIndex + 1, perf_tour::zones().size(), zone.name, why);
+        end_tour_zone(perf_tour::ZoneStatus::Skipped, std::move(why));
+        next_tour_zone();
+        return;
+    }
     const auto& g = getSettings().game;
     z.interp.requestedMode = interp_name(g.enableFrameInterpolation.getValue());
     z.interp.quality = g.interpolationQuality.getValue() == InterpQuality::Fancy ? "fancy" : "fast";
@@ -1638,8 +1664,11 @@ void tick_tour(unsigned queued) {
             return;
         }
         if (seconds_since(r.phaseStart) > kTourTiming.loadTimeoutSeconds) {
+            // v1.1-perf-lab: a warp that never lands leaves the game where no later warp is taken either: every
+            // zone after it failed the same way, two minutes each. Stop here and try to go back.
             end_tour_zone(perf_tour::ZoneStatus::Failed, "the zone did not finish loading");
-            next_tour_zone();
+            cancel_tour(fmt::format("{} did not finish loading; if the game does not come back, restart it", zone.name),
+                Outcome::Failed);
             return;
         }
         detail = "loading";
@@ -2070,6 +2099,8 @@ bool start_tour(std::string& error) {
     report.pipelinesKnownAtStart = r.createdAtRunStart;
     report.queuedAtStart = queued_pipelines();
     // V1-rc9: perf-lab.ini tour_matrix: the heavy zones once per value, switched at run time (perf_tour.hpp).
+    // v1.1-perf-lab: tour_zones = extended, before the plan (it is built over these zones).
+    perf_tour::set_extended(frame_telemetry::lab().tourExtended);
     perf_tour::set_plan({}, "");
     if (const auto& spec = frame_telemetry::lab().tourMatrix; !spec.empty()) {
         std::string notes;
@@ -2102,8 +2133,10 @@ bool start_tour(std::string& error) {
         r.original.stage, r.original.room, r.original.point, perf_tour::zones().size(), report.envAtStart.mode,
         fmt::format("{}x{}", r.renderW, r.renderH), report.envAtStart.profile, report.interpRequestedMode,
         report.interpQuality, report.uniformReuseModeAtStart, report.envAtStart.companionEnabled ? "on" : "off");
-    toast("Performance tour", "Three places, measured one after the other (about 3-5 minutes). Controls are "
-                              "locked. Press Start to cancel.",
+    toast("Performance tour",
+        fmt::format("{} measurements, one after the other (about {} minutes). Controls are locked. Press Start to "
+                    "cancel.",
+            perf_tour::zones().size(), perf_tour::zones().size() + 1),
         5);
     begin_tour_zone();
     return true;

@@ -16,6 +16,15 @@
 #include <utility>
 #include <vector>
 
+#if defined(AURORA_GFX_DEKO3D)
+// Aurora's lib/deko/dk_modgfx.hpp (private to Aurora; the C side is all the game needs)
+extern "C" {
+void* aurora_dk_wgpu_proc(const char* name);
+const char* aurora_dk_wgpu_proc_name(size_t index);
+uint32_t aurora_dk_modgfx_failures(void);
+}
+#endif
+
 namespace dusk::deko3d_policy {
 namespace detail {
 bool g_running = false;
@@ -25,7 +34,10 @@ namespace {
 
 constexpr borealis::Log Log{"dusk::deko3d"};
 // One line per mod: "<id>\t<name>". Written with deko3d running, read at every start.
-constexpr const char* kNeedsDawnPath = "sdmc:/switch/dusklight/cache/needs_dawn.txt";
+// v1.1: a new name, since 1.0.x listed every mod that used the gfx service at all, which deko3d now runs;
+// the old list is removed at start.
+constexpr const char* kNeedsDawnPath = "sdmc:/switch/dusklight/cache/needs_dawn_v2.txt";
+constexpr const char* kOldNeedsDawnPath = "sdmc:/switch/dusklight/cache/needs_dawn.txt";
 constexpr const char* kRestartHint = "Settings > Graphics Backend > Restart now.";
 // rc12: Auto = deko3d whenever nothing on the list below needs Vulkan (Dawn/NVK). One switch for the whole
 // choice: the build's ALEKS2_DEKO3D_DEFAULT (cmake/SwitchOptions.cmake, ON in rc12). Off, Auto is Vulkan again
@@ -107,6 +119,12 @@ bool deko3d_default() noexcept {
 }
 
 AuroraBackend boot_backend(AuroraBackend desired) {
+    {
+        std::error_code ec;
+        if (std::filesystem::remove(kOldNeedsDawnPath, ec)) {
+            Log.info("needs_dawn.txt of 1.0.x removed: deko3d runs mods' gfx service now");
+        }
+    }
     const bool wanted = desired == BACKEND_DEKO3D || (kAutoPrefersDeko3d && desired == BACKEND_AUTO);
     if (!wanted) {
         return desired;
@@ -205,8 +223,18 @@ void note_gfx_mod(std::string_view modId, std::string_view modName, const char* 
     out << modId << '\t' << modName << '\n';
     Log.warn("[{}] {} through the gfx service: not run with deko3d; the next start uses Vulkan", modId, what);
     toast(fmt::format("{} needs Vulkan: restart?", modName),
-        fmt::format("It draws with the gfx service, which deko3d does not run yet. From the next start on, Vulkan is used. {}",
+        fmt::format("Part of its graphics cannot run with deko3d yet. From the next start on, Vulkan is used. {}",
             kRestartHint));
 }
+
+#if defined(AURORA_GFX_DEKO3D)
+void* wgpu_proc(const char* name) noexcept { return aurora_dk_wgpu_proc(name); }
+const char* wgpu_proc_name(size_t index) noexcept { return aurora_dk_wgpu_proc_name(index); }
+uint32_t modgfx_failures() noexcept { return aurora_dk_modgfx_failures(); }
+#else
+void* wgpu_proc(const char*) noexcept { return nullptr; }
+const char* wgpu_proc_name(size_t) noexcept { return nullptr; }
+uint32_t modgfx_failures() noexcept { return 0; }
+#endif
 
 }  // namespace dusk::deko3d_policy

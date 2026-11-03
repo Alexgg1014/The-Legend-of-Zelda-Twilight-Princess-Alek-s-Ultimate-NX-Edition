@@ -85,6 +85,8 @@ struct LabOptions {
     bool profileMain = false;
     unsigned profileSeconds = 30;
     unsigned profileDelayS = 90;
+    // v1.1-perf-lab: profile_fifo -- with profile_main, also sample Aurora's GX FIFO worker (each sample tagged m or f).
+    bool profileFifo = false;
     // V1-rc9: warmup_fade_boost -- while the loading screen waits for the scene's shaders, the compile thread
     // also gets core 0 and the game's priority (aurora_shader_set_compile_boost). On by default.
     bool warmupFadeBoost = true;
@@ -105,6 +107,25 @@ struct LabOptions {
     // V1-rc9: tour_matrix = key:v1,v2; key:v1,v2 -- the Performance Tour measures the heavy zones once per value
     // (perf_tour.hpp, parse_matrix), switching the keys at run time. Empty: the plain tour.
     std::string tourMatrix;
+    // v1.1-perf-lab: tour_zones = extended -- the Performance Tour's four zones, then Castle Town, South Faron Woods,
+    // Kakariko, Zora's Domain, Lake Hylia and the Forest Temple (perf_tour.cpp). standard: the four.
+    bool tourExtended = false;
+    // v1.1-perf-lab: mallinfo_guard = warmup -- the 2 s low-memory guard (session_log.cpp) calls mallinfo() only while
+    // the background shader warmup has recipes left; always = every 2 s, as before. Can change while the game runs.
+    bool mallinfoGuardWarmupOnly = true;  // v1.1-beta2: warmup by default
+    // v1.1-perf-lab: audio_core = 0 | 1 | 2 -- the core of SDL's audio callback thread (DuskAudioSystem.cpp pins it to
+    // core 1, the FIFO worker's, at the same priority: the two take turns). 1 = as before. Read at start-up.
+    unsigned audioCore = 2;  // v1.1-beta2: core 2 by default
+    // v1.1-perf-lab: gpu_level = off | 384 | 460 -- the handheld GPU configuration for this run, over the GPU Boost
+    // setting and without saving it (gpu_boost.cpp). -1 (absent) = the setting. Can change while the game runs.
+    int gpuLevel = -1;
+    // v1.1-perf-lab-3: malloc_direct (malloc without devkitPro's memalign(32)), rwlock_quiet (a read unlock wakes only a
+    // waiting writer), fifo_quiet (the FIFO worker woken only when it sleeps). platforms/switch/source/
+    // switch_libc_fast.cpp and Aurora's lib/gx/fifo.cpp. Off = as before; each can change while the game runs.
+    // v1.1-beta2: on by default (perf-lab pass H).
+    bool mallocDirect = true;
+    bool rwlockQuiet = true;
+    bool fifoQuiet = true;
     // V1-rc8: the cores the game's OS threads may run on (OSThread.cpp pins them to core 1, the FIFO worker's
     // core). logic_core = 0 | 1 | 0,1 | 0,2 ... (0 here = keep core 1). swap_interval = 1 | 2 (0 = leave it).
     unsigned logicCoreMask = 0;

@@ -9,6 +9,9 @@
 #include <aurora/tuning.h>
 #include <aurora/shader_cache.h>  // V1-rc12: warmup keep-all
 #include "dusk/sampler.hpp"        // V1-rc12: profile_main
+#ifdef __SWITCH__
+#include "dusk/gpu_boost.hpp"      // v1.1-perf-lab: gpu_level
+#endif
 #include <borealis/log.hpp>
 #include <fmt/format.h>
 
@@ -29,13 +32,18 @@ extern bool g_duskModLibCache;      // mods/loader/natives.cpp (V1-rc19)
 extern bool g_duskHookVerify;       // mods/svc/hook.cpp (V1-PGO)
 extern bool g_duskHudCullAlpha0;    // libs/JSystem/src/J2DGraph/J2DPane.cpp (V1-rc10)
 extern bool g_duskDbgNoRealShadow;  // src/d/d_drawlist.cpp (V1-rc12)
+extern bool g_duskMallinfoGuardWarmupOnly;  // session_log.cpp (v1.1-perf-lab)
 #ifdef __SWITCH__
 extern "C" unsigned g_duskExitMode;  // platforms/switch/source/switch_startup.cpp (V1-rc10)
 #endif
 extern "C" {
 extern u32 g_duskOsThreadCoreMask;
 extern s32 g_duskOsThreadStartCore;
+extern u32 g_duskAudioCoreMask;   // audio/DuskAudioSystem.cpp (v1.1-perf-lab)
 }
+#include <atomic>
+extern "C" std::atomic<bool> g_aleks2MallocDirect;  // platforms/switch/source/switch_libc_fast.cpp (v1.1-perf-lab-3)
+extern "C" std::atomic<bool> g_aleks2RwlockQuiet;
 #endif
 
 namespace dusk::frame_telemetry {
@@ -87,6 +95,15 @@ void update_request() {
         Log.info("GPU timing {}", want ? "on" : "off");
     }
 }
+
+// v1.1-perf-lab-3: malloc_direct, rwlock_quiet, fifo_quiet, as g_lab says now.
+void apply_fast_paths() {
+#ifdef __SWITCH__
+    g_aleks2MallocDirect.store(g_lab.mallocDirect, std::memory_order_relaxed);
+    g_aleks2RwlockQuiet.store(g_lab.rwlockQuiet, std::memory_order_relaxed);
+#endif
+    aurora_gx_set_fifo_quiet(g_lab.fifoQuiet);
+}
 }  // namespace
 
 void load_lab_options() {
@@ -114,8 +131,18 @@ void load_lab_options() {
     aurora_shader_set_warmup_keep_all(g_lab.warmupKeepAll ? 1u : 0u);  // V1-rc12: warmup memory
     sampler::start_if_enabled();                                        // V1-rc12: profile_main (off: returns)
     g_duskDbgNoRealShadow = g_lab.dbgNoRealShadow;
+    g_duskMallinfoGuardWarmupOnly = g_lab.mallinfoGuardWarmupOnly;  // v1.1-perf-lab
+    apply_fast_paths();  // v1.1-perf-lab-3
+#ifdef __SWITCH__
+    gpu_boost::set_lab_level(g_lab.gpuLevel);  // v1.1-perf-lab
+#endif
 #ifdef __SWITCH__
     g_duskExitMode = g_lab.exitMode;
+    // v1.1-perf-lab: audio_core, before SDL's audio thread runs its first callback (it pins itself there).
+    __atomic_store_n(&g_duskAudioCoreMask, 1u << g_lab.audioCore, __ATOMIC_RELAXED);
+    if (g_lab.audioCore != 1) {
+        Log.warn("audio_core: SDL's audio callback on core {}", g_lab.audioCore);
+    }
 #endif
     // V1-rc8: the texture-replacement cache budget (0 keeps Aurora's platform default).
     aurora_gx_set_texrep_budget_mb(g_lab.texrepBudgetMb);
@@ -145,7 +172,8 @@ const perf::LabOptions& lab() {
 bool set_lab_value(std::string_view key, std::string_view value, std::string& why) {
     static constexpr std::string_view kRuntime[] = {
         "hud_fast", "minimap_pan", "swap_interval", "fifo_fast", "warmup_fade_boost", "arg_shield",
-        "hud_cull_alpha0", "hook_fast", "vsync_relaxed"};
+        "hud_cull_alpha0", "hook_fast", "vsync_relaxed", "mallinfo_guard", "audio_core", "gpu_level",
+        "malloc_direct", "rwlock_quiet", "fifo_quiet"};
     bool runtime = false;
     for (const auto k : kRuntime) {
         runtime = runtime || k == key;
@@ -182,17 +210,45 @@ bool set_lab_value(std::string_view key, std::string_view value, std::string& wh
         g_duskHookFast = g_lab.hookFast; g_duskHookVerify = g_lab.hookVerify;
     } else if (key == "vsync_relaxed") {
         g_lab.vsyncRelaxed = parsed.vsyncRelaxed;  // tick() applies it on its next frame
+    } else if (key == "mallinfo_guard") {
+        g_lab.mallinfoGuardWarmupOnly = parsed.mallinfoGuardWarmupOnly;  // v1.1-perf-lab: session_log's next check
+        g_duskMallinfoGuardWarmupOnly = g_lab.mallinfoGuardWarmupOnly;
+    } else if (key == "malloc_direct") {
+        g_lab.mallocDirect = parsed.mallocDirect;  // v1.1-perf-lab-3
+        apply_fast_paths();
+    } else if (key == "rwlock_quiet") {
+        g_lab.rwlockQuiet = parsed.rwlockQuiet;
+        apply_fast_paths();
+    } else if (key == "fifo_quiet") {
+        g_lab.fifoQuiet = parsed.fifoQuiet;
+        apply_fast_paths();
+    } else if (key == "gpu_level") {
+        g_lab.gpuLevel = parsed.gpuLevel;  // v1.1-perf-lab: gpu_boost::tick() applies it on its next frame
+#ifdef __SWITCH__
+        gpu_boost::set_lab_level(g_lab.gpuLevel);
+#endif
+    } else if (key == "audio_core") {
+        g_lab.audioCore = parsed.audioCore;  // v1.1-perf-lab: the audio callback re-pins itself on its next call
+#ifdef __SWITCH__
+        __atomic_store_n(&g_duskAudioCoreMask, 1u << g_lab.audioCore, __ATOMIC_RELAXED);
+#endif
     }
     return true;
 }
 
 void restore_lab(const perf::LabOptions& saved) {
     g_lab = saved;
+    apply_fast_paths();  // v1.1-perf-lab-3
     aurora_gx_set_fifo_fast(g_lab.fifoFast);
     g_duskWarmupFadeBoost = g_lab.warmupFadeBoost;
     g_duskArgShield = g_lab.argShield;
     g_duskHookFast = g_lab.hookFast; g_duskHookVerify = g_lab.hookVerify;
     g_duskHudCullAlpha0 = g_lab.hudCullAlpha0;
+    g_duskMallinfoGuardWarmupOnly = g_lab.mallinfoGuardWarmupOnly;
+#ifdef __SWITCH__
+    __atomic_store_n(&g_duskAudioCoreMask, 1u << g_lab.audioCore, __ATOMIC_RELAXED);
+    gpu_boost::set_lab_level(g_lab.gpuLevel);
+#endif
 }
 
 std::uint64_t ticks() {

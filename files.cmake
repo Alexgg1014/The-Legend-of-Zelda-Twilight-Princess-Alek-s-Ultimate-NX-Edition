@@ -1716,6 +1716,8 @@ set(DUSK_FILES
         src/dusk/ui/select_button.hpp
         src/dusk/ui/settings.cpp
         src/dusk/ui/settings.hpp
+        src/dusk/ui/rml_text_input.cpp
+        src/dusk/ui/rml_text_input.hpp
         src/dusk/ui/string_button.cpp
         src/dusk/ui/string_button.hpp
         src/dusk/ui/tab_bar.cpp

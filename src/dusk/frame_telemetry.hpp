@@ -33,7 +33,7 @@ float budget_ms();
 
 // Who needs GPU figures; timestamps are written only while at least one does (or always with
 // gpu_timing=always). A no-op with gpu_timing=off.
-enum Consumer : unsigned { kBenchmark = 1u, kDrs = 2u, kStress = 4u };
+enum Consumer : unsigned { kBenchmark = 1u, kDrs = 2u, kStress = 4u, kOverlay = 8u };  // kOverlay: v1.1-perf-lab
 void want_gpu_timing(Consumer who, bool on);
 
 struct GpuStatus {

@@ -18,6 +18,9 @@ void tick();
 void restore();
 // For the session log and the tours: is the boost being asked for right now.
 bool active();
+// v1.1-perf-lab: perf-lab.ini gpu_level = off | 384 | 460 overrides the setting (not saved); -1 = the setting.
+// The next tick() applies it, so the Performance Tour can switch it per measurement.
+void set_lab_level(int level);
 // The clocks in effect, MHz (clkrst; 0 when unknown).
 void clocks_mhz(unsigned& cpu, unsigned& gpu, unsigned& emc);
 

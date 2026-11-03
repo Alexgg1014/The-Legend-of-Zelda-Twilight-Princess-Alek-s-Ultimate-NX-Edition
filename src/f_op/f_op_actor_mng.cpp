@@ -876,7 +876,7 @@ f32 fopAcM_searchActorDistanceXZ(const fopAc_ac_c* i_actorA, const fopAc_ac_c* i
     return (*posB - *posA).absXZ();
 }
 
-f32 fopAcM_searchActorDistanceXZ2(const fopAc_ac_c* i_actorA, const fopAc_ac_c* i_actorB) {
+DUSK_NOINLINE f32 fopAcM_searchActorDistanceXZ2(const fopAc_ac_c* i_actorA, const fopAc_ac_c* i_actorB) {
     const cXyz* posA = fopAcM_GetPosition_p(i_actorA);
     const cXyz* posB = fopAcM_GetPosition_p(i_actorB);
     return (*posB - *posA).abs2XZ();

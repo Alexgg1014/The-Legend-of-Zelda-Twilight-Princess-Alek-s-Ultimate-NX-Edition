@@ -12,6 +12,7 @@
 
 #include <aurora/aurora.h>
 #include <aurora/tuning.h>
+#include <dolphin/pad.h>
 #include <dolphin/vi.h>
 
 #include <utility>
@@ -240,6 +241,7 @@ UserSettings g_userSettings = {
         .hdRumble {"game.hdRumble", true},
         .rumbleIntensity {"game.rumbleIntensity", 70},
         .gpuBoost {"game.gpuBoost", false},
+        .gpuBoostLevel {"game.gpuBoostLevel", GpuBoostLevel::Off},
     },
 
     .backend = {
@@ -477,6 +479,7 @@ void registerSettings() {
     Register(g_userSettings.game.hdRumble);         // V1-rc16
     Register(g_userSettings.game.rumbleIntensity);  // V1-rc16
     Register(g_userSettings.game.gpuBoost);         // V1-rc16
+    Register(g_userSettings.game.gpuBoostLevel);    // v1.1
     Register(g_userSettings.game.enableMapBackground);
     Register(g_userSettings.game.disableCutscenePillarboxing);
     Register(g_userSettings.game.disableLetterboxing);
@@ -703,7 +706,7 @@ static bool sanitizeLoadedSettings() {
 void runConfigMigrations() {
     // Bump this and add a numbered block below when an update needs to
     // rewrite a value stored by older installs.
-    constexpr int kConfigMigration = 4;
+    constexpr int kConfigMigration = 5;
     const bool repaired = sanitizeLoadedSettings();
     auto& applied = g_userSettings.game.configMigration;
     if (applied.getValue() >= kConfigMigration) {
@@ -742,6 +745,26 @@ void runConfigMigrations() {
             g_userSettings.game.autoResolutionPolicy.setValue(profile::policy_for(legacy));
             g_userSettings.game.internalResolutionScale.setValue(0);
         }
+    }
+    if (applied.getValue() < 5) {
+        // 5 (v1.1-beta.3): the console's pad became positional, with L/R as shoulders and ZL/ZR as
+        // triggers (platforms/switch/sdl). Action bindings store SDL's button numbers, so each one
+        // saved before moves to the number the same physical button has now, as the controller
+        // mappings do (Aurora's __PADLoadMapping).
+#ifdef __SWITCH__
+        auto& binds = g_userSettings.actionBindings;
+        for (auto* action : {&binds.firstPersonCamera, &binds.callMidna, &binds.openMapScreen,
+                             &binds.toggleMinimap, &binds.openDusklightMenu, &binds.turboSpeedButton,
+                             &binds.useSlotItem1, &binds.useSlotItem2})
+        {
+            for (auto& port : *action) {
+                const int value = port.getValue();
+                if (value >= 0) {
+                    port.setValue(static_cast<int>(PADSwitchLegacyNativeButton(static_cast<u32>(value))));
+                }
+            }
+        }
+#endif
     }
     applied.setValue(kConfigMigration);
     config::save();

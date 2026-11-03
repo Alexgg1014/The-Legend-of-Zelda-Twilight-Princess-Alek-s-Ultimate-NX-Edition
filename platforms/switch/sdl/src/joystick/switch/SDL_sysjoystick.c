@@ -28,16 +28,15 @@
 // merged player-one pad.
 #define NX_CONNECTABLE_PADS 4
 
-// Joystick buttons, in the order SDL numbers them. The first sixteen are the
-// physical controls; the last four repeat the shoulder buttons so the gamepad
-// mapping can hand them out as MISC1..MISC4 as well. NXJoystickGetGamepadMapping
-// below refers to these by index.
+#define NX_DEVICE_NAME "Nintendo Switch Controller"
+
+// Joystick buttons, in the order SDL numbers them. The gamepad mapping below
+// refers to these by index.
 static const u64 k_buttons[] = {
     HidNpadButton_A,     HidNpadButton_B,     HidNpadButton_X,      HidNpadButton_Y,
     HidNpadButton_L,     HidNpadButton_R,     HidNpadButton_ZL,     HidNpadButton_ZR,
     HidNpadButton_Minus, HidNpadButton_Plus,  HidNpadButton_StickL, HidNpadButton_StickR,
     HidNpadButton_Up,    HidNpadButton_Down,  HidNpadButton_Left,   HidNpadButton_Right,
-    HidNpadButton_L,     HidNpadButton_R,     HidNpadButton_ZL,     HidNpadButton_ZR,
 };
 
 enum
@@ -45,6 +44,19 @@ enum
     kButtonCount = SDL_arraysize(k_buttons),
     kAxisCount = 4,
 };
+
+// How the gamepad layer reads the joystick: the same layout SDL gives a Pro
+// Controller on a PC, so a mod reads this pad the way it reads one there. SDL's
+// face buttons are positional (SOUTH is the bottom one, Switch B; EAST the right
+// one, Switch A), L/R are the shoulders and ZL/ZR the triggers. "type:switchpro"
+// makes SDL label the face buttons as printed (SDL_GetGamepadButtonLabel). The
+// game's own defaults for this layout are in Aurora (lib/dolphin/pad/pad.cpp,
+// g_defaultButtonsSwitchConsole). Until v1.1-beta.3, a was Switch A and L/R were
+// the triggers; Aurora moves mappings saved then onto this layout.
+static const char k_mapping[] =
+    "type:switchpro,a:b1,b:b0,x:b3,y:b2,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,"
+    "back:b8,start:b9,leftstick:b10,rightstick:b11,dpup:b12,dpdown:b13,dpleft:b14,dpright:b15,"
+    "leftx:a0,lefty:a1,rightx:a2,righty:a3,";
 
 static struct
 {
@@ -57,6 +69,18 @@ static bool NXJoystickInit(void)
     padConfigureInput(NX_CONNECTABLE_PADS, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&g_nx.pad);
     g_nx.held = 0;
+
+    // Before the pad is announced, so it opens with this mapping. Should SDL
+    // refuse it, NXJoystickGetGamepadMapping gives the same layout (without the
+    // type, so the labels would be SDL's generic ones).
+    char guid[33];
+    char mapping[sizeof(k_mapping) + 128];
+    SDL_GUIDToString(SDL_CreateJoystickGUIDForName(NX_DEVICE_NAME), guid, sizeof(guid));
+    (void)SDL_snprintf(mapping, sizeof(mapping), "%s,%s,%s", guid, NX_DEVICE_NAME, k_mapping);
+    if (SDL_AddGamepadMapping(mapping) < 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Switch joystick: gamepad mapping refused: %s", SDL_GetError());
+    }
+
     SDL_PrivateJoystickAdded(1);
     return true;
 }
@@ -77,7 +101,7 @@ static bool NXJoystickIsDevicePresent(Uint16 vendor_id, Uint16 product_id, Uint1
 
 static const char *NXJoystickGetDeviceName(int index)
 {
-    return "Nintendo Switch Controller";
+    return NX_DEVICE_NAME;
 }
 
 static const char *NXJoystickGetDevicePath(int index)
@@ -186,10 +210,7 @@ static void NXJoystickQuit(void)
 {
 }
 
-// How the gamepad layer reads the joystick above. L and R are the game's
-// triggers and ZL/ZR its shoulders: that is the arrangement the game's default
-// bindings were built around, and it is kept as is. The four duplicated
-// buttons appear as MISC1..MISC4 so a binding can still reach the other reading.
+// The fallback for k_mapping above, in SDL's raw form: the same layout.
 static SDL_InputMapping OnButton(Uint8 index)
 {
     SDL_InputMapping m;
@@ -213,15 +234,15 @@ static bool NXJoystickGetGamepadMapping(int index, SDL_GamepadMapping *out)
     SDL_zerop(out);
 
     // k_buttons indices: A=0 B=1 X=2 Y=3 L=4 R=5 ZL=6 ZR=7 Minus=8 Plus=9
-    // StickL=10 StickR=11 Up=12 Down=13 Left=14 Right=15, then L R ZL ZR again.
-    out->a = OnButton(0);
-    out->b = OnButton(1);
-    out->x = OnButton(2);
-    out->y = OnButton(3);
-    out->lefttrigger = OnButton(4);
-    out->righttrigger = OnButton(5);
-    out->leftshoulder = OnButton(6);
-    out->rightshoulder = OnButton(7);
+    // StickL=10 StickR=11 Up=12 Down=13 Left=14 Right=15.
+    out->a = OnButton(1);
+    out->b = OnButton(0);
+    out->x = OnButton(3);
+    out->y = OnButton(2);
+    out->leftshoulder = OnButton(4);
+    out->rightshoulder = OnButton(5);
+    out->lefttrigger = OnButton(6);
+    out->righttrigger = OnButton(7);
     out->back = OnButton(8);
     out->start = OnButton(9);
     out->leftstick = OnButton(10);
@@ -230,10 +251,6 @@ static bool NXJoystickGetGamepadMapping(int index, SDL_GamepadMapping *out)
     out->dpdown = OnButton(13);
     out->dpleft = OnButton(14);
     out->dpright = OnButton(15);
-    out->misc1 = OnButton(16);
-    out->misc2 = OnButton(17);
-    out->misc3 = OnButton(18);
-    out->misc4 = OnButton(19);
     out->leftx = OnAxis(0);
     out->lefty = OnAxis(1);
     out->rightx = OnAxis(2);

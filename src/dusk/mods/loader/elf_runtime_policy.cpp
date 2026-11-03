@@ -3,6 +3,8 @@
 
 #include "elf_image_runtime.h"
 
+#include "dusk/deko3d_policy.hpp"
+
 #include <dirent.h>
 #include <atomic>
 #include <pthread.h>
@@ -26,6 +28,10 @@
 // must be plain functions and objects. Each has glibc's semantics for what a mod built
 // against glibc expects of it.
 extern "C" {
+
+#if defined(__SWITCH__)
+void* __wrap_malloc(size_t size);  // platforms/switch/source/switch_libc_fast.cpp
+#endif
 
 // glibc's errno accessor; newlib keeps errno per reent and exposes it as the macro errno.
 int* aleks2_shim_errno_location() {
@@ -313,7 +319,16 @@ std::vector<Shim> shims() {
             "std::filesystem::equivalent by normalised path (no inodes on Horizon)"},
         {"readdir", addr(&aleks2_shim_readdir), "readdir with glibc's struct dirent layout", true},
         {"closedir", addr(&aleks2_shim_closedir), "closedir, releasing the glibc-layout entry", true},
+#if defined(__SWITCH__)
+        // v1.1-perf-lab-3: the game's malloc, so perf-lab malloc_direct covers mods too (switch_libc_fast.cpp).
+        {"malloc", addr(&__wrap_malloc), "malloc, without devkitPro's memalign(32) when malloc_direct is on"},
+#endif
     };
+    // v1.1: a mod's wgpu* calls go through Aurora's deko3d side of the gfx service (dk_modgfx.cpp), which
+    // forwards to Dawn while the renderer is Dawn/NVK; both kinds of module
+    for (size_t i = 0; const char* name = deko3d_policy::wgpu_proc_name(i); ++i) {
+        table.push_back({name, addr(deko3d_policy::wgpu_proc(name)), "WebGPU, run with deko3d when it renders"});
+    }
 #if ALEKS2_MOD_LINUX_STREAMS
     for (const auto& s : linux_stream_shims()) {
         table.push_back(s);

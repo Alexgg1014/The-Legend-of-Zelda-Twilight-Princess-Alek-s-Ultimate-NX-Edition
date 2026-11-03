@@ -424,7 +424,7 @@ bool daNbomb_c::checkTimerStop() {
             fopAcM_GetParam(this) == PRM_ENEMY_BOMB_BOOMERANG_MOVE);
 }
 
-BOOL daNbomb_c::checkExplode() {
+DUSK_NOINLINE BOOL daNbomb_c::checkExplode() {
     if (checkStateFlg0(daNbomb_FLG0(FLG0_UNK_800 | FLG0_FROZEN))) {
         return false;
     }

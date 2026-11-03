@@ -213,10 +213,18 @@ Rml::Input::KeyIdentifier map_raw_gamepad_button(SDL_GamepadButton button) noexc
         return Rml::Input::KI_LEFT;
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
         return Rml::Input::KI_RIGHT;
+#ifdef __SWITCH__
+    // The console's pad is positional (platforms/switch/sdl): Switch A, which confirms, is EAST.
+    case SDL_GAMEPAD_BUTTON_EAST:
+        return Rml::Input::KI_RETURN;
+    case SDL_GAMEPAD_BUTTON_SOUTH:
+        return Rml::Input::KI_ESCAPE;
+#else
     case SDL_GAMEPAD_BUTTON_EAST:
         return Rml::Input::KI_ESCAPE;
     case SDL_GAMEPAD_BUTTON_SOUTH:
         return Rml::Input::KI_RETURN;
+#endif
     case SDL_GAMEPAD_BUTTON_BACK:
         if (isActionBound(ActionBinds::OPEN_DUSKLIGHT_MENU, PAD_CHAN0)) {
             return Rml::Input::KI_UNKNOWN;

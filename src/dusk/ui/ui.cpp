@@ -4,6 +4,7 @@
 #include "drop_install_modal.hpp"
 #include "icon_provider.hpp"
 #include "input.hpp"
+#include "rml_text_input.hpp"
 #include "mod_texture_provider.hpp"
 #include "prelaunch.hpp"
 #include "remote_texture_provider.hpp"
@@ -504,6 +505,7 @@ void update() noexcept {
         sPendingDrops.erase(sPendingDrops.begin() + static_cast<std::ptrdiff_t>(index));
     }
     input::update_input();
+    rml_text_input::update();  // v1.1-beta2: the system keyboard for mods' own text fields
     const auto update_documents = [](auto& documents) {
         const size_t count = documents.size();
         for (size_t i = 0; i < count && i < documents.size(); ++i) {

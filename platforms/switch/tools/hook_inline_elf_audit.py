@@ -60,6 +60,8 @@ def collect_targets(args) -> int:
     _, manifest = check_symbol_manifest.read_symdb(pathlib.Path(args.symdb).read_bytes())
     targets = collections.defaultdict(set)
     unresolved = []
+    mod_side = []
+    image = pathlib.Path(args.elf).read_bytes()
     for pkg in map(pathlib.Path, args.packages):
         try:
             label, data = elf_audit.select_library(pkg)
@@ -86,7 +88,9 @@ def collect_targets(args) -> int:
                 continue
             entry = check_symbol_manifest.lookup(manifest, hook["name"])
             names = by_addr.get(entry[1], []) if entry else []
-            if not names:
+            if not names and no_such_overload(hook["name"], manifest, image):
+                mod_side.append(f"{pkg.stem}: {hook['name']}")
+            elif not names:
                 unresolved.append(f"{pkg.stem}: {hook['name']}")
             for name in names:
                 targets[name].add(f"{pkg.stem} (by name)")
@@ -97,7 +101,21 @@ def collect_targets(args) -> int:
     # (the profile build lost Dawnlight 5's d_a_e_mm_mt.cpp#action). That is as bad as an inlined copy.
     for u in unresolved:
         print(f"UNRESOLVED {u}")
+    # v1.1: an overload the game never declared fails on PC too (Twilit Essentials 3.0.0's fopAcM_create ... S0_):
+    # reported, not held against the build
+    for m in mod_side:
+        print(f"MOD-SIDE (no such overload in the game, fails on PC as well) {m}")
     return 1 if unresolved else 0
+
+
+def no_such_overload(name: str, manifest, image: bytes) -> bool:
+    """v1.1: name is a plain _Z<len><identifier> function whose identifier the manifest has under other
+    signatures, and the name itself is nowhere in the ELF (an inlined function keeps its linkage name in DWARF)."""
+    m = re.match(r"_Z(\d+)", name)
+    if not m or b"\0" + name.encode() + b"\0" in image:
+        return False
+    prefix = name[:m.end() + int(m.group(1))]
+    return any(k.startswith(prefix) and k != name for k in manifest)
 
 
 def inlined_copies(readelf: str, image: str, targets: dict) -> dict:

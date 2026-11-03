@@ -191,6 +191,20 @@ LabOptions parse_lab_options(std::string_view text) {
             o.modLibCache = b;  // V1-rc19
         } else if (key == "tour_matrix" && !v.empty()) {
             o.tourMatrix = std::string(v);
+        } else if (key == "tour_zones" && (v == "standard" || v == "extended")) {
+            o.tourExtended = v == "extended";  // v1.1-perf-lab
+        } else if (key == "mallinfo_guard" && (v == "always" || v == "warmup")) {
+            o.mallinfoGuardWarmupOnly = v == "warmup";  // v1.1-perf-lab
+        } else if (key == "gpu_level" && (v == "off" || v == "0" || v == "384" || v == "460")) {
+            o.gpuLevel = v == "384" ? 1 : v == "460" ? 2 : 0;  // v1.1-perf-lab
+        } else if (key == "malloc_direct" && parse_bool(v, b)) {
+            o.mallocDirect = b;  // v1.1-perf-lab-3
+        } else if (key == "rwlock_quiet" && parse_bool(v, b)) {
+            o.rwlockQuiet = b;
+        } else if (key == "fifo_quiet" && parse_bool(v, b)) {
+            o.fifoQuiet = b;
+        } else if (key == "audio_core" && (v == "0" || v == "1" || v == "2")) {
+            o.audioCore = static_cast<unsigned>(v[0] - '0');  // v1.1-perf-lab
         } else if (key == "minimap_pan" && parse_bool(v, b)) {
             o.minimapPan = b;
         } else if (key == "dbg_fog_off" && parse_bool(v, b)) {
@@ -209,6 +223,8 @@ LabOptions parse_lab_options(std::string_view text) {
             o.warmupKeepAll = b;
         } else if (key == "profile_main" && parse_bool(v, b)) {
             o.profileMain = b;
+        } else if (key == "profile_fifo" && parse_bool(v, b)) {
+            o.profileFifo = b;  // v1.1-perf-lab
         } else if (key == "profile_seconds" && parse_uint(v, n) && n >= 5 && n <= 300) {
             o.profileSeconds = static_cast<unsigned>(n);
         } else if (key == "profile_delay_s" && parse_uint(v, n) && n <= 3600) {
@@ -300,16 +316,18 @@ std::string describe(const LabOptions& o) {
     for (std::size_t i = 0; i < o.drsSteps.size(); ++i) {
         steps += (i ? "," : "") + std::to_string(o.drsSteps[i]);
     }
-    char buf[1024];
+    char buf[2048];
     std::snprintf(buf, sizeof buf,
         "gpu_timing=%s rt_pool=%u drs_steps=%s drs_target_fps=%d drs_log=%d drs_stress_transitions=%u "
-        "drs_stress_interval_ms=%u drs_stress_pattern=%s fifo_fast=%s logic_core_mask=0x%x swap_interval=%u hud_fast=%d minimap_pan=%d texrep_budget_mb=%u warmup_fade_boost=%d arg_shield=%d hook_fast=%d vsync_relaxed=%d tour_matrix='%s' hud_cull_alpha0=%d exit_mode=%s interp_floor_fps=%u dbg=0x%x dbg_no_real_shadow=%d mod_lib_cache=%d",
+        "drs_stress_interval_ms=%u drs_stress_pattern=%s fifo_fast=%s logic_core_mask=0x%x swap_interval=%u hud_fast=%d minimap_pan=%d texrep_budget_mb=%u warmup_fade_boost=%d arg_shield=%d hook_fast=%d vsync_relaxed=%d tour_matrix='%s' hud_cull_alpha0=%d exit_mode=%s interp_floor_fps=%u dbg=0x%x dbg_no_real_shadow=%d mod_lib_cache=%d tour_zones=%s mallinfo_guard=%s audio_core=%u gpu_level=%d profile_fifo=%d malloc_direct=%d rwlock_quiet=%d fifo_quiet=%d",
         o.gpuTiming == GpuTiming::Always ? "always" : o.gpuTiming == GpuTiming::Off ? "off" : "auto", o.rtPool,
         steps.c_str(), o.drsTargetFps, o.drsVerbose ? 1 : 0, o.stressTransitions, o.stressIntervalMs,
         o.stressLadder ? "ladder" : "steps", fifo_fast_name(o.fifoFast).c_str(), o.logicCoreMask, o.swapInterval, o.hudFast ? 1 : 0, o.minimapPan ? 1 : 0, o.texrepBudgetMb,
         o.warmupFadeBoost ? 1 : 0, o.argShield ? 1 : 0, o.hookVerify ? 2 : o.hookFast ? 1 : 0, o.vsyncRelaxed ? 1 : 0, o.tourMatrix.c_str(), o.hudCullAlpha0 ? 1 : 0,
         o.exitMode == 1 ? "loader" : o.exitMode == 2 ? "process" : "auto", o.interpFloorFps, o.debugFlags,
-        o.dbgNoRealShadow ? 1 : 0, o.modLibCache ? 1 : 0);
+        o.dbgNoRealShadow ? 1 : 0, o.modLibCache ? 1 : 0, o.tourExtended ? "extended" : "standard",
+        o.mallinfoGuardWarmupOnly ? "warmup" : "always", o.audioCore, o.gpuLevel, o.profileFifo ? 1 : 0, o.mallocDirect ? 1 : 0,
+        o.rwlockQuiet ? 1 : 0, o.fifoQuiet ? 1 : 0);
     return buf;
 }
 

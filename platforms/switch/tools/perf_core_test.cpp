@@ -110,6 +110,32 @@ static void test_options() {
     CHECK(parse_lab_options("").modLibCache);
     CHECK(!parse_lab_options("mod_lib_cache = 0\n").modLibCache);
     CHECK(describe(parse_lab_options("mod_lib_cache=0\n")).find("mod_lib_cache=0") != std::string::npos);
+    // v1.1-perf-lab: tour_zones, mallinfo_guard, audio_core and gpu_level; the defaults keep the old behaviour.
+    {
+        const auto d = parse_lab_options("");
+        // v1.1-beta2: mallinfo_guard = warmup and audio_core = 2 are the defaults now.
+        CHECK(!d.tourExtended && d.mallinfoGuardWarmupOnly && d.audioCore == 2 && d.gpuLevel == -1);
+        CHECK(!parse_lab_options("mallinfo_guard = always\n").mallinfoGuardWarmupOnly);
+        CHECK(parse_lab_options("audio_core = 1\n").audioCore == 1);
+        const auto o = parse_lab_options("tour_zones = extended\nmallinfo_guard = warmup\naudio_core = 2\ngpu_level = 384\n");
+        CHECK(o.tourExtended && o.mallinfoGuardWarmupOnly && o.audioCore == 2 && o.gpuLevel == 1 && o.unknown.empty());
+        CHECK(parse_lab_options("gpu_level = 460\n").gpuLevel == 2 && parse_lab_options("gpu_level = off\n").gpuLevel == 0);
+        CHECK(!parse_lab_options("audio_core = 3\n").unknown.empty());
+        CHECK(!parse_lab_options("gpu_level = 500\n").unknown.empty());
+        CHECK(!d.profileFifo && parse_lab_options("profile_fifo = 1\n").profileFifo);
+        CHECK(describe(o).find("tour_zones=extended mallinfo_guard=warmup audio_core=2 gpu_level=1") != std::string::npos);
+    }
+    // v1.1-perf-lab-3: malloc_direct, rwlock_quiet, fifo_quiet; on by default since v1.1-beta2.
+    {
+        const auto d = parse_lab_options("");
+        CHECK(d.mallocDirect && d.rwlockQuiet && d.fifoQuiet);
+        const auto off = parse_lab_options("malloc_direct = 0\nrwlock_quiet = off\nfifo_quiet = 0\n");
+        CHECK(!off.mallocDirect && !off.rwlockQuiet && !off.fifoQuiet && off.unknown.empty());
+        const auto o = parse_lab_options("malloc_direct = 1\nrwlock_quiet = on\nfifo_quiet = 1\n");
+        CHECK(o.mallocDirect && o.rwlockQuiet && o.fifoQuiet && o.unknown.empty());
+        CHECK(describe(o).find("malloc_direct=1 rwlock_quiet=1 fifo_quiet=1") != std::string::npos);
+        CHECK(!parse_lab_options("fifo_quiet = maybe\n").unknown.empty());
+    }
     CHECK(parse_lab_options("dbg_copy_shape_match=1\n").debugFlags == 8);
     CHECK(parse_lab_options("wii_record=1\n").wiiRecord && !parse_lab_options("").wiiRecord);
     CHECK(!parse_lab_options("").warmupKeepAll && parse_lab_options("warmup_keep_all=1\n").warmupKeepAll);

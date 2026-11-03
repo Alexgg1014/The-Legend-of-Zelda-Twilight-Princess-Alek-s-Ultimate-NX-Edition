@@ -83,3 +83,9 @@ gettimeofday
 # or checks a stream.
 mkdir
 ferror
+# v1.1: Twilit Essentials 3.0.0 (catalog 2026-10-31). setenv/unsetenv have one meaning on newlib and glibc;
+# the nothrow deletes are the pair of the nothrow news above (delete and delete[] together).
+setenv
+unsetenv
+_ZdlPvRKSt9nothrow_t
+_ZdaPvRKSt9nothrow_t

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""aleks2 (V1-rc12): symbolize a main-thread profile written by src/dusk/sampler.cpp (perf-lab profile_main = 1).
+"""aleks2 (V1-rc12): symbolize a profile written by src/dusk/sampler.cpp (perf-lab profile_main = 1; with
+profile_fifo = 1 the GX FIFO worker too, one report per thread).
 
     profile_report.py PROFILE (--elf dusklight.elf [--nm aarch64-none-elf-nm] | --symbols nm.txt) [--top 40]
 
@@ -37,7 +38,11 @@ def read_symbols(lines):
     return [addrs[i] for i in order], [names[i] for i in order]
 
 
-def read_profile(lines):
+THREAD_NAMES = {"m": "main thread", "f": "GX FIFO worker"}
+
+
+def read_tagged(lines):
+    """v1.1-perf-lab: sampler v1 lines are 'pc lr f1 f2' (main thread); v2 lines start with a thread tag (m, f)."""
     base, samples = None, []
     for line in lines:
         if line.startswith("#"):
@@ -46,15 +51,23 @@ def read_profile(lines):
                 base = int(m.group(1), 16)
             continue
         parts = line.split()
+        tag = "m"
+        if len(parts) == 5:
+            tag, parts = parts[0], parts[1:]
         if len(parts) != 4:
             continue
         try:
-            samples.append(tuple(int(p, 16) for p in parts))
+            samples.append((tag, tuple(int(p, 16) for p in parts)))
         except ValueError:
             continue
     if base is None:
         raise SystemExit("no 'NRO base' in the profile header")
     return base, samples
+
+
+def read_profile(lines):
+    base, tagged = read_tagged(lines)
+    return base, [s for _, s in tagged]
 
 
 class Symbolizer:
@@ -115,8 +128,16 @@ def main(argv=None):
     else:
         ap.error("--elf or --symbols")
     with open(a.profile, encoding="utf-8", errors="replace") as f:
-        base, samples = read_profile(f)
-    report(samples, Symbolizer(addrs, names, base), a.top)
+        base, tagged = read_tagged(f)
+    sym = Symbolizer(addrs, names, base)
+    tags = sorted({t for t, _ in tagged})
+    if len(tags) <= 1:
+        report([s for _, s in tagged], sym, a.top)
+        return
+    # v1.1-perf-lab: one report per thread (profile_fifo = 1).
+    for tag in tags:
+        print(f"\n######## {THREAD_NAMES.get(tag, tag)} ########")
+        report([s for t, s in tagged if t == tag], sym, a.top)
 
 
 if __name__ == "__main__":

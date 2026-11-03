@@ -404,7 +404,7 @@ s32 mDoMemCd_Ctrl_c::SaveSync() {
     return ret;
 }
 
-u32 mDoMemCd_Ctrl_c::getStatus(u32) {
+DUSK_NOINLINE u32 mDoMemCd_Ctrl_c::getStatus(u32) {
     u32 status;
     if (OSTryLockMutex(&mMutex)) {
         switch (mCardState) {

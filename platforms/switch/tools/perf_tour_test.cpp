@@ -71,6 +71,22 @@ void test_plan_against_warp_table(const std::string& mapDefinitionsPath) {
     }
 }
 
+// v1.1-perf-lab: tour_zones = extended keeps the four first, in their order, and adds six warp-table entries.
+void test_extended_zones(const std::string& mapDefinitionsPath) {
+    const auto standard = pt::zones();
+    pt::set_extended(true);
+    const auto extended = pt::zones();
+    CHECK(extended.size() == 10);
+    for (std::size_t i = 0; i < standard.size() && i < extended.size(); ++i) {
+        CHECK(std::strcmp(standard[i].stage, extended[i].stage) == 0 && standard[i].room == extended[i].room &&
+              standard[i].point == extended[i].point);
+    }
+    CHECK(std::strcmp(extended[4].stage, "F_SP116") == 0 && std::strcmp(extended[4].category, "heavy-town") == 0);
+    test_plan_against_warp_table(mapDefinitionsPath);
+    pt::set_extended(false);
+    CHECK(pt::zones().size() == 4);
+}
+
 void test_plan_and_order() {
     const auto zones = pt::zones();
     CHECK(zones.size() == 4);
@@ -394,6 +410,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     test_plan_against_warp_table(argv[1]);
+    test_extended_zones(argv[1]);
     test_plan_and_order();
     test_timing_and_duration();
     test_pipeline_wait();

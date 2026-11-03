@@ -28,6 +28,15 @@ static std::array<f32, DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS> OutInte
 
 static SDL_AudioStream* PlaybackStream;
 
+#ifdef __SWITCH__
+// v1.1-perf-lab: the audio callback's core, from perf-lab.ini audio_core (frame_telemetry.cpp). Read on every callback,
+// so a value set after the stream opened still applies. v1.1-beta2: core 2 by default (it was core 1, the FIFO
+// worker's: the two took turns); +1.5 to +4 FPS in Castle Town and outside it, both perf-lab passes on the console.
+extern "C" {
+u32 g_duskAudioCoreMask = 0x4;
+}
+#endif
+
 /**
  * SDL audiostream callback to trigger rendering of new audio data.
  */
@@ -165,7 +174,14 @@ void SDLCALL GetNewAudio(
     int needed,
     int) {
 #ifdef __SWITCH__
-    { static bool pinned = false; if (!pinned) { pinned = true; svcSetThreadCoreMask(threadGetCurHandle(), 1, 0x2); } }
+    {
+        static u32 pinned = 0;
+        const u32 mask = __atomic_load_n(&g_duskAudioCoreMask, __ATOMIC_RELAXED);
+        if (pinned != mask && mask != 0) {
+            pinned = mask;
+            svcSetThreadCoreMask(threadGetCurHandle(), __builtin_ctz(mask), mask);
+        }
+    }
 #endif
     FrameMarkStart(FrameName);
     while (needed > 0) {

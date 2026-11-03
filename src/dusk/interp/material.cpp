@@ -16,7 +16,7 @@
 #include <cmath>
 #include <memory>
 #include <tuple>
-#include <unordered_map>
+#include <absl/container/flat_hash_map.h>
 #include <utility>
 
 namespace dusk::interp::material {
@@ -49,12 +49,19 @@ struct LightView {
     }
 };
 
+// v1.1-perf-lab-3: flat tables (no node allocation per entry); the per-tick ones are emptied keeping their storage
+// (empty_keep), since absl's clear() frees a large table and it would grow back every tick.
 struct Tables {
-    std::unordered_map<const J3DFrameCtrl*, Frames> controllers;
-    std::unordered_map<const J3DAnmBase*, Frames> resources;
-    std::unordered_map<J3DTexMtxInfo*, ViewProjection> projections;
-    std::unordered_map<J3DMaterial*, LightView> lightViews;
+    absl::flat_hash_map<const J3DFrameCtrl*, Frames> controllers;
+    absl::flat_hash_map<const J3DAnmBase*, Frames> resources;
+    absl::flat_hash_map<J3DTexMtxInfo*, ViewProjection> projections;
+    absl::flat_hash_map<J3DMaterial*, LightView> lightViews;
 };
+
+template <typename Map>
+void empty_keep(Map& map) {
+    absl::erase_if(map, [](const auto&) { return true; });
+}
 
 Tables& tables() {
     static Tables stored;
@@ -96,6 +103,33 @@ f32 sample_texture_translation(const J3DAnmKeyTableBase& table, const BE(f32)* v
 }
 }  // namespace
 
+// v1.1-perf-lab-3: a model's recording lives until the next sim tick, when begin_sim_tick drops the interpolation
+// callbacks and then calls prune() (clear() when the history goes). Recordings are kept and reused from then on,
+// instead of a make_shared and a fresh ModelBindings (all its vectors) per model per tick: the malloc lock was a few %
+// of the game thread with Twilit Essentials 3 on the console.
+struct Recording {
+    J3DModel* model = nullptr;
+    ModelBindings bindings;
+};
+
+namespace {
+std::vector<std::unique_ptr<Recording>> s_recordings;
+size_t s_recordingsUsed = 0;
+
+Recording& take_recording() {
+    if (s_recordingsUsed == s_recordings.size()) {
+        s_recordings.push_back(std::make_unique<Recording>());
+    }
+    Recording& recording = *s_recordings[s_recordingsUsed++];
+    recording.bindings.reset();
+    return recording;
+}
+
+void release_recordings() {
+    s_recordingsUsed = 0;
+}
+}  // namespace
+
 Frames get_frames(const J3DFrameCtrl* controller) {
     return lookup(tables().controllers, controller);
 }
@@ -134,6 +168,7 @@ void swap_frames(J3DAnmBase* resource, Frames& frames) {
 }
 
 void clear() {
+    release_recordings();
     tables().controllers.clear();
     tables().resources.clear();
     tables().projections.clear();
@@ -141,15 +176,16 @@ void clear() {
 }
 
 void prune() {
-    tables().projections.clear();
-    tables().lightViews.clear();
+    release_recordings();
+    empty_keep(tables().projections);
+    empty_keep(tables().lightViews);
     const uint64_t tick = sim_tick_seq();
     const uint64_t epoch = game_clock::g_frameTiming.presentationEpoch;
     auto stale = [=](const auto& entry) {
         return entry.second.epoch != epoch || entry.second.tick < tick - (tick != 0);
     };
-    std::erase_if(tables().controllers, stale);
-    std::erase_if(tables().resources, stale);
+    absl::erase_if(tables().controllers, stale);
+    absl::erase_if(tables().resources, stale);
 }
 
 f32 Frames::read(f32 requested) const {
@@ -356,6 +392,14 @@ struct ModelBindings::State {
 ModelBindings::ModelBindings() : m_state(std::make_unique<State>()) {}
 ModelBindings::~ModelBindings() = default;
 
+void ModelBindings::reset() {
+    std::apply([](auto&... values) { (values.entries.clear(), ...); }, m_state->values);
+    m_state->animations.clear();
+    m_state->resources.clear();
+    m_state->projections.clear();
+    m_state->lights.clear();
+}
+
 void ModelBindings::capture(J3DMaterial* material) {
     auto& state = *m_state;
     if (!state.capture(material)) {
@@ -535,16 +579,11 @@ void record_model(J3DModel* model) {
         return;
     }
 
-    struct Recording {
-        J3DModel* model;
-        ModelBindings bindings;
-    };
-
-    auto recording = std::make_shared<Recording>();
-    recording->model = model;
+    Recording& recording = take_recording();
+    recording.model = model;
     J3DModelData* data = model->getModelData();
     for (u16 i = 0; i < data->getMaterialNum(); ++i) {
-        recording->bindings.capture(data->getMaterialNodePointer(i));
+        recording.bindings.capture(data->getMaterialNodePointer(i));
     }
 
     add_interpolation_callback([](void* work) {
@@ -552,7 +591,7 @@ void record_model(J3DModel* model) {
         ModelScope scope(recording.bindings);
         recording.model->calcMaterial();
         recording.model->diff();
-    }, recording.get(), recording);
+    }, &recording);
 }
 
 void set_view_projection(J3DTexMtxInfo* info, f32 scaleS, f32 scaleT, f32 transS, f32 transT) {

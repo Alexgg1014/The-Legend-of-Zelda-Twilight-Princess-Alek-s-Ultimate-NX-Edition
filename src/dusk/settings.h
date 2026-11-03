@@ -83,6 +83,13 @@ enum class InterpQuality : u8 {
     Fancy = 1,
 };
 
+// aleks2 (v1.1): GPU Boost (handheld), the system's official handheld GPU configurations (src/dusk/gpu_boost.cpp).
+enum class GpuBoostLevel : u8 {
+    Off = 0,     // 307.2 MHz, what the system gives homebrew
+    Mhz384 = 1,  // 0x00020004: CPU 1020, GPU 384, memory 1331.2
+    Mhz460 = 2,  // 0x92220008: CPU 1020, GPU 460.8, memory 1331.2
+};
+
 enum class LetterboxMode : u8 {
     Off = 0,
     On = 1,
@@ -170,6 +177,12 @@ template <>
 struct ConfigEnumRange<InterpQuality> {
     static constexpr auto min = InterpQuality::Fast;
     static constexpr auto max = InterpQuality::Fancy;
+};
+
+template <>
+struct ConfigEnumRange<GpuBoostLevel> {
+    static constexpr auto min = GpuBoostLevel::Off;
+    static constexpr auto max = GpuBoostLevel::Mhz460;
 };
 
 template <>
@@ -484,6 +497,9 @@ struct UserSettings {
         // aleks2 (V1-rc16): handheld only, opt-in, any preset: the system's official 460 MHz GPU configuration
         // (src/dusk/gpu_boost.cpp). Presets never touch the clocks. Appended last: mod ABI.
         ConfigVar<bool> gpuBoost;
+        // aleks2 (v1.1): GPU Boost as a level, Off / 384 / 460.8 MHz. Replaces gpuBoost, which stays (mod ABI) and is
+        // read once: an old "on" becomes 460.8 (settings.cpp). Appended last: mod ABI.
+        ConfigVar<GpuBoostLevel> gpuBoostLevel;
     } game;
 
     struct {

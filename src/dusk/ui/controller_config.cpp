@@ -69,6 +69,7 @@ const std::vector<ButtonNames> kGamepadButtonNames = {
         {SDL_GAMEPAD_TYPE_PS5, "L3"},
         {SDL_GAMEPAD_TYPE_XBOX360, "Left Stick"},
         {SDL_GAMEPAD_TYPE_XBOXONE, "Left Stick"},
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, "Left Stick"},
         {SDL_GAMEPAD_TYPE_GAMECUBE, "Control Stick"},
     }},
     { SDL_GAMEPAD_BUTTON_RIGHT_STICK, {
@@ -77,6 +78,7 @@ const std::vector<ButtonNames> kGamepadButtonNames = {
         {SDL_GAMEPAD_TYPE_PS5, "R3"},
         {SDL_GAMEPAD_TYPE_XBOX360, "Right Stick"},
         {SDL_GAMEPAD_TYPE_XBOXONE, "Right Stick"},
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, "Right Stick"},
         {SDL_GAMEPAD_TYPE_GAMECUBE, "C Stick"},
     }},
     { SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, {
@@ -85,6 +87,7 @@ const std::vector<ButtonNames> kGamepadButtonNames = {
         {SDL_GAMEPAD_TYPE_PS5, "L1"},
         {SDL_GAMEPAD_TYPE_XBOX360, "LB"},
         {SDL_GAMEPAD_TYPE_XBOXONE, "LB"},
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, "L"},
     }},
     { SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, {
         {SDL_GAMEPAD_TYPE_PS3, "R1"},
@@ -92,6 +95,7 @@ const std::vector<ButtonNames> kGamepadButtonNames = {
         {SDL_GAMEPAD_TYPE_PS5, "R1"},
         {SDL_GAMEPAD_TYPE_XBOX360, "RB"},
         {SDL_GAMEPAD_TYPE_XBOXONE, "RB"},
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, "R"},
         {SDL_GAMEPAD_TYPE_GAMECUBE, "Z"},
     }},
     { SDL_GAMEPAD_BUTTON_BACK, {
@@ -100,6 +104,7 @@ const std::vector<ButtonNames> kGamepadButtonNames = {
         {SDL_GAMEPAD_TYPE_PS5, "Create"},
         {SDL_GAMEPAD_TYPE_XBOX360, "Back"},
         {SDL_GAMEPAD_TYPE_XBOXONE, "View"},
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, "Minus"},
     }},
     { SDL_GAMEPAD_BUTTON_START, {
         {SDL_GAMEPAD_TYPE_PS3, "Start"},
@@ -107,12 +112,44 @@ const std::vector<ButtonNames> kGamepadButtonNames = {
         {SDL_GAMEPAD_TYPE_PS5, "Options"},
         {SDL_GAMEPAD_TYPE_XBOX360, "Start"},
         {SDL_GAMEPAD_TYPE_XBOXONE, "Menu"},
+        {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, "Plus"},
         {SDL_GAMEPAD_TYPE_GAMECUBE, "Start/Pause"},
     }},
 };
 // clang-format on
 
+// The first button pressed, or a trigger pulled half way as PAD_NATIVE_TRIGGER_* (pad.h; from SwitchWaker, V1):
+// a trigger is only an axis (a GameCube adapter's L/R, the Switch's ZL/ZR) and can still drive a digital action.
+s32 native_button_or_trigger_pressed(int port) {
+    const s32 button = PADGetNativeButtonPressed(static_cast<u32>(port));
+    if (button != -1) {
+        return button;
+    }
+    const PADSignedNativeAxis axis = PADGetNativeAxisPulled(static_cast<u32>(port));
+    if (axis.nativeAxis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
+        return static_cast<s32>(PAD_NATIVE_TRIGGER_LEFT);
+    }
+    if (axis.nativeAxis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+        return static_cast<s32>(PAD_NATIVE_TRIGGER_RIGHT);
+    }
+    return -1;
+}
+
+// The triggers by the name printed on them: ZL/ZR on a Pro Controller (and the
+// console's own pad, which reports as one: platforms/switch/sdl).
+Rml::String native_trigger_name(SDL_Gamepad* gamepad, bool left) {
+    if (gamepad != nullptr && SDL_GetGamepadType(gamepad) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO) {
+        return left ? "ZL" : "ZR";
+    }
+    return left ? "Left Trigger" : "Right Trigger";
+}
+
 Rml::String native_axis_name(const PADAxisMapping& mapping, SDL_Gamepad* gamepad) {
+    if (mapping.nativeAxis.nativeAxis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ||
+        mapping.nativeAxis.nativeAxis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
+    {
+        return native_trigger_name(gamepad, mapping.nativeAxis.nativeAxis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+    }
     if (mapping.nativeAxis.nativeAxis != -1) {
         Rml::String value = PADGetNativeAxisName(mapping.nativeAxis);
         if (mapping.padAxis != PAD_AXIS_TRIGGER_L && mapping.padAxis != PAD_AXIS_TRIGGER_R) {
@@ -1074,17 +1111,7 @@ void ControllerConfigWindow::poll_pending_binding() {
     }
 
     if (mPendingButtonMapping != nullptr) {
-        s32 nativeButton = PADGetNativeButtonPressed(mPendingPort);
-        if (nativeButton == -1) {
-            // V1: a trigger that is only an axis (a GameCube adapter's L/R; the Switch's own also report as
-            // buttons, MISC1..4) can still drive a digital action, as PAD_NATIVE_TRIGGER_* (pad.h, SwitchWaker).
-            const PADSignedNativeAxis axis = PADGetNativeAxisPulled(mPendingPort);
-            if (axis.nativeAxis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
-                nativeButton = static_cast<s32>(PAD_NATIVE_TRIGGER_LEFT);
-            } else if (axis.nativeAxis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
-                nativeButton = static_cast<s32>(PAD_NATIVE_TRIGGER_RIGHT);
-            }
-        }
+        const s32 nativeButton = native_button_or_trigger_pressed(mPendingPort);
         if (nativeButton != -1) {
             const int completedPort = mPendingPort;
             if (mPendingButtonMapping->nativeButton == static_cast<u32>(nativeButton) &&
@@ -1128,7 +1155,7 @@ void ControllerConfigWindow::poll_pending_binding() {
         if (keyboard_active(mPendingPort)) {
             button = keyboard_key_pressed();
         } else {
-            button = PADGetNativeButtonPressed(mPendingPort);
+            button = native_button_or_trigger_pressed(mPendingPort);
         }
 
         if (button != -1) {
@@ -1252,28 +1279,8 @@ Rml::String native_button_name(SDL_Gamepad* gamepad, u32 buttonUntyped) {
     }
     // V1: a trigger axis bound as a button (PAD_NATIVE_TRIGGER_*, pad.h).
     if (buttonUntyped == PAD_NATIVE_TRIGGER_LEFT || buttonUntyped == PAD_NATIVE_TRIGGER_RIGHT) {
-        const bool left = buttonUntyped == PAD_NATIVE_TRIGGER_LEFT;
-#ifdef __SWITCH__
-        return left ? "L" : "R";  // platforms/switch/sdl: the Switch's L/R are the triggers
-#else
-        return left ? "Left Trigger" : "Right Trigger";
-#endif
+        return native_trigger_name(gamepad, buttonUntyped == PAD_NATIVE_TRIGGER_LEFT);
     }
-#ifdef __SWITCH__
-    // The Switch joystick driver offers the four shoulder buttons a second time as
-    // MISC1 to MISC4 (platforms/switch/sdl); these are the names printed on them.
-    static constexpr std::pair<SDL_GamepadButton, const char*> kShoulderNames[] = {
-        {SDL_GAMEPAD_BUTTON_MISC1, "L"},
-        {SDL_GAMEPAD_BUTTON_MISC2, "R"},
-        {SDL_GAMEPAD_BUTTON_MISC3, "ZL"},
-        {SDL_GAMEPAD_BUTTON_MISC4, "ZR"},
-    };
-    for (const auto& [id, name] : kShoulderNames) {
-        if (buttonUntyped == static_cast<u32>(id)) {
-            return name;
-        }
-    }
-#endif
 
     auto button = static_cast<SDL_GamepadButton>(buttonUntyped);
     if (gamepad != nullptr) {

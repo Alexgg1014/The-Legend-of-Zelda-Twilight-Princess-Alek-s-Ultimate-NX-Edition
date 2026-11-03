@@ -385,6 +385,9 @@ private:
     void require_restart(std::string_view id, std::string reason);
     void clear_restart(std::string_view id);
     [[nodiscard]] bool code_change_needs_restart(const LoadedMod& mod) const;
+    // aleks2 (v1.1): native code starts and stops at once in the pre-launch menu with no save loaded.
+    [[nodiscard]] static bool live_code_window();
+    void apply_toggles_waiting();
     void settle_update_journal();
 
     LoadedMod* try_load_mod(const std::filesystem::path& modPath, bool fromDir,

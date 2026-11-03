@@ -7,6 +7,7 @@ project as is. In those cases it is used only with its author's written permissi
 |---|---|---|
 | **ChanseyIsTheBest** | Ideas from `renut_nx`, Chansey's deko3d renderer: CPU-cached staging slots and skipping a redundant clear at present. Both are off by default, in Aurora's `lib/deko` | 19 October 2026: asked to borrow ideas from Renut with full credit; Chansey said yes |
 | **ChanseyIsTheBest** | Ideas from `sa2-nx` and `banjo-nx`: relaxed vsync, hook early-outs, GPU timestamps only when read, the profiler's stack-bound check, renderer A/B switches, and the profile-guided build workflow | 20 October 2026: asked to use ideas and, if needed, code. Chansey answered that it is public so everyone can use it. No sa2-nx code is included; the code here is our own |
+| **Kawaii** | The idea of calling newlib's allocator directly, from KartPadNX | 31 October 2026: asked to use ideas and code from KartPadNX and Kawaii's own parts of Melee-NX, with credit; Kawaii said yes. The code here is our own |
 | **HayatoG** | The original Switch layer (window, input, disc, shims), `switch-nvk`, the SQLite VFS fix | Used with the author's permission |
 | **danfromtico** | Mesa for Horizon (`mesa-switch`) | Used with the author's permission (Mesa itself is MIT) |
 

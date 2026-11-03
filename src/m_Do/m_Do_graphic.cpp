@@ -383,7 +383,7 @@ void mDoGph_gInf_c::resetDimming() {
 }
 #endif
 
-void mDoGph_gInf_c::fadeOut(f32 fadeSpeed, GXColor& fadeColor) {
+DUSK_NOINLINE void mDoGph_gInf_c::fadeOut(f32 fadeSpeed, GXColor& fadeColor) {
     mFade = 1;
     mFadeSpeed = fadeSpeed;
     mFadeColor = fadeColor;

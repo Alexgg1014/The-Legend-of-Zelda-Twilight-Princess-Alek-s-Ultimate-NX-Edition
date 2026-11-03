@@ -21,6 +21,9 @@
 extern unsigned long long g_duskPanesDrawn;
 extern unsigned long long g_duskPanesAlpha0;
 extern bool g_duskHudCullAlpha0;
+// v1.1-perf-lab: perf-lab.ini mallinfo_guard = warmup (frame_telemetry.cpp); false = every 2 s, as before.
+// v1.1-beta2: warmup by default (mallinfo walks the heap under the malloc lock: 3.5-6 ms spikes on the game thread).
+bool g_duskMallinfoGuardWarmupOnly = true;
 
 #include <fmt/format.h>
 #include <string>
@@ -170,7 +173,10 @@ void stampSettings(const char* why) {
             const int p = dusk::profile::detectCurrent();
             return p < 0 ? "Custom" : dusk::profile::name(p);
         }(),
-        s.game.gpuBoost.getValue() ? "on" : "off", dusk::gpu_boost::active() ? "(active)" : "",
+        s.game.gpuBoostLevel.getValue() == GpuBoostLevel::Mhz384   ? "384"
+        : s.game.gpuBoostLevel.getValue() == GpuBoostLevel::Mhz460 ? "460.8"
+                                                                   : "off",
+        dusk::gpu_boost::active() ? "(active)" : "",
         cpu, gpu, emc);
 #else
     (void)why;
@@ -304,18 +310,50 @@ void requestHeartbeat() {
 #endif
 }
 
+#ifdef __SWITCH__
+namespace {
+// v1.1-perf-lab: mallinfo() walks every free chunk under malloc's lock (25-46 ms a call in banjo-nx's measurement,
+// ~10 ms in lm-nx's). Every call on this thread goes through here, so the heartbeat can say what it really costs.
+struct MallinfoCost {
+    uint64_t calls = 0;
+    uint64_t totalNs = 0;
+    uint64_t maxNs = 0;
+    uint64_t skipped = 0;  // guard checks left out by mallinfo_guard = warmup
+};
+MallinfoCost s_mallinfoCost;
+
+struct mallinfo timed_mallinfo() {
+    const auto start = clock::now();
+    const struct mallinfo info = mallinfo();
+    const auto ns = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now() - start).count());
+    ++s_mallinfoCost.calls;
+    s_mallinfoCost.totalNs += ns;
+    s_mallinfoCost.maxNs = std::max(s_mallinfoCost.maxNs, ns);
+    return info;
+}
+}  // namespace
+#endif
+
 void tick() {
 #ifdef __SWITCH__
     const auto now = clock::now();
     // V1-rc12: low-memory guard for the background shader warmup, every 2 s (mallinfo is not free). A tester's rc11
     // first launch ran the heap down to 65 MiB free while the whole list warmed in the background, then the capture
     // service and fatal fell over. Under 150 MiB free (arena + never used) the warmup holds; over 250 it goes on.
+    // v1.1-perf-lab: perf-lab.ini mallinfo_guard = warmup checks only while the warmup has recipes left (or is held):
+    // the guard exists for the warmup alone, and once it is done the call is pure cost on the game thread.
     {
         static clock::time_point s_nextMemCheck{};
         static bool s_warmupHeld = false;
-        if (now >= s_nextMemCheck) {
+        const bool due = now >= s_nextMemCheck;
+        if (due) {
             s_nextMemCheck = now + std::chrono::seconds(2);
-            const struct mallinfo info = mallinfo();
+        }
+        if (due && g_duskMallinfoGuardWarmupOnly && !s_warmupHeld && aurora_shader_warmup_pending() == 0) {
+            ++s_mallinfoCost.skipped;
+        } else if (due) {
+            const struct mallinfo info = timed_mallinfo();
             const uintptr_t top = reinterpret_cast<uintptr_t>(sbrk(0));
             const uintptr_t end = reinterpret_cast<uintptr_t>(fake_heap_end);
             const uint64_t freeMiB =
@@ -417,7 +455,7 @@ void tick() {
     // V1-rc5: memory, to see a session that grows (a tester's rc4 died of bad_alloc after 25 min of compiling).
     // libnx reserves the whole heap at start (the process's used memory never moves): what tells is malloc's arena,
     // what is in use in it, what is free in it, and the part of the heap never handed out yet.
-    const struct mallinfo heap = mallinfo();
+    const struct mallinfo heap = timed_mallinfo();
     const uintptr_t brk = reinterpret_cast<uintptr_t>(sbrk(0));
     const uintptr_t heapEnd = reinterpret_cast<uintptr_t>(fake_heap_end);
     Log.info("[t={:.1f}s] mem: heap arena {} MiB, in use {} MiB, free in arena {} MiB, never used {} MiB; "
@@ -425,6 +463,33 @@ void tick() {
         elapsed(), static_cast<unsigned long>(heap.arena) >> 20, static_cast<unsigned long>(heap.uordblks) >> 20,
         static_cast<unsigned long>(heap.fordblks) >> 20, heapEnd > brk ? (heapEnd - brk) >> 20 : 0,
         st != nullptr ? st->createdPipelines : 0u, aurora_pipeline_live_count(), aurora_shader_warmup_released());
+    // v1.1-perf-lab: what mallinfo() cost on the game thread since the last heartbeat (this heartbeat's call included).
+    Log.info("[t={:.1f}s] mallinfo: {} calls, mean {:.2f} ms, max {:.2f} ms, {} guard checks skipped (mallinfo_guard={}); "
+             "warmup pending {}",
+        elapsed(), s_mallinfoCost.calls,
+        s_mallinfoCost.calls != 0 ? static_cast<double>(s_mallinfoCost.totalNs) / 1e6 / s_mallinfoCost.calls : 0.0,
+        static_cast<double>(s_mallinfoCost.maxNs) / 1e6, s_mallinfoCost.skipped,
+        g_duskMallinfoGuardWarmupOnly ? "warmup" : "always", aurora_shader_warmup_pending());
+    s_mallinfoCost = {};
+    // v1.1-perf-lab: the game thread's own CPU time (Horizon thread ticks) against the wall clock since the last
+    // heartbeat. Below the wall clock it was waiting or lost its core; with the FIFO's busy time and the render
+    // worker's CPU (below) it gives the total CPU a frame costs, which is what moves the frame rate once the cores
+    // are full (banjo-nx's finding).
+    {
+        static uint64_t s_lastTicks = 0;
+        static clock::time_point s_lastWall{};
+        uint64_t ticks = 0;
+        if (R_SUCCEEDED(svcGetInfo(&ticks, InfoType_ThreadTickCount, CUR_THREAD_HANDLE, UINT64_MAX))) {
+            if (s_lastTicks != 0) {
+                const double cpuMs = static_cast<double>(armTicksToNs(ticks - s_lastTicks)) / 1e6;
+                const double wallMs = std::chrono::duration<double, std::milli>(now - s_lastWall).count();
+                Log.info("[t={:.1f}s] game thread: CPU {:.0f} ms of {:.0f} ms wall ({:.0f} %)", elapsed(), cpuMs,
+                    wallMs, wallMs > 0.0 ? 100.0 * cpuMs / wallMs : 0.0);
+            }
+            s_lastTicks = ticks;
+            s_lastWall = now;
+        }
+    }
     aleks2_socket_counters sockets{};
     aleks2_get_socket_counters(&sockets);
     Log.info("[t={:.1f}s] net: sockets open={} created={} closed={} connect_failed={} enobufs={} last_errno={} ({})",

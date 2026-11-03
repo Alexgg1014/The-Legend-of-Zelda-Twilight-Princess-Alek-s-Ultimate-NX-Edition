@@ -12,6 +12,13 @@
 #include "dusk/profiler.hpp"
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
+#ifdef __SWITCH__
+#include "dusk/frame_telemetry.hpp"
+#include "dusk/gpu_boost.hpp"
+
+#include <algorithm>
+#include <cstdint>
+#endif
 
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_horse.h"
@@ -34,6 +41,83 @@
 #endif
 
 namespace dusk {
+#ifdef __SWITCH__
+    namespace {
+    // aleks2 (v1.1-perf-lab): where each presented frame goes, live -- the per-thread profiler panel other ports
+    // show (LM-NX, banjo-nx; Stevens' suggestion). frame_telemetry already measures it every frame; this only keeps
+    // the last kHistory frames and draws them. Series: present interval, game thread work, GX FIFO worker, render
+    // worker, GPU.
+    constexpr int kHistory = 180;
+    struct Series {
+        const char* name;
+        float values[kHistory] = {};
+    };
+    Series g_series[] = {{"Frame (present)"}, {"Game thread"}, {"GX FIFO thread"}, {"Render worker"}, {"GPU"}};
+    int g_head = 0;
+    int g_filled = 0;
+    std::uint64_t g_lastTick = 0;
+    unsigned g_bounds[perf::kBoundCount] = {};
+
+    void record_frame() {
+        const std::uint64_t tick = frame_telemetry::ticks();
+        if (tick == g_lastTick) {
+            return;
+        }
+        g_lastTick = tick;
+        const auto& f = frame_telemetry::last();
+        const float v[] = {f.intervalMs, f.mainWorkMs, f.fifoBusyMs, f.renderWorkMs, f.gpuMs};
+        for (int i = 0; i < 5; ++i) {
+            g_series[i].values[g_head] = v[i];
+        }
+        g_head = (g_head + 1) % kHistory;
+        g_filled = std::min(g_filled + 1, kHistory);
+        ++g_bounds[static_cast<int>(frame_telemetry::last_bound())];
+    }
+
+    void show_frame_breakdown() {
+        record_frame();
+        ImGuiStringViewText(fmt::format("Budget {:.1f} ms (perf-lab drs_target_fps)\n", frame_telemetry::budget_ms()));
+        for (const auto& s : g_series) {
+            float sum = 0.f, worst = 0.f;
+            int n = 0;
+            for (int i = 0; i < g_filled; ++i) {
+                const float x = s.values[i];
+                if (x < 0.f) {
+                    continue;  // no GPU figure for that frame
+                }
+                sum += x;
+                worst = std::max(worst, x);
+                ++n;
+            }
+            if (n == 0) {
+                ImGuiStringViewText(fmt::format("{:<16} --\n", s.name));
+                continue;
+            }
+            const int last = (g_head + kHistory - 1) % kHistory;
+            ImGuiStringViewText(fmt::format("{:<16} {:6.2f} ms  avg {:6.2f}  max {:6.2f}\n", s.name,
+                std::max(s.values[last], 0.f), sum / n, worst));
+            ImGui::PlotLines(fmt::format("##{}", s.name).c_str(), s.values, g_filled,
+                g_filled < kHistory ? 0 : g_head, nullptr, 0.f, 50.f, ImVec2(300.f, 28.f));
+        }
+        unsigned total = 0;
+        for (const unsigned b : g_bounds) {
+            total += b;
+        }
+        if (total != 0) {
+            ImGuiStringViewText(fmt::format("Missed since shown: {} of {} (gpu {}, game {}, fifo {}, other {})\n",
+                total - g_bounds[static_cast<int>(perf::Bound::Met)], total,
+                g_bounds[static_cast<int>(perf::Bound::Gpu)], g_bounds[static_cast<int>(perf::Bound::CpuMain)],
+                g_bounds[static_cast<int>(perf::Bound::CpuRender)], g_bounds[static_cast<int>(perf::Bound::Unknown)]));
+        }
+        unsigned cpu = 0, gpu = 0, emc = 0;
+        gpu_boost::clocks_mhz(cpu, gpu, emc);
+        if (cpu != 0) {
+            ImGuiStringViewText(fmt::format("Clocks: CPU {} / GPU {} / memory {} MHz\n", cpu, gpu, emc));
+        }
+    }
+    }  // namespace
+#endif
+
     ImGuiMenuTools::ImGuiMenuTools() {}
 
     void ImGuiMenuTools::draw() {
@@ -194,8 +278,15 @@ namespace dusk {
             m_showDebugOverlay = true;
         } else if (!getSettings().backend.enableAdvancedSettings ||
                    !ImGuiConsole::CheckMenuViewToggle(ImGuiKey_F3, m_showDebugOverlay)) {
+#ifdef __SWITCH__
+            frame_telemetry::want_gpu_timing(frame_telemetry::kOverlay, false);
+#endif
             return;
         }
+#ifdef __SWITCH__
+        // v1.1-perf-lab: GPU timestamps while the overlay shows its GPU line.
+        frame_telemetry::want_gpu_timing(frame_telemetry::kOverlay, true);
+#endif
 
         ImGui::PushFont(ImGuiEngine::fontMono);
 
@@ -217,6 +308,10 @@ namespace dusk {
             }
 
             ImGui::Separator();
+#ifdef __SWITCH__
+            show_frame_breakdown();
+            ImGui::Separator();
+#endif
 
             ImGuiStringViewText(fmt::format(FMT_STRING("Backend: {}\n"), backend_name(aurora_get_backend())));
 

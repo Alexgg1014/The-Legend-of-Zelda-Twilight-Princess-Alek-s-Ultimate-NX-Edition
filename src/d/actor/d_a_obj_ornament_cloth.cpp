@@ -101,7 +101,7 @@ void daObjOnCloth_c::setBaseMtx() {
     MTXCopy(mDoMtx_stack_c::get(), mMtx);
 }
 
-void daObjOnCloth_c::setNormalClothPos() {
+DUSK_NOINLINE void daObjOnCloth_c::setNormalClothPos() {
     cXyz sp4c = dKyw_get_AllWind_vecpow(&current.pos);
     sp4c *= attr().offset * attr().windRate;
     f32 fVar1 = sp4c.abs();

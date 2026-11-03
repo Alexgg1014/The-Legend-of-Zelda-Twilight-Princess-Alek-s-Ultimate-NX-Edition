@@ -2865,7 +2865,7 @@ void dMenu_Collect3D_c::_move(u8 param_0, u8 param_1) {
     }
 }
 
-void dMenu_Collect3D_c::draw() {
+DUSK_NOINLINE void dMenu_Collect3D_c::draw() {
     dComIfGd_setListItem3D();
     if (daAlink_getAlinkActorClass()) {
         daAlink_getAlinkActorClass()->statusWindowDraw();

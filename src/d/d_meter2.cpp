@@ -3280,7 +3280,7 @@ u8 dMeter2_c::isKeyVisible() {
     return false;
 }
 
-int dMeter2_c::isArrowEquip() {
+DUSK_NOINLINE int dMeter2_c::isArrowEquip() {
     for (int i = 0; i < 2; i++) {
         if (mItemStatus[i * 2] == dItemNo_BOW_e || mItemStatus[i * 2] == dItemNo_LIGHT_ARROW_e ||
             mItemStatus[i * 2] == dItemNo_ARROW_LV1_e || mItemStatus[i * 2] == dItemNo_ARROW_LV2_e ||
@@ -3293,7 +3293,7 @@ int dMeter2_c::isArrowEquip() {
     return 0;
 }
 
-int dMeter2_c::isPachinkoEquip() {
+DUSK_NOINLINE int dMeter2_c::isPachinkoEquip() {
     for (int i = 0; i < 2; i++) {
         if (mItemStatus[i * 2] == dItemNo_PACHINKO_e) {
             return i + 1;

@@ -42,6 +42,12 @@ Recording s_currentRecording;
 Recording s_previousRecording;
 
 absl::flat_hash_map<uintptr_t, Mtx> g_replacements;
+// v1.1-perf-lab: the replacements' keys only change when a recording does. Between two sim ticks every presentation
+// rewrote the same keys into a map cleared first, and absl frees a large table on clear(): it grew back from nothing
+// every presented frame (~5 % of the game thread in Boldiatti's stack profile, Castle Town West). Same generation:
+// the values are rewritten in place.
+uint64_t s_recordingGen = 1;
+uint64_t s_replacementsGen = 0;
 
 int s_presentationDepth = 0;
 bool s_cameraPresentationActive = false;
@@ -66,14 +72,20 @@ bool has_recording_data(const Recording& recording) {
 
 void clear_replacements() {
     g_replacements.clear();
+    s_replacementsGen = 0;
 }
 
 void interpolate_replacements() {
-    clear_replacements();
     s_replacementsActive = dusk::interp::is_enabled() && !s_recording && !s_syncPresentation &&
                            has_recording_data(s_currentRecording);
     if (!s_replacementsActive) {
+        clear_replacements();
         return;
+    }
+    if (s_replacementsGen != s_recordingGen) {
+        clear_replacements();
+        g_replacements.reserve(s_previousRecording.matrix_values.size());
+        s_replacementsGen = s_recordingGen;
     }
     for (auto const& old : s_previousRecording.matrix_values) {
         if (auto it = s_currentRecording.matrix_values.find(old.first);
@@ -110,6 +122,7 @@ void clear_interpolation_history() {
     s_syncPresentation = false;
     s_previousRecording = {};
     s_currentRecording = {};
+    ++s_recordingGen;
     clear_replacements();
     clear_callbacks();
     dusk::interp::camera_invalidate_snapshots();
@@ -178,6 +191,9 @@ void begin_record() {
     s_syncPresentation = false;
     s_previousRecording = std::move(s_currentRecording);
     s_currentRecording = {};
+    // v1.1-perf-lab: about as many matrices as last tick; one allocation instead of growing through every size.
+    s_currentRecording.matrix_values.reserve(s_previousRecording.matrix_values.size());
+    ++s_recordingGen;
     s_recording = true;
     s_replacementsActive = false;
     clear_replacements();

@@ -13,6 +13,10 @@
 void fapGm_After();
 void fapGm_Create();
 void fapGm_Execute();
+#if TARGET_PC
+// aleks2 (v1.1): runs the mods' tick deferred by duskExecute; fpcM_Management calls it right after its painter.
+void fapGm_RunDeferredModTick();
+#endif
 
 class fapGm_HIO_c : public JORReflexible {
 public:

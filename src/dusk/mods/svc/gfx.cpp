@@ -112,6 +112,19 @@ using GfxSlotMap = svc::SlotMap<GfxSlot>;
 GfxSlotMap s_slots;
 std::vector<WorkerFailure> s_workerFailures;
 bool s_modOffscreenOpen = false;
+// v1.1: mods whose callback did something deko3d could not (Aurora's dk_modgfx.cpp counted it); noted on the
+// game thread by gfx_frame_begin, and the next start uses Vulkan for them
+std::vector<std::string> s_dekoMisses;
+
+void note_deko_miss(uint32_t before, const std::string& ownerId) {
+    if (!deko3d_policy::deko3d_running() || deko3d_policy::modgfx_failures() == before) [[likely]] {
+        return;
+    }
+    std::lock_guard lock{s_mutex};
+    if (std::find(s_dekoMisses.begin(), s_dekoMisses.end(), ownerId) == s_dekoMisses.end()) {
+        s_dekoMisses.push_back(ownerId);
+    }
+}
 
 GfxSlotMap::Entry* resolve_entry_locked(uint64_t handle, GfxSlotKind kind) {
     auto* entry = s_slots.find(handle);
@@ -255,8 +268,10 @@ void draw_trampoline(const aurora::gfx::DrawContext& ctx, const wgpu::RenderPass
     };
 
     std::string failure;
+    const uint32_t dekoBefore = deko3d_policy::modgfx_failures();
     try {
         fn(modContext, &drawContext, payload, payloadSize, userData);
+        note_deko_miss(dekoBefore, ownerId);
         return;
     } catch (const std::exception& e) {
         failure = fmt::format("exception in gfx draw callback: {}", e.what());
@@ -304,8 +319,10 @@ void compute_trampoline(const aurora::gfx::EncoderTaskContext& ctx, const wgpu::
     };
 
     std::string failure;
+    const uint32_t dekoBefore = deko3d_policy::modgfx_failures();
     try {
         fn(modContext, &computeContext, payload, payloadSize, userData);
+        note_deko_miss(dekoBefore, ownerId);
         return;
     } catch (const std::exception& e) {
         failure = fmt::format("exception in gfx compute callback: {}", e.what());
@@ -602,9 +619,6 @@ ModResult gfx_unregister_draw_type(LoadedMod& mod, uint64_t handle) {
 }
 
 ModResult gfx_push_draw(LoadedMod& mod, uint64_t handle, const void* payload, size_t payloadSize) {
-    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
-        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "a draw");
-    }
     aurora::gfx::DrawTypeId auroraId = aurora::gfx::InvalidDrawType;
     {
         std::lock_guard lock{s_mutex};
@@ -671,9 +685,6 @@ ModResult gfx_unregister_stage_hook(LoadedMod& mod, uint64_t handle) {
 }
 
 ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolvedTargets& out) {
-    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
-        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "a scene pass resolve");
-    }
     out = GfxResolvedTargets{.struct_size = sizeof(GfxResolvedTargets)};
     if (aurora::gfx::is_offscreen() && !s_modOffscreenOpen) {
         Log.error(
@@ -711,9 +722,6 @@ ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolv
 }
 
 ModResult gfx_create_pass(LoadedMod& mod, uint32_t width, uint32_t height) {
-    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
-        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "an offscreen pass");
-    }
     if (aurora::gfx::is_offscreen()) {
         Log.error("[{}] create_pass: an offscreen pass is already active", mod.metadata.id);
         return MOD_UNAVAILABLE;
@@ -780,9 +788,6 @@ ModResult gfx_unregister_compute_type(LoadedMod& mod, uint64_t handle) {
 
 ModResult gfx_push_compute(
     LoadedMod& mod, uint64_t handle, const void* payload, size_t payloadSize) {
-    if (deko3d_policy::deko3d_running()) [[unlikely]] {  // aleks2 (deko3d rc12): deko3d does not run it
-        deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "a compute task");
-    }
     aurora::gfx::EncoderTaskId auroraId = aurora::gfx::InvalidEncoderTask;
     {
         std::lock_guard lock{s_mutex};
@@ -1005,8 +1010,10 @@ void gfx_run_stage(
         }
 
         const bool wasOffscreen = aurora::gfx::is_offscreen();
+        const uint32_t dekoBefore = deko3d_policy::modgfx_failures();  // (per thread: this one's)
         try {
             entry.fn(entry.context, &stageContext, entry.userData);
+            note_deko_miss(dekoBefore, entry.owner->metadata.id);
         } catch (const std::exception& e) {
             fail_mod(*entry.owner, MOD_ERROR,
                 fmt::format("exception in gfx stage callback: {}", e.what()));
@@ -1050,9 +1057,19 @@ void gfx_mod_detached(LoadedMod& mod) {
 
 void gfx_frame_begin() {
     std::vector<WorkerFailure> failures;
+    std::vector<std::string> dekoMisses;
     {
         std::lock_guard lock{s_mutex};
         failures.swap(s_workerFailures);
+        dekoMisses.swap(s_dekoMisses);
+    }
+    for (const auto& id : dekoMisses) {
+        for (auto& mod : ModLoader::instance().mods()) {
+            if (mod.metadata.id == id) {
+                deko3d_policy::note_gfx_mod(mod.metadata.id, mod.metadata.name, "graphics deko3d cannot draw");
+                break;
+            }
+        }
     }
     if (failures.empty()) {
         return;
@@ -1134,6 +1151,10 @@ ModResult gfx_get_scene_target_layout(ModContext* context, GfxRenderTargetLayout
 void* gfx_get_proc_address(ModContext* context, const char* name) {
     if (mod_from_context(context) == nullptr || name == nullptr) {
         return nullptr;
+    }
+    // v1.1: the deko3d side of the gfx service first (it forwards to Dawn while Dawn renders)
+    if (void* fn = deko3d_policy::wgpu_proc(name)) {
+        return fn;
     }
     return reinterpret_cast<void*>(wgpuGetProcAddress(WGPUStringView{name, WGPU_STRLEN}));
 }

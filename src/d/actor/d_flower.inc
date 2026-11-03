@@ -1351,7 +1351,7 @@ void dFlower_packet_c::draw() {
 }
 #endif
 
-void dFlower_packet_c::calc() {
+DUSK_NOINLINE void dFlower_packet_c::calc() {
     dFlower_anm_c* anm_p = getAnm();
 
     for (int i = 0; i < 8; i++) {
@@ -1411,7 +1411,7 @@ static f32 flowerCheckGroundY(cXyz& param_0) {
     }
 }
 
-void dFlower_packet_c::update() {
+DUSK_NOINLINE void dFlower_packet_c::update() {
     dFlower_anm_c* var_r29 = getAnm();
 
     for (int i = 0; i < 72; i++) {

@@ -163,6 +163,7 @@ constexpr std::array kInterpolationModes = {
 };
 
 constexpr std::array<const char*, 2> kInterpQualityModes = {"Fast", "Fancy"};
+constexpr std::array<const char*, 3> kGpuBoostLevels = {"Off", "384 MHz", "460.8 MHz"};  // v1.1
 
 constexpr std::array kAudioOutputModeNames = {
     "Stereo (Speakers)",
@@ -1196,15 +1197,15 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
 
 #ifdef __SWITCH__
         // aleks2 (V1-rc16): src/dusk/gpu_boost.cpp. Opt-in, any profile; profiles never touch the clocks.
-        config_bool_select(leftPane, rightPane, getSettings().game.gpuBoost,
-            {
-                .key = "GPU Boost (handheld)",
-                .helpText = "In handheld mode, asks the console for its official 460 MHz GPU profile instead of "
-                            "the usual 307 MHz. This is not an overclock -- the system offers it -- but it uses "
-                            "more battery and the console runs warmer.<br/><br/>Not recommended for most players: "
-                            "the profiles are designed for stock clocks. Docked play is unaffected. If a clock "
-                            "tool such as sys-clk is setting the clocks, this steps aside.",
-            });
+        // v1.1: a level, Off / 384 / 460.8 MHz (the system's own handheld GPU configurations).
+        config_enum_select(leftPane, rightPane, getSettings().game.gpuBoostLevel, "GPU Boost (handheld)",
+            kGpuBoostLevels,
+            "In handheld mode, asks the console for one of its official GPU profiles instead of the usual "
+            "307 MHz. This is not an overclock -- the system offers these profiles -- but they use more battery "
+            "and the console runs warmer.<br/><br/><b>384 MHz</b> gives most of the gain for the least battery; "
+            "<b>460.8 MHz</b> adds little on top, because the memory clock stays the same.<br/><br/>Off by "
+            "default: the profiles are designed for stock clocks. Docked play is unaffected. If a clock tool "
+            "such as sys-clk is setting the clocks, this steps aside.");
 #endif
 
         config_bool_select(leftPane, rightPane, getSettings().game.predictiveInterpolation,

@@ -92,7 +92,20 @@ void updateActionBindings() {
                     // If controller is active
                     auto controller = aurora::input::get_controller_for_player(port);
                     if (controller) {
-                        if (SDL_GetGamepadButton(controller->m_controller, static_cast<SDL_GamepadButton>(button))) {
+                        bool pressed = false;
+                        if (button == static_cast<int>(PAD_NATIVE_TRIGGER_LEFT) ||
+                            button == static_cast<int>(PAD_NATIVE_TRIGGER_RIGHT))
+                        {
+                            // A trigger pulled half way (pad.h; the Switch's ZL/ZR since v1.1-beta.3).
+                            const auto axis = button == static_cast<int>(PAD_NATIVE_TRIGGER_LEFT)
+                                                  ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER
+                                                  : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+                            pressed = SDL_GetGamepadAxis(controller->m_controller, axis) > 16000;
+                        } else {
+                            pressed = SDL_GetGamepadButton(controller->m_controller,
+                                                           static_cast<SDL_GamepadButton>(button));
+                        }
+                        if (pressed) {
                             actionPressData[port][static_cast<int>(action)].pressedCurFrame = true;
                         }
                     }

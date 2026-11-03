@@ -90,6 +90,7 @@ add_library(dusk_switch_runtime STATIC
   ${_sw_src}/switch_sockets.cpp
   ${_sw_src}/switch_abort.cpp
   ${_sw_src}/switch_threads.cpp
+  ${_sw_src}/switch_libc_fast.cpp
 )
 target_include_directories(dusk_switch_runtime
   PUBLIC ${_sw_inc}
@@ -350,6 +351,9 @@ target_link_options(dusklight PRIVATE "-Wl,--wrap=abort")
 # aleks2 (V1-rc8): threads a mod starts through the NRO's C++ library are counted for the exit guard
 # (source/switch_threads.cpp).
 target_link_options(dusklight PRIVATE "-Wl,--wrap=pthread_create")
+# aleks2 (v1.1-perf-lab-3): malloc without devkitPro's memalign(32), and a rwlock unlock that wakes only a waiting
+# writer (source/switch_libc_fast.cpp; perf-lab.ini malloc_direct, rwlock_quiet).
+target_link_options(dusklight PRIVATE "-Wl,--wrap=malloc" "-Wl,--wrap=pthread_rwlock_unlock")
 # aleks2 (deko3d P1): the deko3d shadows of Aurora's WebGPU textures, views, samplers and bind groups
 # (extern/aurora/lib/deko/dk_objects.cpp). With the Dawn backend the wrappers only forward.
 if (AURORA_GFX_DEKO3D)

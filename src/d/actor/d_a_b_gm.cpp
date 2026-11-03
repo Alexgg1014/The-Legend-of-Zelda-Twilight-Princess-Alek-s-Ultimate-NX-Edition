@@ -232,7 +232,7 @@ static void* s_ko_del(void* i_actor, void* i_data) {
     return NULL;
 }
 
-static void damage_check(b_gm_class* i_this) {
+static DUSK_NOINLINE void damage_check(b_gm_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
 
@@ -570,7 +570,7 @@ static void b_gm_beam(b_gm_class* i_this) {
     cLib_addCalc2(&i_this->speedF, move_speed, 1.0f, 1.0f + (0.5f * l_HIO.dash_speed));
 }
 
-static void b_gm_kogoma(b_gm_class* i_this) {
+static DUSK_NOINLINE void b_gm_kogoma(b_gm_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
 
     cXyz kogoma_pos;
@@ -666,7 +666,7 @@ static void b_gm_damage(b_gm_class* i_this) {
     cLib_addCalc0(&a_this->speedF, 1.0f, 5.0f);
 }
 
-static void b_gm_drop(b_gm_class* i_this) {
+static DUSK_NOINLINE void b_gm_drop(b_gm_class* i_this) {
     fopAc_ac_c* a_this = (fopAc_ac_c*)i_this;
     cXyz sp20;
     cXyz sp14;

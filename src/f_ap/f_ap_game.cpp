@@ -31,6 +31,7 @@
 #endif
 #include "dusk/game_mode.hpp"
 #include "dusk/gamepad_color.h"
+#include "dusk/game_clock.h"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/menu_pointer.h"
@@ -750,6 +751,16 @@ static void fapGm_AfterRecord() {
 
 DUSK_GAME_DATA BOOL isRecording = false;
 
+// aleks2 (v1.1): set by duskExecute, consumed by fapGm_RunDeferredModTick.
+static bool s_modTickPending = false;
+
+void fapGm_RunDeferredModTick() {
+    if (s_modTickPending) {
+        s_modTickPending = false;
+        dusk::mods::ModLoader::instance().tick();
+    }
+}
+
 static void duskExecute() {
 #ifdef __SWITCH__
     // aleks2: feed the touchscreen first: taps must land BEFORE the companion
@@ -843,7 +854,16 @@ static void duskExecute() {
         dComIfGp_setOxygen(dComIfGp_getMaxOxygen());
     }
 
-    dusk::mods::ModLoader::instance().tick();
+    // aleks2 (v1.1): without separate presentation, the painter at the top of fpcM_Management paints the lists
+    // recorded LAST frame. A mod_update that deletes game objects (Twilit Essentials 3 closes the Collection
+    // screen with dMw_collect_delete) left those lists pointing at freed packets: dMenu_Collect2D_c::_draw on a
+    // deleted screen. So there the tick runs right after the painter, still before the game's own processes --
+    // the order the separate-presentation path already has (sim tick, then record, then paint).
+    if (dusk::game_clock::g_frameTiming.separatePresentation) {
+        dusk::mods::ModLoader::instance().tick();
+    } else {
+        s_modTickPending = true;
+    }
 }
 #endif
 
@@ -865,6 +885,7 @@ void fapGm_Execute() {
 
 #ifdef TARGET_PC
     fpcM_Management(fapGm_Before, fapGm_AfterRecord);
+    fapGm_RunDeferredModTick();  // aleks2 (v1.1): only if fpcM_Management skipped its painter (error screens)
 #else
     fpcM_ManagementFunc(NULL, fapGm_After);
 #endif

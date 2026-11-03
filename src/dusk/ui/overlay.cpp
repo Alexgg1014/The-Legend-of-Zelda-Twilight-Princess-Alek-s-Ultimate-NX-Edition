@@ -168,6 +168,8 @@ Rml::String back_button_name() {
             return "Back";
         case SDL_GAMEPAD_TYPE_XBOXONE:
             return "View";
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+            return "Minus";
         case SDL_GAMEPAD_TYPE_GAMECUBE:
             return "R + Start";
         default:

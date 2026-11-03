@@ -393,7 +393,7 @@ void dMeter2Info_c::getString(u32 i_stringID, TEXT_SPAN o_string, JMSMesgEntry_c
     }
 }
 
-void dMeter2Info_c::getStringKana(u32 i_stringID, TEXT_SPAN o_string, JMSMesgEntry_c* i_msgEntry) {
+DUSK_NOINLINE void dMeter2Info_c::getStringKana(u32 i_stringID, TEXT_SPAN o_string, JMSMesgEntry_c* i_msgEntry) {
     SAFE_STRCPY(o_string, "");
 
     u8* msgRes;
