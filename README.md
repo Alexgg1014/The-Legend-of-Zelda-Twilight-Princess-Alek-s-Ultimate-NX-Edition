@@ -4,7 +4,7 @@
   <h1>Dusklight — Alek's Ultimate NX Edition</h1>
 
   <p><b>A free, unofficial Nintendo Switch port of <a href="https://github.com/TwilitRealm/dusklight">Dusklight</a></b><br>
-  by <a href="https://github.com/Alexgg1014">Alexgg1014</a> · version <code>1.1.0</code></p>
+  by <a href="https://github.com/Alexgg1014">Alexgg1014</a> · version <code>1.1.1</code></p>
 
   <p>
     <a href="https://github.com/Alexgg1014/The-Legend-of-Zelda-Twilight-Princess-Alek-s-Ultimate-NX-Edition/releases/latest"><b>Download</b></a>

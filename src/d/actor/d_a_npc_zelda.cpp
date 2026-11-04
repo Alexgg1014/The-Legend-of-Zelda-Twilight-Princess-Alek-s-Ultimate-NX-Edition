@@ -291,11 +291,11 @@ int daNpc_Zelda_c::Delete() {
     return 1;
 }
 
-int daNpc_Zelda_c::Execute() {
+DUSK_NOINLINE int daNpc_Zelda_c::Execute() {
     return execute();
 }
 
-int daNpc_Zelda_c::Draw() {
+DUSK_NOINLINE int daNpc_Zelda_c::Draw() {
     J3DModelData* modelData = mpMorf[0]->getModel()->getModelData();
     if (mpMatAnm[0] != NULL) {
         modelData->getMaterialNodePointer(getEyeballLMaterialNo())->setMaterialAnm(mpMatAnm[0]);

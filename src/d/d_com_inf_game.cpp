@@ -29,7 +29,7 @@
 #if TARGET_PC
 #include "dusk/settings.h"
 #include "helpers/string.hpp"
-
+#include "dusk/dualscreen.h"
 #include "m_Do/m_Do_MemCard.h"
 #endif
 
@@ -2040,9 +2040,9 @@ DUSK_NOINLINE u8 dComIfGp_getSelectItem(int i_selItemIdx) {
     u8 playItem = g_dComIfG_gameInfo.play.getSelectItem(i_selItemIdx);
 
 #if TARGET_PC
-    // The companion's slot buttons (indices 2/3) are full item buttons and
-    // carry combos too — resolve the mix on all four.
-    if (i_selItemIdx >= 0 && i_selItemIdx < 4 &&
+    // aleks2 (1.1.1): indices 2/3 carry combos only while the companion shows them. With it off they belong to mods,
+    // as upstream: Twilit Essentials keeps its Z item already combined there, and a second pass undid the bomb arrow.
+    if (i_selItemIdx >= 0 && (i_selItemIdx < 2 || (i_selItemIdx < 4 && dusk::dualscreen::hudOnCompanion())) &&
         dComIfGs_getMixItemIndex(i_selItemIdx) != 0xFF)
 #else
     if ((i_selItemIdx == SELECT_ITEM_X || i_selItemIdx == SELECT_ITEM_Y) &&

@@ -989,7 +989,7 @@ int daHorse_c::setDoubleAnime(f32 i_ratio, f32 i_anmSpeedA, f32 i_anmSpeedB, u16
     return 1;
 }
 
-int daHorse_c::setSingleAnime(u16 i_anmIdx, f32 i_speed, f32 i_startF, s16 i_endF, f32 i_morf,
+DUSK_NOINLINE int daHorse_c::setSingleAnime(u16 i_anmIdx, f32 i_speed, f32 i_startF, s16 i_endF, f32 i_morf,
                               BOOL i_isDemoAnm) {
     J3DAnmTransform* bck;
     if (i_isDemoAnm) {
@@ -3283,7 +3283,7 @@ void daHorse_c::setNeckAnimeMorf() {
     m_oldFrame->initOldFrameMorf(3.0f, start_jnt_no, end_jnt_no);
 }
 
-void daHorse_c::setNeckAnime(u16 i_anmIdx, f32 i_speed, f32 i_startF, s16 i_endF) {
+DUSK_NOINLINE void daHorse_c::setNeckAnime(u16 i_anmIdx, f32 i_speed, f32 i_startF, s16 i_endF) {
     J3DAnmTransform* bck = (J3DAnmTransform*)dComIfG_getObjectRes(l_arcName, i_anmIdx);
     
     s16 endF;
