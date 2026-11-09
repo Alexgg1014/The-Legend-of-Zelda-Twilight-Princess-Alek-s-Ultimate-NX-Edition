@@ -1,5 +1,7 @@
 #include "dusk/self_update_core.hpp"
 
+#include <cstdio>
+#include <cstring>
 #include <algorithm>
 #include <cctype>
 #include <system_error>
@@ -106,6 +108,48 @@ std::string replace_with_backup(const std::filesystem::path& target, const std::
                "): rename " + bak.filename().string() + " to " + target.filename().string() + " by hand";
     }
     return "could not put the new NRO in place (" + why + "); the previous one is back";
+}
+
+void apply_pending_at_boot(const char* pendingFile, const char* resultFile, const char* root) {
+    std::FILE* in = std::fopen(pendingFile, "r");
+    if (in == nullptr) {
+        return;
+    }
+    char tag[64] = {};
+    char target[512] = {};
+    const bool read = std::fgets(tag, sizeof tag, in) != nullptr && std::fgets(target, sizeof target, in) != nullptr;
+    std::fclose(in);
+    tag[std::strcspn(tag, "\r\n")] = 0;
+    target[std::strcspn(target, "\r\n")] = 0;
+    char part[520];
+    char bak[520];
+    std::snprintf(part, sizeof part, "%s.part", target);
+    std::snprintf(bak, sizeof bak, "%s.bak", target);
+    const bool ours = read && std::strncmp(target, root, std::strlen(root)) == 0 &&
+                      ends_with_nocase(target, ".nro") && std::strstr(target, "..") == nullptr;
+    std::FILE* download = ours ? std::fopen(part, "rb") : nullptr;
+    if (download == nullptr) {
+        std::remove(pendingFile);
+        return;
+    }
+    std::fclose(download);
+    const char* failed = nullptr;
+    std::remove(bak);
+    if (std::rename(target, bak) != 0) {
+        failed = "could not move the current NRO aside";
+    } else if (std::rename(part, target) != 0) {
+        failed = "could not put the new NRO in place";
+        std::rename(bak, target);
+    }
+    if (std::FILE* out = std::fopen(resultFile, "w")) {
+        if (failed != nullptr) {
+            std::fprintf(out, "%s\n", failed);
+        } else {
+            std::fprintf(out, "installed %s\n", tag);
+        }
+        std::fclose(out);
+    }
+    std::remove(pendingFile);
 }
 
 bool auto_check_due(long long lastMinutes, long long nowMinutes) {

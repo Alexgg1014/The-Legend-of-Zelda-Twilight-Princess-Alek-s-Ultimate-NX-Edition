@@ -2912,6 +2912,7 @@
     _ZNSt18condition_variableD1Ev;
     _ZNSt28__atomic_futex_unsigned_base19_M_futex_notify_allEPj;
     _ZNSt28__atomic_futex_unsigned_base19_M_futex_wait_untilEPjjbNSt6chrono8durationIlSt5ratioILl1ELl1EEEENS2_IlS3_ILl1ELl1000000000EEEE;
+    _ZNSt28__atomic_futex_unsigned_base26_M_futex_wait_until_steadyEPjjbNSt6chrono8durationIlSt5ratioILl1ELl1EEEENS2_IlS3_ILl1ELl1000000000EEEE;
     _ZNSt3_V215system_categoryEv;
     _ZNSt3_V216generic_categoryEv;
     _ZNSt5ctypeIcE2idE;

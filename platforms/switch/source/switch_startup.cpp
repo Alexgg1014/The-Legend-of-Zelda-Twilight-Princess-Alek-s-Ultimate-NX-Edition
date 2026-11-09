@@ -54,7 +54,9 @@ u32 __nx_applet_exit_mode = 0;
 void aleks2_exit_trace(const char* line); extern unsigned long long aleks2_boot_entry_tick, aleks2_boot_romfs_tick;
 static void exit_trace_atexit_last(void);
 
+extern "C" void aleks2_apply_update_at_boot(void);  // self_update.cpp, 1.1.2
 void userAppInit(void) {
+  aleks2_apply_update_at_boot();  // before romfs opens this NRO
   aleks2_boot_entry_tick = armGetSystemTick(); romfsInit(); aleks2_boot_romfs_tick = armGetSystemTick();  // res/, the files that ship inside the NRO; rc17: boot timing (session_log.cpp)
   dusk::sw::vulkan_env_setup(); // before nv: the driver reads its environment on init
   nvInitialize();               // the GPU service the Vulkan driver talks to

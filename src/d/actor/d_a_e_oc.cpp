@@ -2394,7 +2394,7 @@ void daE_OC_c::executeMoveOut() {
     }
 }
 
-bool daE_OC_c::checkWaterSurface() {
+DUSK_NOINLINE bool daE_OC_c::checkWaterSurface() {
     dBgS_ObjGndChk_Spl gnd_chk_spl;
     Vec my_vec_0;
     my_vec_0 = current.pos;

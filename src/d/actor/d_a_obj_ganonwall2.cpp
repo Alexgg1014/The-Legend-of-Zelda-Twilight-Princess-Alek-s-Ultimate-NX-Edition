@@ -75,7 +75,7 @@ int daObjGWall2_c::CreateHeap() {
     return 1;
 }
 
-int daObjGWall2_c::create1st() {
+DUSK_NOINLINE int daObjGWall2_c::create1st() {
     if (getEventBit1() != 0x3FF &&
         dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[(u16)getEventBit1()]) != 0)
     {

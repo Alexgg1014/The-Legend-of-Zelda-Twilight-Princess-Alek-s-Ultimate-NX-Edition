@@ -863,7 +863,7 @@ void daE_GI_c::action() {
     mpModelMorf->play(0, dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
 }
 
-void daE_GI_c::mtx_set() {
+DUSK_NOINLINE void daE_GI_c::mtx_set() {
     mDoMtx_stack_c::transS(current.pos);
     mDoMtx_stack_c::ZXYrotM(shape_angle);
     mDoMtx_stack_c::scaleM(l_HIO.model_size, l_HIO.model_size, l_HIO.model_size);

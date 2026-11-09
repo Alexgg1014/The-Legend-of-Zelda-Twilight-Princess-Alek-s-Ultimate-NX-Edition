@@ -67,6 +67,8 @@ __thread void (*__once_call)();
 struct __atomic_futex_unsigned_base {
     static bool _M_futex_wait_until(unsigned* addr, unsigned value, bool hasTimeout,
                                     chrono::seconds seconds, chrono::nanoseconds nanoseconds);
+    static bool _M_futex_wait_until_steady(unsigned* addr, unsigned value, bool hasTimeout,
+                                           chrono::seconds seconds, chrono::nanoseconds nanoseconds);
     static void _M_futex_notify_all(unsigned* addr);
 };
 
@@ -79,6 +81,22 @@ bool __atomic_futex_unsigned_base::_M_futex_wait_until(
     const auto deadline = chrono::system_clock::time_point{seconds + nanoseconds};
     while (__atomic_load_n(addr, __ATOMIC_ACQUIRE) == value) {
         if (hasTimeout && chrono::system_clock::now() >= deadline) {
+            return false;
+        }
+        this_thread::sleep_for(kPoll);
+    }
+    return true;
+}
+
+// 1.1.2: the steady-clock twin, for wait_for and wait_until on a steady clock (std::future, Twilit Essentials
+// 3.0.2). The same poll; the deadline is on steady_clock, whose epoch libstdc++ passes as seconds and nanoseconds.
+bool __atomic_futex_unsigned_base::_M_futex_wait_until_steady(
+    unsigned* addr, unsigned value, bool hasTimeout,
+    chrono::seconds seconds, chrono::nanoseconds nanoseconds) {
+    constexpr auto kPoll = chrono::microseconds{200};
+    const auto deadline = chrono::steady_clock::time_point{seconds + nanoseconds};
+    while (__atomic_load_n(addr, __ATOMIC_ACQUIRE) == value) {
+        if (hasTimeout && chrono::steady_clock::now() >= deadline) {
             return false;
         }
         this_thread::sleep_for(kPoll);

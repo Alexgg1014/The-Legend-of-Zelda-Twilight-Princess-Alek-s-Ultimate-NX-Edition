@@ -44,6 +44,7 @@ constexpr borealis::AppInfo kPortRelease{
     .githubRepo = "The-Legend-of-Zelda-Twilight-Princess-Alek-s-Ultimate-NX-Edition",
 };
 constexpr const char* kResultFile = "sdmc:/switch/dusklight/update-result.txt";
+constexpr const char* kPendingFile = "sdmc:/switch/dusklight/update-pending.txt";  // 1.1.2: apply_pending_at_boot
 constexpr std::uint64_t kSpaceMargin = 32ull << 20;
 constexpr unsigned kGoodRunFrames = 3600;  // about a minute of game frames with the new NRO
 
@@ -57,6 +58,7 @@ borealis::Task<borealis::http::Result> s_download;
 borealis::Task<std::string> s_verify;
 bool s_autoCheck = false;
 bool s_booted = false;
+bool s_installedAtBoot = false;  // 1.1.2: the file on the card is newer than this run: nothing to check until it closes
 
 // Kept out of UserSettings (its layout stays as it was); registered on first use, which back-fills a saved value.
 struct Vars {
@@ -110,7 +112,13 @@ void on_boot() {
         in.close();
         std::error_code ec;
         std::filesystem::remove(kResultFile, ec);
-        if (line.rfind("ok ", 0) == 0) {
+        if (line.rfind("installed ", 0) == 0) {
+            s_installedAtBoot = true;
+            UpdLog.info("Update: {} installed at this start; the next start runs it", line.substr(10));
+            ui::push_toast({.title = "Update installed",
+                .content = fmt::format("Close Dusklight and open it again to run {}.", line.substr(10)),
+                .duration = std::chrono::seconds(12)});
+        } else if (line.rfind("ok ", 0) == 0) {
             UpdLog.info("Update: now running {} (the previous NRO is kept as .bak for a while)", line.substr(3));
             ui::push_toast({.title = "Dusklight updated",
                 .content = fmt::format("Now running {}.", line.substr(3)),
@@ -284,12 +292,15 @@ void take_verify() {
     meta += ".borealis-resume.json";
     std::filesystem::remove(meta, ec);
     s_state = State::Ready;
-    s_detail = fmt::format("{} is downloaded and checked. It is installed when Dusklight closes: save, then "
-                           "Restart now.",
+    // 1.1.2: closing from HOME skips the exit that installs it; the next start does it from this file (issue 12)
+    if (std::ofstream out{kPendingFile}; out) {
+        out << s_latest.tagName << '\n' << s_target.string() << '\n';
+    }
+    s_detail = fmt::format("{} is downloaded and checked. Save, then close Dusklight and open it again to install it.",
         latest_label());
-    UpdLog.info("Update: {} downloaded and its SHA-256 matches; installed at exit", s_latest.tagName);
+    UpdLog.info("Update: {} downloaded and its SHA-256 matches; installed at exit or at the next start", s_latest.tagName);
     ui::push_toast({.title = "Update ready",
-        .content = "Installed when Dusklight closes. Save, then Restart now (Settings, Dusklight Update).",
+        .content = "Save, then close Dusklight and open it again to install it.",
         .duration = std::chrono::seconds(8)});
 }
 
@@ -321,7 +332,7 @@ void maybe_auto_check() {
     if (!s_booted) {
         on_boot();
     }
-    if (!getSettings().backend.checkForUpdates.getValue() || s_state != State::Idle) {
+    if (s_installedAtBoot || !getSettings().backend.checkForUpdates.getValue() || s_state != State::Idle) {
         return;
     }
     const long long now = now_minutes();
@@ -338,6 +349,12 @@ void maybe_auto_check() {
 void check_now() {
     if (!s_booted) {
         on_boot();
+    }
+    if (s_installedAtBoot) {
+        ui::push_toast({.title = "Update installed",
+            .content = "Close Dusklight and open it again to run it.",
+            .duration = std::chrono::seconds(6)});
+        return;
     }
     start_check(false);
 }
@@ -379,7 +396,7 @@ void restart_now() {
         IsRunning = false;
     } else {
         ui::push_toast({.title = "Close Dusklight by hand",
-            .content = "The update is installed when Dusklight closes: quit it, then open it again.",
+            .content = "Save, then close Dusklight and open it again to install the update.",
             .duration = std::chrono::seconds(6)});
     }
 }
@@ -435,6 +452,7 @@ extern "C" void aleks2_apply_pending_update(void) {
     // loop ends (userAppExit's romfsExit then finds nothing to unmount).
     romfsExit();
     const std::string error = replace_with_backup(s_target, part_path(s_target));
+    std::remove(kPendingFile);  // 1.1.2: done or failed, the next start has nothing to install
     if (std::FILE* f = std::fopen(kResultFile, "w")) {
         if (error.empty()) {
             std::fprintf(f, "ok %s\n", s_latest.tagName.c_str());
@@ -443,4 +461,10 @@ extern "C" void aleks2_apply_pending_update(void) {
         }
         std::fclose(f);
     }
+}
+
+// 1.1.2: userAppInit, before romfs opens the NRO (issue 12)
+extern "C" void aleks2_apply_update_at_boot(void) {
+    dusk::self_update::apply_pending_at_boot("sdmc:/switch/dusklight/update-pending.txt",
+        "sdmc:/switch/dusklight/update-result.txt", "sdmc:/");
 }

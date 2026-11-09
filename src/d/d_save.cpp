@@ -1191,7 +1191,7 @@ DUSK_NOINLINE BOOL dSv_memBit_c::isSwitch(int i_no) const {
     return (mSwitch[i_no >> 5] & 1 << (i_no & 0x1F)) ? TRUE : FALSE;
 }
 
-BOOL dSv_memBit_c::revSwitch(int i_no) {
+DUSK_NOINLINE BOOL dSv_memBit_c::revSwitch(int i_no) {
     JUT_ASSERT(2828, 0 <= i_no && i_no < 128);
 
     u32 switchInd = i_no >> 5;

@@ -1003,6 +1003,13 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .title = "Depth of Field",
                 .helpText = kDepthOfFieldHelpText,
             });
+        // 1.1.2 (issue 13): was only in the developer tools menu; the Performance profile already sets it
+        config_bool_select(leftPane, rightPane, getSettings().game.disableWaterRefraction,
+            {
+                .key = "Disable Water Refraction",
+                .helpText = "Turns off the effect that bends what you see through water, such as Link's legs when "
+                            "he stands in it. Saves some GPU time.",
+            });
 
         leftPane.add_section("Rendering");
         graphics_tuner_control(*this, leftPane, rightPane,

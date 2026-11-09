@@ -5311,7 +5311,7 @@ void daB_ZANT_c::cc_ice_set() {
     }
 }
 
-int daB_ZANT_c::execute() {
+DUSK_NOINLINE int daB_ZANT_c::execute() {
     if (mModeTimer != 0) {
         mModeTimer--;
     }

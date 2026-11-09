@@ -885,7 +885,7 @@ void dKy_FiveSenses_fullthrottle_dark() {
     dKy_FiveSenses_fullthrottle_dark_static1();
 }
 
-int dKy_light_influence_id(cXyz position, int param_1) {
+DUSK_NOINLINE int dKy_light_influence_id(cXyz position, int param_1) {
     f32 closest_plight_dist = 1000000.0f;
 
     int closest_plight_no = -1;
@@ -10256,7 +10256,7 @@ int dKy_WolfEyeLight_set(cXyz* pos_p, f32 angle_x, f32 angle_y, f32 cutoff, GXCo
     return sp28;
 }
 
-void dKy_twilight_camelight_set() {
+DUSK_NOINLINE void dKy_twilight_camelight_set() {
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     fopAc_ac_c* player_p = dComIfGp_getPlayer(0);
     camera_class* camera_p = (camera_class*)dComIfGp_getCamera(0);
@@ -10965,7 +10965,7 @@ BOOL dKy_TeachWind_existence_chk() {
     }
 }
 
-BOOL dKy_SunMoon_Light_Check() {
+DUSK_NOINLINE BOOL dKy_SunMoon_Light_Check() {
     BOOL check = false;
     if (g_env_light.mSunInitialized && !dKy_darkworld_check()) {
         // stage is not City in the Sky, Hyrule Castle, or Hidden Skill area

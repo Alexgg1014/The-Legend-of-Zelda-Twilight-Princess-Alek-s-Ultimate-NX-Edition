@@ -98,6 +98,40 @@ int main(int argc, char** argv) {
     write(backup_path(nro), "older");  // a .bak left by an earlier update is dropped
     CHECK(replace_with_backup(nro, part_path(nro)).empty());
     CHECK(read(nro) == "new" && read(backup_path(nro)) == "old" && !fs::exists(part_path(nro)));
+    // 1.1.2: an update waiting at boot
+    {
+        const fs::path dir = fs::path{nro}.parent_path();
+        const std::string root = dir.generic_string();
+        const std::string pending = (dir / "pending.txt").generic_string();
+        const std::string result = (dir / "result.txt").generic_string();
+        const fs::path game = dir / "boot.nro";
+        const auto put = [](const fs::path& p, const char* text) { std::ofstream o{p, std::ios::binary}; o << text; };
+        const auto mark = [&](const std::string& target) {
+            std::ofstream o{pending};
+            o << "v9.9.9\n" << target << "\n";
+        };
+        apply_pending_at_boot(pending.c_str(), result.c_str(), root.c_str());  // nothing pending
+        CHECK(!fs::exists(result));
+        mark(game.generic_string());  // its download is gone: dropped without a word
+        apply_pending_at_boot(pending.c_str(), result.c_str(), root.c_str());
+        CHECK(!fs::exists(pending) && !fs::exists(result));
+        mark("/elsewhere/card.nro");  // not under the root
+        apply_pending_at_boot(pending.c_str(), result.c_str(), root.c_str());
+        CHECK(!fs::exists(pending) && !fs::exists(result));
+        put(game, "old");
+        put(part_path(game), "new");
+        mark(game.generic_string());
+        apply_pending_at_boot(pending.c_str(), result.c_str(), root.c_str());
+        CHECK(read(game) == "new" && read(backup_path(game)) == "old" && !fs::exists(part_path(game)));
+        CHECK(read(result).rfind("installed v9.9.9", 0) == 0 && !fs::exists(pending));
+        fs::remove(result);
+        const fs::path gone = dir / "gone.nro";  // nothing to move aside: told, and the pending file goes
+        put(part_path(gone), "new");
+        mark(gone.generic_string());
+        apply_pending_at_boot(pending.c_str(), result.c_str(), root.c_str());
+        CHECK(read(result).rfind("could not move the current NRO aside", 0) == 0 && !fs::exists(pending));
+        fs::remove(result);
+    }
     // no download: nothing moves
     CHECK(!replace_with_backup(nro, part_path(nro)).empty());
     CHECK(read(nro) == "new" && read(backup_path(nro)) == "old");

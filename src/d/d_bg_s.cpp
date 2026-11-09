@@ -1453,7 +1453,7 @@ void dBgS::MoveBgMatrixCrrPos(const cBgS_PolyInfo& i_poly, bool param_1, cXyz* i
     }
 }
 
-void dBgS_MoveBGProc_Typical(dBgW* pbgw, void* i_actor_ptr, const cBgS_PolyInfo& i_poly,
+DUSK_NOINLINE void dBgS_MoveBGProc_Typical(dBgW* pbgw, void* i_actor_ptr, const cBgS_PolyInfo& i_poly,
                              bool param_3, cXyz* i_pos, csXyz* i_angle, csXyz* i_shapeAngle) {
     UNUSED(i_actor_ptr);
     UNUSED(i_poly);

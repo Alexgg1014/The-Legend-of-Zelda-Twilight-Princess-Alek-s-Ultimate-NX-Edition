@@ -104,7 +104,7 @@ int daObjGWall_c::execute() {
     return 1;
 }
 
-int daObjGWall_c::checkDraw() {
+DUSK_NOINLINE int daObjGWall_c::checkDraw() {
     if (mEventBit2 != 0x3ff && dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[mEventBit2]) ||
         mEventBit1 != 0x3ff && !dComIfGs_isEventBit(dSv_event_flag_c::saveBitLabels[mEventBit1]))
     {

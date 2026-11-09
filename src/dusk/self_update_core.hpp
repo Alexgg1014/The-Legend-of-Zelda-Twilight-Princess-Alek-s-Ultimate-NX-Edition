@@ -27,6 +27,13 @@ std::optional<NroAsset> pick_nro_asset(const borealis::update::Release& release,
 // True when `tag` is a newer version than `current` (semver precedence; false when either does not parse).
 bool is_newer(std::string_view tag, std::string_view current);
 
+// 1.1.2: a verified download whose game was closed from HOME never reached aleks2_apply_pending_update. `pendingFile`
+// (tag, then the NRO's path) says one is waiting: put it in place and tell `resultFile`. Runs in userAppInit, before
+// romfs opens the NRO and before static constructors, so C stdio only and no allocation. A pending file whose
+// download is gone is dropped without a word. The pending file goes last: a power cut leaves it, not half an update.
+// `root`: what the NRO's path must start with ("sdmc:/" on the console).
+void apply_pending_at_boot(const char* pendingFile, const char* resultFile, const char* root);
+
 // True for the path of an NRO on the SD card ("sdmc:/....nro"): the only thing the updater replaces.
 bool replaceable_nro_path(std::string_view argv0);
 
