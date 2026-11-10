@@ -20148,10 +20148,16 @@ void daAlink_c::addUseButton(u16 i_flags) {
 // X (0), Y (1), the companion's slot I (2) or II (3), or ITEM_BTN_COUNT for none. X and Y come from
 // checkItemSetButton itself, so a mod's hook on it still decides them; the slots count only while the companion
 // shows them: with it off, select items 2 and 3 belong to mods, as upstream.
+//
+// 1.1.3: only upstream's 2 means "on no button". Upstream's callers read any other answer as "on a button", and a
+// mod's hook may give its own: Twilit Essentials answers 3 for its Z slot and for what Quick Access keeps equipped.
+// Reading 3 as none made the port call setHeavyBoots(0) every frame with the boots on Twilit's Z; its guard lets that
+// call through right after Z is pressed, so the boots came off and procBootsEquip put them straight back on
+// (GBAtemp report, 1.1.1/1.1.2). A hook's answer that happens to equal ITEM_BTN_COUNT stays "set" as well.
 int daAlink_c::checkItemSetButtonWide(int i_itemNo) {
     const int button = checkItemSetButton(i_itemNo);
-    if (button == 0 || button == 1) {
-        return button;
+    if (button != 2) {
+        return button != ITEM_BTN_COUNT ? button : ITEM_BTN_COUNT - 1;
     }
     if (dusk::dualscreen::hudOnCompanion()) {
         for (u8 i = 2; i < ITEM_BTN_COUNT; i++) {

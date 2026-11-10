@@ -271,9 +271,9 @@ static DUSK_CONSTEXPR int DUSK_CONST* l_loadRes_list[4] = {
     l_loadRes_GRO0,
 };
 
-static DUSK_CONSTEXPR int l_loadObj_list[2][2] = {
-    {1, 2},
-    {-1, 1},
+static DUSK_CONSTEXPR int l_loadObj_list[1][4] = {  // 1.1.3: was [2][2], read out of bounds (GitHub #14): note at the end
+    {1, 2,
+     -1, 1},
 };
 
 static DUSK_CONSTEXPR char DUSK_CONST* l_resNames[3] = {
@@ -1933,3 +1933,10 @@ DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_NPC_GRO = {
     /* Group        */ fopAc_NPC_e,
     /* Cull Type    */ fopAc_CULLBOX_CUSTOM_e,
 };
+
+// 1.1.3 (GitHub #14, upstream TwilitRealm/dusklight#2695): CreateHeap reads l_loadObj_list[0][mType] for all four
+// types (0..3). As int[2][2] that runs past row 0 for TYPE_MARO and TYPE_DEFAULT, which is UB: GCC then assumes
+// mType < 2, finds only 1 and 2 there and drops the `mdlIdx > 0` check. TYPE_MARO (the Goron in Kakariko's Malo
+// Mart, once Castle Town's Malo Mart clerk has been talked to) reads -1 and loads l_bmdGetParamList[-1], the BCK
+// grO1 #0x11, as a model: crash in mDoExt_J3DModel__create. One row of four keeps the same bytes without the UB.
+// Declared on the same four lines and explained down here so no line above moves (PGO profile).

@@ -96,6 +96,18 @@ function's body does. Two release-gate checks cover that:
   mod from outside the catalog finds any of those functions. `std::filesystem::equivalent` is bound
   to a loader shim that compares paths: Horizon has no inode numbers.
 
+## Checks for single fixes
+
+Two more release-gate checks guard 1.1.3's fixes against a later change or compiler update:
+
+- `platforms/switch/tools/check_gro_loadobj.py dusklight.elf`: `daNpc_grO_c::CreateHeap` keeps
+  its `mdlIdx > 0` branch (GitHub #14). Upstream's `l_loadObj_list[2][2]` is read out of bounds,
+  GCC drops the branch and the Goron in Kakariko's Malo Mart crashes the room; the port declares the
+  table `int[1][4]`.
+- `platforms/switch/tools/test-item-set-button-wide.sh` (host test): `checkItemSetButtonWide`
+  passes every hook answer except upstream's 2 ("on no button") through, so Twilit Essentials'
+  answer 3 keeps the Iron Boots on.
+
 ## Run
 
 Copy `dusklight.nro` to `sdmc:/switch/dusklight/` and start it as a title takeover (hold R while
