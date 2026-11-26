@@ -829,7 +829,7 @@ void TouchControls::sync_virtual_input() noexcept {
     mQueuedActions.reset();
 }
 
-void TouchControls::sync_visibility() noexcept {
+DUSK_NOINLINE void TouchControls::sync_visibility() noexcept {
     mWasSuppressed = any_document_visible();
     if ((getSettings().game.enableTouchControls ||
             (menu_pointer::enabled() && menu_pointer::active())) &&

@@ -60,7 +60,7 @@ void J2DFillBox(f32 x, f32 y, f32 width, f32 height, JUtility::TColor color) {
                color);
 }
 
-void J2DFillBox(JGeometry::TBox2<f32> const& box, JUtility::TColor color) {
+DUSK_NOINLINE void J2DFillBox(JGeometry::TBox2<f32> const& box, JUtility::TColor color) {
     J2DOrthoGraph oGrph;
     oGrph.setColor(color);
     oGrph.fillBox(box);

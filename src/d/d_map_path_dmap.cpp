@@ -1181,7 +1181,7 @@ void renderingPlusDoorAndCursor_c::drawTreasureAfterPlayer() {
     setTevSettingNonTextureDirectColor();
 }
 
-void renderingPlusDoorAndCursor_c::drawIconSingle(Vec const& param_0, f32 param_1, f32 param_2) {
+DUSK_NOINLINE void renderingPlusDoorAndCursor_c::drawIconSingle(Vec const& param_0, f32 param_1, f32 param_2) {
     static f32 const l_iconPosData[4][2] = {
         {-50.0f, 50.0f},
         {50.0f, 50.0f},

@@ -208,7 +208,7 @@ bool JAISeq::JAISound_tryDie_() {
     return false;
 }
 
-void JAISeq::mixOut_(const JASSoundParams& params, JAISoundActivity activity) {
+DUSK_NOINLINE void JAISeq::mixOut_(const JASSoundParams& params, JAISoundActivity activity) {
     inner_.outputTrack.setTempoRate(inner_.mTempoMgr.getTempo());
     inner_.outputTrack.mute(activity.field_0x0.flags.flag1 || status_.isMute());
     inner_.outputTrack.pause(activity.field_0x0.flags.flag2 || status_.isPaused());

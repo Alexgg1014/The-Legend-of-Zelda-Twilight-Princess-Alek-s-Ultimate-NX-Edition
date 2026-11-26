@@ -1496,7 +1496,7 @@ DUSK_NOINLINE void dComIfGp_setNextStage(char const* i_stage, s16 i_point, s8 i_
     }
 }
 
-void dComIfGp_setNextStage(char const* i_stage, s16 i_point, s8 i_roomNo, s8 i_layer) {
+DUSK_NOINLINE void dComIfGp_setNextStage(char const* i_stage, s16 i_point, s8 i_roomNo, s8 i_layer) {
     dComIfGp_setNextStage(i_stage, i_point, i_roomNo, i_layer, 0.0f, 0, 1, 0, 0, 1, 0);
 }
 

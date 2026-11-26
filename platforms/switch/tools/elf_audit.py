@@ -59,7 +59,8 @@ PROVIDED_NEEDED = {"libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1", 
                    "libpthread.so.0", "libdl.so.2", "librt.so.1"}  # V1-rc1: merged into glibc 2.34
 # The loader's own shims (for Linux-built packages; DM1-c's readdir/closedir are for them only).
 LOADER_SHIMS = {"__cxa_finalize", "__errno_location", "__libc_single_threaded", "__stack_chk_guard",
-                "stdin", "stdout", "stderr", "readdir", "closedir"}
+                "stdin", "stdout", "stderr", "readdir", "closedir",
+                "environ", "__environ", "posix_memalign"}  # 1.1.4
 # glibc-only names the NRO itself defines (src/dusk/switch_mod_libc.cpp, switch_mod_libstdcxx.cpp).
 NRO_GLIBC_COMPAT = {"__ctype_b_loc", "__ctype_tolower_loc", "__ctype_toupper_loc", "__isoc23_strtol",
                     "__isoc23_strtoll", "__isoc23_strtoul", "__isoc23_strtoull", "__isoc23_sscanf",

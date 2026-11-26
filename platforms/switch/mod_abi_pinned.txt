@@ -89,3 +89,7 @@ setenv
 unsetenv
 _ZdlPvRKSt9nothrow_t
 _ZdaPvRKSt9nothrow_t
+# 1.1.4: Crests of Courage 1.10.1 (catalog 2026-11-21). std::istream's base-object constructor (the one a
+# class deriving from istream calls); the complete-object one, _ZNSiC1Ev, is its pair.
+_ZNSiC2Ev
+_ZNSiC1Ev

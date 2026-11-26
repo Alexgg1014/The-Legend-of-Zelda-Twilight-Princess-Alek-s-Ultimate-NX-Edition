@@ -68,7 +68,7 @@ DUSK_NOINLINE bool Z2SoundStarter::startSound(JAISoundID soundID, JAISoundHandle
     return startSoundRes;
 }
 
-void Z2SoundStarter::setPortData(JAISoundHandle* handlePtr, u32 portNum, u16 data, s8 childIndex) {
+DUSK_NOINLINE void Z2SoundStarter::setPortData(JAISoundHandle* handlePtr, u32 portNum, u16 data, s8 childIndex) {
     if (handlePtr != NULL && *handlePtr) {
         JASTrack* track = handlePtr->getSound()->getTrack();
         if (childIndex != -1) {

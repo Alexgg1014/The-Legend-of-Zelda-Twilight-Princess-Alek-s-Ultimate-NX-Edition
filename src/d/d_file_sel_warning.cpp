@@ -210,7 +210,7 @@ void dFile_warning_c::setFontColor(JUtility::TColor param_0, JUtility::TColor pa
                              JUtility::TColor(255, 255, 255, 255));
 }
 
-void dDlst_FileWarn_c::draw() {
+DUSK_NOINLINE void dDlst_FileWarn_c::draw() {
     J2DGrafContext* graf_ctx = dComIfGp_getCurrentGrafPort();
     Scr->draw(0.0f, 0.0f, graf_ctx);
 }

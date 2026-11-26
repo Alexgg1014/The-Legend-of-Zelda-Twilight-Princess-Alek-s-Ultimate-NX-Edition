@@ -6,6 +6,7 @@
 #include "dusk/deko3d_policy.hpp"
 
 #include <dirent.h>
+#include <malloc.h>
 #include <atomic>
 #include <pthread.h>
 
@@ -57,6 +58,27 @@ uintptr_t aleks2_shim_stack_chk_guard = 0x2f8a6d1c7e3b5940ull;
 FILE* aleks2_shim_stdin = stdin;
 FILE* aleks2_shim_stdout = stdout;
 FILE* aleks2_shim_stderr = stderr;
+
+// 1.1.4: glibc's environ and __environ are the same char** variable, read through the GOT. newlib's
+// environ has the same type and meaning; both names bind to it (Twilit Essentials 3.1 reads it).
+extern "C" char** environ;
+
+// 1.1.4: posix_memalign, which devkitA64's newlib does not have (the only copy in the image is Mesa's,
+// hidden). POSIX contract: EINVAL for an alignment that is not a power of two multiple of sizeof(void*),
+// ENOMEM on failure, *out untouched then, errno not set. memalign's block is released with free.
+int aleks2_shim_posix_memalign(void** out, size_t alignment, size_t size) {
+    if (alignment < sizeof(void*) || (alignment & (alignment - 1)) != 0) {
+        return EINVAL;
+    }
+    const int saved = errno;
+    void* p = memalign(alignment, size == 0 ? 1 : size);
+    errno = saved;
+    if (p == nullptr) {
+        return ENOMEM;
+    }
+    *out = p;
+    return 0;
+}
 
 // V1-rc5: a mod that ends the program (abort, exit, a failed stack canary or fortify check, an assert) used to
 // reach newlib's, which exits cleanly: no crash report, no line in the log, and sdmc unmounted under the other
@@ -301,6 +323,9 @@ std::vector<Shim> shims() {
         {"stdin", addr(&aleks2_shim_stdin), "the C library's stdin stream"},
         {"stdout", addr(&aleks2_shim_stdout), "the C library's stdout stream"},
         {"stderr", addr(&aleks2_shim_stderr), "the C library's stderr stream"},
+        {"environ", addr(&environ), "the C library's environment (newlib's environ)"},
+        {"__environ", addr(&environ), "glibc's other name for environ (newlib's environ)"},
+        {"posix_memalign", addr(&aleks2_shim_posix_memalign), "posix_memalign over newlib's memalign"},
         // V1-rc5: logged with the caller, then a panic (a crash report) instead of a clean exit.
         {"pthread_create", addr(&aleks2_shim_pthread_create), "pthread_create, the thread counted while it runs"},
         {"abort", addr(&aleks2_shim_abort), "abort: logged, then a crash report"},
